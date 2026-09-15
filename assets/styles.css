@@ -17,8 +17,8 @@
   --line: rgba(242, 239, 232, 0.08);
   --line-strong: rgba(242, 239, 232, 0.16);
 
-  --serif: "Fraunces", "Playfair Display", Georgia, "Times New Roman", serif;
-  --sans: "Inter", "Helvetica Neue", Arial, system-ui, sans-serif;
+  --serif: "Instrument Serif", Georgia, "Times New Roman", serif;
+  --sans: "Manrope", "Helvetica Neue", Arial, system-ui, sans-serif;
 
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --transition: 0.35s var(--ease);
@@ -351,8 +351,10 @@ a {
 }
 
 .mobile-menu a {
-  font-family: var(--serif);
-  font-size: 30px;
+  font-family: var(--sans);
+  font-size: 1.35rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
   color: var(--text);
   padding-block: 8px;
   border-bottom: 1px solid var(--line);
@@ -383,7 +385,7 @@ a {
 /* ---------- Sections ---------- */
 
 .section {
-  padding-block: clamp(64px, 9vw, 118px);
+  padding-block: clamp(56px, 7vw, 96px);
   border-top: 1px solid var(--line);
 }
 
@@ -392,7 +394,7 @@ a {
 }
 
 .sec-head {
-  margin-bottom: clamp(36px, 5vw, 60px);
+  margin-bottom: clamp(28px, 4vw, 44px);
 }
 
 .sec-label {
@@ -483,12 +485,14 @@ a {
 }
 
 .hero-sub {
-  font-family: var(--serif);
-  font-size: clamp(1.15rem, 2vw, 1.5rem);
-  font-weight: 380;
-  font-style: italic;
+  font-family: var(--sans);
+  font-size: clamp(0.82rem, 1.4vw, 0.98rem);
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
   color: var(--accent);
   margin: 0 0 18px;
+  line-height: 1.9;
 }
 
 .hero-para {
@@ -585,12 +589,12 @@ a {
 }
 
 .metric-num {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: clamp(2rem, 4vw, 3rem);
-  font-weight: 420;
+  font-weight: 700;
   line-height: 1;
   color: var(--accent);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
 }
 
 .metric-label {
@@ -661,10 +665,11 @@ a.card:focus-visible {
 }
 
 .card h3 {
-  font-family: var(--serif);
-  font-weight: 420;
-  font-size: 1.28rem;
-  line-height: 1.25;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1.12rem;
+  line-height: 1.3;
+  letter-spacing: -0.005em;
   margin: 0 0 10px;
 }
 
@@ -730,9 +735,10 @@ a.card:focus-visible {
 }
 
 .pillar h3 {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: 1.3rem;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1.12rem;
+  letter-spacing: -0.005em;
   margin: 0 0 8px;
 }
 
@@ -805,9 +811,10 @@ a.card:focus-visible {
 }
 
 .exp-block-head h3 {
-  font-family: var(--serif);
-  font-size: clamp(1.2rem, 2.2vw, 1.5rem);
-  font-weight: 400;
+  font-family: var(--sans);
+  font-size: clamp(1.1rem, 2vw, 1.3rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
@@ -821,10 +828,11 @@ a.card:focus-visible {
 }
 
 .exp-role {
-  font-family: var(--serif);
-  font-style: italic;
+  font-family: var(--sans);
+  font-weight: 600;
   color: var(--text);
-  font-size: 1.15rem;
+  font-size: 1rem;
+  letter-spacing: 0.01em;
   margin: 2px 0 6px;
 }
 
@@ -898,12 +906,13 @@ a.card:focus-visible {
 }
 
 .metric-inline b {
-  font-family: var(--serif);
+  font-family: var(--sans);
   font-size: 1.5rem;
-  font-weight: 420;
+  font-weight: 700;
   color: var(--accent);
   display: block;
   line-height: 1;
+  letter-spacing: -0.01em;
 }
 
 .metric-inline span {
@@ -1050,9 +1059,10 @@ a.card:focus-visible {
 }
 
 .cred-block h3 {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: 1.35rem;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1.12rem;
+  letter-spacing: -0.005em;
   margin: 0 0 6px;
 }
 
@@ -1120,8 +1130,10 @@ a.card:focus-visible {
 }
 
 .contact-line a {
-  font-family: var(--serif);
-  font-size: clamp(1rem, 2vw, 1.25rem);
+  font-family: var(--sans);
+  font-size: clamp(0.95rem, 1.8vw, 1.1rem);
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--text);
   display: inline-flex;
   align-items: center;
@@ -1146,9 +1158,10 @@ a.card:focus-visible {
 }
 
 .focus-box h3 {
-  font-family: var(--serif);
-  font-weight: 400;
-  font-size: 1.2rem;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.005em;
   margin: 0 0 14px;
 }
 
@@ -1264,9 +1277,10 @@ a.card:focus-visible {
 
 .principle b {
   display: block;
-  font-family: var(--serif);
-  font-weight: 420;
-  font-size: 1.12rem;
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1rem;
+  letter-spacing: -0.005em;
   margin-bottom: 5px;
 }
 
@@ -1447,6 +1461,57 @@ a.card:focus-visible {
     font-size: 10.5px;
     padding: 6px 9px;
   }
+}
+
+/* ---------- Supporting (compact) projects ---------- */
+
+.proj--compact .proj-body {
+  grid-template-columns: 1fr;
+  gap: 18px;
+}
+
+.proj--compact .proj-title-row h3 {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: clamp(1.1rem, 2vw, 1.3rem);
+  letter-spacing: -0.01em;
+}
+
+.proj--compact {
+  padding-block: clamp(36px, 5vw, 56px);
+}
+
+/* ---------- Credential status badges ---------- */
+
+.pill--status-strong {
+  color: var(--accent);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+.pill--status-plain {
+  color: var(--muted);
+  background: var(--surface-2);
+  border-color: var(--line);
+}
+
+/* ---------- Tighter credential blocks ---------- */
+
+.cred-block {
+  padding-block: clamp(20px, 3vw, 30px);
+}
+
+.cred-block .lede {
+  font-size: 14px;
+  margin: 0 0 14px;
+}
+
+.cred-meta {
+  font-size: 12.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin: 0 0 12px;
 }
 
 /* ---------- Report CTAs & pending states ---------- */
