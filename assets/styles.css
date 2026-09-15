@@ -1515,3 +1515,22 @@ a.card:focus-visible {
   display: block;
   margin: 12px 0 4px;
 }
+
+/* ---------- Portrait ---------- */
+
+.portrait {
+  margin: 0 0 20px;
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  overflow: hidden;
+  background: var(--surface-2);
+  aspect-ratio: 1 / 1;
+}
+
+.portrait img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 20%;
+  display: block;
+}
