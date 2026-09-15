@@ -22,6 +22,17 @@
   --line: rgba(242, 239, 232, 0.08);
   --line-strong: rgba(242, 239, 232, 0.16);
 
+  /* Centralized design tokens — single source for the approved palette.
+     All component rules must reference these, never raw color values. */
+  --color-bg: #0B0C0E;
+  --color-surface: #121417;
+  --color-surface-2: #171A1E;
+  --color-text: #F2EFE8;
+  --color-muted: #A7A39A;
+  --color-muted-2: #6E6A62;
+  --color-accent: #C6A15B;
+  --color-accent-hover: #D8B56C;
+
   --serif: "Newsreader", Georgia, "Times New Roman", serif;
   --sans: "Geist", "Helvetica Neue", Arial, system-ui, sans-serif;
 
@@ -1541,6 +1552,76 @@ a.card:focus-visible {
   text-transform: uppercase;
   color: var(--muted-2);
   margin: 0 0 12px;
+}
+
+/* ---------- Editorial timeline ---------- */
+
+.timeline {
+  border-left: 1px solid var(--line-strong);
+  margin: 6px 0 0;
+  padding: 0;
+  list-style: none;
+  max-width: 760px;
+}
+
+.timeline li {
+  position: relative;
+  padding: 0 0 30px 34px;
+}
+
+.timeline li:last-child {
+  padding-bottom: 0;
+}
+
+.timeline li::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: 7px;
+  width: 7px;
+  height: 7px;
+  background: var(--bg);
+  border: 1px solid var(--accent-line);
+  border-radius: 50%;
+}
+
+.timeline .tl-num {
+  font-family: var(--serif);
+  font-size: 15px;
+  color: var(--accent);
+  letter-spacing: 0.06em;
+}
+
+.timeline h3 {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 0.82rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+  margin: 6px 0 4px;
+}
+
+.timeline .tl-role {
+  font-size: 14.5px;
+  color: var(--text);
+  font-weight: 500;
+  margin: 0 0 4px;
+}
+
+.timeline p {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 6px;
+  max-width: 62ch;
+}
+
+.timeline .tl-meta {
+  font-size: 11.5px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  margin: 0;
 }
 
 /* ---------- Report CTAs & pending states ---------- */
