@@ -1,0 +1,8 @@
+# Internal-only: audit registry + audit doc contain non-public verification notes
+/data/
+/docs/
+# OS / editor junk
+Thumbs.db
+Desktop.ini
+~$*
+*.tmp
