@@ -1020,19 +1020,18 @@ a.card:focus-visible {
 }
 
 .proj-head {
-  display: grid;
-  grid-template-columns: 74px 1fr;
-  gap: clamp(16px, 3vw, 40px);
   margin-bottom: 6px;
 }
 
 .proj-num {
-  font-family: var(--serif);
-  font-size: clamp(1.9rem, 4vw, 2.7rem);
-  font-weight: 380;
+  display: block;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
   color: var(--accent);
   line-height: 1;
-  letter-spacing: -0.01em;
+  margin-bottom: 12px;
 }
 
 .proj-title-row {
@@ -1044,17 +1043,18 @@ a.card:focus-visible {
 
 .proj-title-row h3 {
   font-family: var(--serif);
-  font-weight: 420;
-  font-size: clamp(1.4rem, 2.6vw, 1.85rem);
+  font-weight: 400;
+  font-size: clamp(1.3rem, 2.4vw, 1.7rem);
   line-height: 1.2;
+  letter-spacing: 0;
   margin: 0;
+  max-width: 28ch;
 }
 
 .proj-body {
   display: grid;
   grid-template-columns: 1fr 1.5fr;
   gap: clamp(20px, 4vw, 48px);
-  margin-left: clamp(16px, 3vw, 40px);
   padding-top: 22px;
 }
 
@@ -1084,7 +1084,96 @@ a.card:focus-visible {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
+  margin-top: 14px;
+}
+
+/* ---------- Subcase research-list rows ---------- */
+
+.subcase {
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+  margin-top: 22px;
+}
+
+.subcase:first-of-type {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 6px;
+}
+
+.subcase h5 {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 1rem;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+  margin: 0 0 8px;
+  color: var(--text);
+  max-width: 60ch;
+}
+
+.subcase-num {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 12px;
+  letter-spacing: 0.16em;
+  color: var(--accent);
+  margin-right: 10px;
+  white-space: nowrap;
+}
+
+.subcase p {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0 0 10px;
+  max-width: 68ch;
+}
+
+.subcase p:last-of-type {
+  margin-bottom: 0;
+}
+
+.subcase .qa {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  display: block;
+  margin: 12px 0 4px;
+}
+
+/* ---------- Evidence highlights ---------- */
+
+.evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 36px;
+  margin: 16px 0 4px;
+  padding: 14px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.evidence div b {
+  font-family: var(--sans);
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  display: block;
+  line-height: 1.2;
+}
+
+.evidence div span {
+  font-family: var(--sans);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted-2);
+  display: block;
+  margin-top: 3px;
 }
 
 /* ---------- Certifications ---------- */
@@ -1485,7 +1574,7 @@ a.card:focus-visible {
   }
 
   .proj-head {
-    grid-template-columns: 56px 1fr;
+    margin-bottom: 4px;
   }
 
   .hero-title {
