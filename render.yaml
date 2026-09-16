@@ -1,0 +1,13 @@
+# Render.com one-step deploy (stdlib-only Python service).
+services:
+  - type: web
+    name: finance-terminal
+    env: python
+    plan: free
+    startCommand: python server.py --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: TERMINAL_HOST
+        value: 0.0.0.0
+      - key: ALPHA_VANTAGE_API_KEY
+        sync: false

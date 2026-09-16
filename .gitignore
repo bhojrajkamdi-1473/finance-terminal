@@ -6,3 +6,8 @@ Thumbs.db
 Desktop.ini
 ~$*
 *.tmp
+# Finance terminal runtime storage (sqlite) — never commit user data
+/terminal-data/
+# Local secrets / credentials — never commit (see .env.example for names only)
+.env
+*.db

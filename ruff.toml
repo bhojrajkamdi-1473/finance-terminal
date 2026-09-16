@@ -1,0 +1,16 @@
+# Ruff config for finance-terminal (stdlib-only Python backend).
+# Broad `except Exception` is INTENTIONAL at provider boundaries:
+# upstream market-data failures must become honest error envelopes,
+# never crash the app (spec: every external-data dependency must handle
+# API failure / timeout / rate limit / auth failure gracefully).
+[lint]
+select = ["E4", "E7", "E9", "F", "I", "UP", "TRY", "BLE", "RUF059", "PLW1510"]
+# TRY003/TRY300 are style nits that fight the codebase's simple
+# validate-and-raise / envelope-return style; not defects.
+ignore = ["TRY003", "TRY300"]
+
+[lint.per-file-ignores]
+"providers/*.py" = ["BLE001"]
+"server.py" = ["BLE001"]
+"tests/*.py" = ["BLE001"]
+"scripts/*.py" = ["BLE001"]

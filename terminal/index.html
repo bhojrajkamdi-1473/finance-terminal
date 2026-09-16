@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Finance Terminal — Institutional Research</title>
+<link rel="stylesheet" href="/terminal/styles.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <div class="brand"><span class="brand-mark">FT</span> FINANCE TERMINAL</div>
+    <div class="search-wrap">
+      <input id="global-search" type="text" placeholder="Search company, ticker, sector, index…  ( / )" autocomplete="off" spellcheck="false">
+      <div id="search-results" class="search-results hidden"></div>
+    </div>
+    <div class="topbar-right">
+      <span id="data-status" class="pill pill-live" title="Market data provider status">DELAYED · YAHOO</span>
+      <span id="clock" class="clock"></span>
+    </div>
+  </header>
+  <div id="shell">
+    <nav id="sidenav" aria-label="Terminal sections"></nav>
+    <main id="view"></main>
+  </div>
+  <div id="toast-root"></div>
+</div>
+<script src="/terminal/js/format.js"></script>
+<script src="/terminal/js/api.js"></script>
+<script src="/terminal/js/charts.js"></script>
+<script src="/terminal/js/analysis.js"></script>
+<script src="/terminal/js/pages.js"></script>
+<script src="/terminal/js/app.js"></script>
+</body>
+</html>
