@@ -222,6 +222,94 @@ class ApiTest(unittest.TestCase):
         self.assertIn(body["status"], ("live", "delayed"))
         self.assertIsInstance(body["data"]["price"], (int, float))
 
+    def test_quote_carries_timeliness_and_extended_fields(self):
+        if not _network_ok():
+            self.skipTest("no network to upstream provider")
+        _status, body = _get(self.base, "/api/quote?symbol=RELIANCE.NS")
+        self.assertIn(
+            body.get("timeliness"),
+            ("REAL-TIME", "DELAYED", "END-OF-DAY", "CALCULATED", "UNAVAILABLE"),
+        )
+        for field in ("volume", "day_high", "day_low", "previous_close"):
+            self.assertIn(field, body.get("data", {}))
+        self.assertIn(body.get("served_from"), ("provider", "cache"))
+
+    def test_providers_endpoint_structure(self):
+        status, body = _get(self.base, "/api/providers")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        ids = [p["id"] for p in body["providers"]]
+        for want in (
+            "yahoo",
+            "indian-api",
+            "alphavantage",
+            "twelvedata",
+            "stooq",
+            "nse",
+            "tradingview",
+        ):
+            self.assertIn(want, ids)
+        # key values must never leak
+        raw = json.dumps(body)
+        self.assertNotIn("TWELVE_DATA_API_KEY=", raw)
+        # capabilities declared for every provider
+        for p in body["providers"]:
+            self.assertIn("capabilities", p)
+        # chain routing published
+        self.assertIn("quote", body.get("chain", {}))
+        self.assertIn("history", body.get("chain", {}))
+
+    def test_root_serves_terminal_portfolio_preserved(self):
+        with urllib.request.urlopen(self.base + "/", timeout=10) as r:
+            self.assertEqual(r.status, 200)
+            self.assertIn("FINANCE TERMINAL", r.read().decode())
+        with urllib.request.urlopen(self.base + "/portfolio/", timeout=10) as r:
+            self.assertEqual(r.status, 200)
+
+    def test_unknown_paths_404(self):
+        for path in ("/nope-xyz", "/api/nope-xyz"):
+            try:
+                urllib.request.urlopen(self.base + path, timeout=10)
+            except urllib.error.HTTPError as e:
+                self.assertIn(e.code, (404,))
+            else:
+                self.fail(f"expected 404 for {path}")
+
+    def test_earnings_ipo_macro_technical_unavailable_without_key(self):
+        if os.environ.get("ALPHA_VANTAGE_API_KEY") or os.environ.get(
+            "FUNDAMENTALS_API_KEY"
+        ):
+            self.skipTest("fundamentals key configured")
+        for path in (
+            "/api/earnings?symbol=AAPL",
+            "/api/ipo",
+            "/api/macro?indicator=GDP",
+        ):
+            status, body = _get(self.base, path)
+            self.assertEqual(status, 200)
+            self.assertEqual(body["status"], "unavailable")
+        # technical needs history; bogus symbol -> unavailable, never fake
+        status, body = _get(self.base, "/api/technical?symbol=ZZZ_NOPE_123")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "unavailable")
+
+    def test_technical_missing_symbol_400(self):
+        status, _body = _get(self.base, "/api/technical")
+        self.assertEqual(status, 400)
+
+    def test_screener_new_filters_validate(self):
+        status, _body = _get(self.base, "/api/screener?above_sma=99")
+        self.assertEqual(status, 400)
+        status, body = _get(self.base, "/api/screener?symbols=AAPL&min_volume=1")
+        self.assertEqual(status, 200)
+        self.assertIn("volume", body.get("backed_by", []))
+
+    def test_macro_rejects_unknown_indicator(self):
+        status, body = _get(self.base, "/api/macro?indicator=NOPE")
+        # without key: unavailable (key gate first); with key: 502 error
+        self.assertIn(status, (200, 502))
+        self.assertIn(body["status"], ("unavailable", "error"))
+
     def test_live_search_shape(self):
         if not _network_ok():
             self.skipTest("no network to upstream provider")

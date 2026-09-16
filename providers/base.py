@@ -58,6 +58,9 @@ class MarketDataProvider(ABC):
     """Live/historical price data."""
 
     name: str = "base"
+    # Declared capabilities; the registry routes each domain only to
+    # legs that claim it. Keys: quote, history, search.
+    capabilities: dict[str, bool] = {}
 
     @abstractmethod
     def get_quote(self, symbol: str) -> dict:
@@ -76,6 +79,7 @@ class MarketDataProvider(ABC):
 
 class CompanyProvider(ABC):
     name: str = "base"
+    capabilities: dict[str, bool] = {}
 
     @abstractmethod
     def get_company_profile(self, symbol: str) -> dict:
@@ -84,6 +88,8 @@ class CompanyProvider(ABC):
 
 class FundamentalsProvider(ABC):
     name: str = "base"
+    # Keys: fundamentals, statements, earnings, estimates.
+    capabilities: dict[str, bool] = {}
 
     @abstractmethod
     def get_financial_statements(
@@ -98,6 +104,7 @@ class FundamentalsProvider(ABC):
 
 class NewsProvider(ABC):
     name: str = "base"
+    capabilities: dict[str, bool] = {"news": True}
 
     @abstractmethod
     def get_news(
@@ -111,6 +118,7 @@ class NewsProvider(ABC):
 
 class CorporateActionsProvider(ABC):
     name: str = "base"
+    capabilities: dict[str, bool] = {"actions": True}
 
     @abstractmethod
     def get_corporate_actions(self, symbol: str) -> dict:
@@ -119,7 +127,32 @@ class CorporateActionsProvider(ABC):
 
 class EstimatesProvider(ABC):
     name: str = "base"
+    capabilities: dict[str, bool] = {"estimates": False}
 
     @abstractmethod
     def get_estimates(self, symbol: str) -> dict:
         """Analyst estimates. Envelope."""
+
+
+# Canonical capability keys used by the registry + /api/providers.
+CAPABILITIES = (
+    "quote",
+    "history",
+    "search",
+    "fundamentals",
+    "statements",
+    "earnings",
+    "estimates",
+    "news",
+    "ipo",
+    "actions",
+    "macro",
+    "technical",
+    "chart",
+)
+
+
+def describe(provider) -> dict[str, bool]:
+    """Capability map for a provider instance (missing = unsupported)."""
+    declared = getattr(provider, "capabilities", {}) or {}
+    return {k: bool(declared.get(k, False)) for k in CAPABILITIES}

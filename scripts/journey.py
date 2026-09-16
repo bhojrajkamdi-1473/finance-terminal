@@ -25,8 +25,21 @@ ROUTES = [
     ("markets", "markets", ["Markets", "RELIANCE.NS"]),
     ("screener", "screener", ["Screener", "Run screen"]),
     ("companies", "companies", ["Companies", "Search"]),
-    ("company-overview", "company/RELIANCE.NS", ["RELIANCE", "Overview"]),
-    ("company-charts", "company/RELIANCE.NS/Charts", ["1Y", "SMA20"]),
+    (
+        "company-overview",
+        "company/RELIANCE.NS",
+        ["RELIANCE", "Overview", "Last updated", "52W high"],
+    ),
+    (
+        "company-charts",
+        "company/RELIANCE.NS/Charts",
+        ["1Y", "SMA20", "TradingView"],
+    ),
+    (
+        "company-earnings",
+        "company/RELIANCE.NS/Earnings",
+        ["Earnings"],
+    ),
     ("company-financials", "company/RELIANCE.NS/Financials", ["Financial statements"]),
     ("company-valuation", "company/RELIANCE.NS/Valuation", ["Valuation"]),
     ("company-news", "company/RELIANCE.NS/News", ["News"]),
@@ -36,7 +49,7 @@ ROUTES = [
     ("research", "research", ["Research"]),
     ("compare", "compare", ["Compare"]),
     ("macro", "macro", ["Macro"]),
-    ("settings", "settings", ["Providers", "Environment"]),
+    ("settings", "settings", ["Providers", "Environment", "Twelve Data"]),
 ]
 
 

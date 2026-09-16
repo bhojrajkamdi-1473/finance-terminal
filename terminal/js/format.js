@@ -53,8 +53,47 @@
       live: ["pill-live", "LIVE"], delayed: ["pill-delayed", "DELAYED"],
       calculated: ["pill-calc", "CALC"], ai: ["pill-ai", "AI"],
       unavailable: ["pill-na", "UNAVAIL"], error: ["pill-na", "ERROR"],
+      // timeliness vocabulary: the actual data status of a quote
+      "REAL-TIME": ["pill-live", "REAL-TIME"],
+      DELAYED: ["pill-delayed", "DELAYED"],
+      "END-OF-DAY": ["pill-delayed", "END-OF-DAY"],
+      HISTORICAL: ["pill-delayed", "HISTORICAL"],
+      CALCULATED: ["pill-calc", "CALCULATED"],
+      UNAVAILABLE: ["pill-na", "UNAVAILABLE"],
+      ERROR: ["pill-na", "ERROR"],
+      "RATE LIMITED": ["pill-na", "RATE LIMITED"],
+      "RATE_LIMITED": ["pill-na", "RATE LIMITED"],
+      rate_limited: ["pill-na", "RATE LIMITED"],
+      AVAILABLE: ["pill-live", "AVAILABLE"],
+      STALE: ["pill-na", "STALE"],
     }[status] || ["pill-na", String(status || "—").toUpperCase()];
     return '<span class="pill ' + m[0] + '">' + m[1] + "</span>";
   }
-  window.FT_FMT = { fmtNum, fmtInt, fmtPct, fmtMoney, fmtDate, fmtDateTime, esc, dirClass, statusPill };
+  var SRC_NAMES = {
+    yahoo: "Yahoo Finance", "yahoo-events": "Yahoo Finance",
+    "yahoo-rss": "Yahoo Finance", twelvedata: "Twelve Data",
+    alphavantage: "Alpha Vantage", estimates: "Estimates feed",
+    fundamentals: "Fundamentals feed",
+  };
+  function srcName(s) { return SRC_NAMES[s] || s || "?"; }
+  function fmtIST(ts) {
+    // ts: epoch seconds OR ISO string. Returns "18:25:04 IST".
+    var d = null;
+    if (typeof ts === "number") d = new Date(ts * 1000);
+    else if (typeof ts === "string") {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(ts)) return ts; // bare date, not a time
+      d = new Date(ts);
+    }
+    if (!d || isNaN(d)) return "unavailable";
+    try {
+      return d.toLocaleTimeString("en-GB", {
+        hour: "2-digit", minute: "2-digit", second: "2-digit",
+        hour12: false, timeZone: "Asia/Kolkata",
+      }) + " IST";
+    } catch (e) { return d.toISOString().replace("T", " ").slice(0, 19) + "Z"; }
+  }
+  window.FT_FMT = {
+    fmtNum, fmtInt, fmtPct, fmtMoney, fmtDate, fmtDateTime, esc,
+    dirClass, statusPill, srcName, fmtIST,
+  };
 })();

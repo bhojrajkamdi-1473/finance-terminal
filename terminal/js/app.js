@@ -14,6 +14,7 @@
     var h = (location.hash || "#/dashboard").replace(/^#\/?/, "");
     var parts = h.split("/").map(decodeURIComponent);
     var P = window.FT_PAGES;
+    if (P.clearTimers) P.clearTimers(); // stop previous view's polling
     document.querySelectorAll("#sidenav a").forEach(function (a) {
       a.classList.toggle("on", a.getAttribute("data-r") === parts[0]);
     });
@@ -102,10 +103,28 @@
     }
     tick(); setInterval(tick, 1000);
   }
+  function providerPill() {
+    var pill = document.getElementById("data-status");
+    window.FT_API.get("providers").then(function (r) {
+      var list = ((r.body || {}).providers) || [];
+      var yahoo = list.filter(function (p) { return p.id === "yahoo"; })[0] || {};
+      var td = list.filter(function (p) { return p.id === "twelvedata"; })[0] || {};
+      var av = list.filter(function (p) { return p.id === "alphavantage"; })[0] || {};
+      var legs = "YAHOO" + (td.key_configured ? "+TD" : "") + (av.key_configured ? "+AV" : "");
+      if (yahoo.state === "cooling") {
+        pill.className = "pill pill-delayed";
+        pill.textContent = "AUTO · YAHOO COOLING · " + legs;
+      } else {
+        pill.className = "pill pill-live";
+        pill.textContent = "AUTO · " + legs;
+      }
+      pill.title = "Free-automatic chain: Yahoo → Twelve Data → Alpha Vantage → unavailable";
+    });
+  }
   window.addEventListener("hashchange", route);
   document.addEventListener("DOMContentLoaded", function () {
     window.FT_PAGES.init();
-    buildNav(); bindSearch(); clock();
+    buildNav(); bindSearch(); clock(); providerPill();
     // Corp-actions nav prompts for a symbol
     document.querySelector('[data-r="actions"]').addEventListener("click", function (e) {
       e.preventDefault();

@@ -27,6 +27,21 @@ from .base import (
 
 UA = {"User-Agent": "Mozilla/5.0 (finance-terminal research tool)"}
 
+
+class RateLimitedError(Exception):
+    """Upstream answered 429 through all retries: back off + fall back."""
+
+
+def rate_limited(source: str, detail: str) -> dict:
+    return {
+        "status": "rate_limited",
+        "source": source,
+        "as_of": None,
+        "data": None,
+        "message": f"RATE LIMITED: {detail} Cooling down and falling back.",
+    }
+
+
 # UI range -> Yahoo range param. NOTE: Yahoo uses "1mo" for one month;
 # lowercase "1m" would mean a one-minute window.
 RANGE_MAP = {
@@ -59,6 +74,8 @@ def _http_get_json(url: str, timeout: float = 15.0) -> Any:
         except urllib.error.HTTPError as exc:
             last_exc = exc
             if exc.code != 429 or attempt == 2:
+                if exc.code == 429:
+                    raise RateLimitedError(f"HTTP 429 from Yahoo for {url}")
                 raise
             time.sleep(1.5 * (attempt + 1))
     assert last_exc is not None
@@ -78,6 +95,7 @@ def _cache_set(key: str, value: dict) -> None:
 
 class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
     name = "yahoo"
+    capabilities: dict[str, bool] = {"quote": True, "history": True, "search": True}
 
     # -- search -----------------------------------------------------
     def search(self, query: str, limit: int = 10) -> dict:
@@ -92,7 +110,9 @@ class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
         )
         try:
             payload = _http_get_json(url)
-        except Exception as exc:  # network / rate limit / auth
+        except RateLimitedError as exc:
+            return rate_limited("yahoo", f"Search throttled: {exc}")
+        except Exception as exc:  # network / auth
             return error_envelope("yahoo", f"Search failed: {exc}")
         results = []
         for q in (payload.get("quotes") or [])[:limit]:
@@ -128,6 +148,8 @@ class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
             return cached
         try:
             payload = self._chart(symbol, "5d", "1d")
+        except RateLimitedError as exc:
+            return rate_limited("yahoo", f"Quote throttled for {symbol}: {exc}")
         except Exception as exc:
             return error_envelope("yahoo", f"Quote request failed for {symbol}: {exc}")
         try:
@@ -143,6 +165,7 @@ class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
             price = meta.get("regularMarketPrice")
             if price is None:
                 return unavailable("yahoo", f"No price available for '{symbol}'.")
+            prev = meta.get("chartPreviousClose") or meta.get("previousClose")
             quote = {
                 "symbol": meta.get("symbol", symbol),
                 "name": meta.get("longName") or meta.get("shortName"),
@@ -150,19 +173,30 @@ class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
                 "currency": meta.get("currency"),
                 "instrument_type": meta.get("instrumentType"),
                 "price": price,
-                "previous_close": meta.get("chartPreviousClose")
-                or meta.get("previousClose"),
+                "previous_close": prev,
+                "open": None,  # chart meta carries no session open; see history
+                "day_high": meta.get("regularMarketDayHigh"),
+                "day_low": meta.get("regularMarketDayLow"),
+                "volume": meta.get("regularMarketVolume"),
                 "change": None,
-                "change_pct": None,
+                "change_pct": meta.get("regularMarketChangePercent"),
+                "fifty_two_week_high": meta.get("fiftyTwoWeekHigh"),
+                "fifty_two_week_low": meta.get("fiftyTwoWeekLow"),
                 "market_time": meta.get("regularMarketTime"),
                 "timezone": meta.get("exchangeTimezoneName"),
                 "delayed": True,
             }
-            prev = quote["previous_close"]
             if prev:
                 quote["change"] = price - prev
-                quote["change_pct"] = (price - prev) / prev * 100.0
+                if quote["change_pct"] is None:
+                    quote["change_pct"] = (price - prev) / prev * 100.0
             env = live_envelope("yahoo", quote, delayed=True)
+            # Yahoo's public feed is exchange-delayed. Never REAL-TIME.
+            env["timeliness"] = "DELAYED"
+            env["timeliness_note"] = (
+                "Yahoo Finance public feed is exchange-delayed "
+                "(typically ~15 min for NSE/BSE and US equities)."
+            )
             _cache_set(f"q:{symbol}", env)
             return env
         except Exception as exc:
@@ -182,6 +216,8 @@ class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
         yahoo_range = RANGE_MAP[range_]
         try:
             payload = self._chart(symbol, yahoo_range, interval)
+        except RateLimitedError as exc:
+            return rate_limited("yahoo", f"History throttled for {symbol}: {exc}")
         except Exception as exc:
             return error_envelope(
                 "yahoo", f"History request failed for {symbol}: {exc}"

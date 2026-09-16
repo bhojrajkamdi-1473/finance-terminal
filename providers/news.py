@@ -32,6 +32,7 @@ UA = {"User-Agent": "Mozilla/5.0 (finance-terminal research tool)"}
 
 class YahooRssNewsProvider(NewsProvider):
     name = "yahoo-rss"
+    capabilities: dict[str, bool] = {"news": True}
 
     def get_news(
         self,
@@ -101,6 +102,7 @@ class YahooRssNewsProvider(NewsProvider):
 
 class YahooCorporateActionsProvider(CorporateActionsProvider):
     name = "yahoo-events"
+    capabilities: dict[str, bool] = {"actions": True}
 
     def get_corporate_actions(self, symbol: str) -> dict:
         symbol = (symbol or "").strip().upper()

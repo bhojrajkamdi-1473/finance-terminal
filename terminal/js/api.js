@@ -25,5 +25,15 @@
       return r.json().then(function (j) { return { http: r.status, body: j }; });
     });
   }
-  window.FT_API = { get, post, del };
+  /* Polling helper: frontend polls on `ms`, backend serves cache unless
+     a refresh is allowed (rate-limit governor). Skips while tab hidden. */
+  function poll(ms, fn) {
+    fn();
+    var id = setInterval(function () {
+      if (document.hidden) return;
+      fn();
+    }, ms);
+    return id;
+  }
+  window.FT_API = { get, post, del, poll };
 })();

@@ -90,6 +90,13 @@ def c_static(ctx):
         assert r.status == 200
         html = r.read().decode("utf-8", "replace")
     assert "FINANCE TERMINAL" in html, html[:200]
+    # Root route opens the Finance Terminal (legacy portfolio at /portfolio/).
+    with _u.urlopen(ctx["base"] + "/", timeout=25) as r:
+        assert r.status == 200
+        root = r.read().decode("utf-8", "replace")
+    assert "FINANCE TERMINAL" in root, root[:200]
+    with _u.urlopen(ctx["base"] + "/portfolio/", timeout=25) as r:
+        assert r.status == 200
     for asset in (
         "js/app.js",
         "js/pages.js",
@@ -123,6 +130,33 @@ def c_search(ctx):
     assert body.get("status") in ("live", "unavailable", "error"), body
     if body.get("status") == "live":
         assert body["data"]["results"], body
+
+
+@check("providers: free-mode chain checklist")
+def c_providers(ctx):
+    code, body = http_json(ctx["base"], "/api/providers")
+    assert code == 200 and body.get("ok"), body
+    ids = [p["id"] for p in body.get("providers", [])]
+    for want in ("yahoo", "alphavantage", "twelvedata", "nse", "tradingview"):
+        assert want in ids, body
+    assert body.get("chain", {}).get("quote") == [
+        "indian-api",
+        "yahoo",
+        "twelvedata",
+        "alphavantage",
+    ], body
+    assert body.get("chain", {}).get("history") == [
+        "yahoo",
+        "stooq",
+        "twelvedata",
+        "alphavantage",
+    ], body
+    # schema: status checklist only — the endpoint must never carry
+    # credential values (registry only emits booleans + help text).
+    for p in body.get("providers", []):
+        for k in ("id", "label", "state", "detail"):
+            assert k in p, p
+        assert isinstance(p.get("key_configured"), bool), p
 
 
 @check("quote: RELIANCE.NS envelope has price or honest status")

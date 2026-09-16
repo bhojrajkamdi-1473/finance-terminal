@@ -11,6 +11,7 @@ ignore = ["TRY003", "TRY300"]
 
 [lint.per-file-ignores]
 "providers/*.py" = ["BLE001"]
+"services/*.py" = ["BLE001"]
 "server.py" = ["BLE001"]
 "tests/*.py" = ["BLE001"]
 "scripts/*.py" = ["BLE001"]
