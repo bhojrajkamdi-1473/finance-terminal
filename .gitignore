@@ -11,3 +11,6 @@ Desktop.ini
 # Local secrets / credentials — never commit (see .env.example for names only)
 .env
 *.db
+# Python bytecode caches
+__pycache__/
+*.pyc

@@ -37,6 +37,18 @@ def _api_key() -> str:
     ).strip()
 
 
+def _redact(text: str) -> str:
+    """Strip credential values from upstream text before it can reach
+    clients (Alpha Vantage error notices echo the caller's API key)."""
+    out = str(text)
+    for _key in (os.environ.get("ALPHA_VANTAGE_API_KEY") or "").strip(), (
+        os.environ.get("FUNDAMENTALS_API_KEY") or ""
+    ).strip():
+        if len(_key) >= 8 and _key in out:
+            out = out.replace(_key, "[REDACTED]")
+    return out
+
+
 def _av_get(params: dict, timeout: float = 20.0) -> dict:
     params = dict(params)
     params["apikey"] = _api_key()
@@ -52,6 +64,7 @@ def _not_configured() -> dict:
         "Provider not configured. Set ALPHA_VANTAGE_API_KEY "
         "(or FUNDAMENTALS_API_KEY) to enable financial statements, "
         "ratios and estimates.",
+        code="NOT_CONFIGURED",
     )
 
 
@@ -87,21 +100,26 @@ def _validate(payload: object, function: str) -> tuple[str, str]:
 
 
 def _invalid_envelope(function: str, kind: str, message: str) -> dict:
+    message = _redact(message)
     if kind == "rate_limited":
         return {
             "status": "rate_limited",
             "source": "alphavantage",
             "as_of": None,
             "data": None,
+            "code": "RATE_LIMIT",
             "message": f"RATE LIMITED ({function}): {message}",
         }
     if kind == "premium":
         return unavailable(
             "alphavantage",
             f"{function} requires a premium entitlement: {message}",
+            code="PLAN_LIMITATION",
         )
     if kind == "empty":
-        return unavailable("alphavantage", message)
+        return unavailable(
+            "alphavantage", message, code="EMPTY_RESULT"
+        )
     return error_envelope("alphavantage", f"{function}: {message}")
 
 
@@ -162,10 +180,12 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
         if "Note" in payload or "Information" in payload:
             return error_envelope(
                 "alphavantage",
-                str(
-                    payload.get("Note")
-                    or payload.get("Information")
-                    or "Rate limit / service notice."
+                _redact(
+                    str(
+                        payload.get("Note")
+                        or payload.get("Information")
+                        or "Rate limit / service notice."
+                    )
                 ),
             )
         key = "annualReports" if period != "quarterly" else "quarterlyReports"
@@ -195,9 +215,11 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
         if not payload or "Symbol" not in payload:
             return unavailable(
                 "alphavantage",
-                payload.get("Note")
-                or payload.get("Information")
-                or f"No overview data for '{symbol}'.",
+                _redact(
+                    payload.get("Note")
+                    or payload.get("Information")
+                    or f"No overview data for '{symbol}'."
+                ),
             )
         keep = [
             "Symbol",
@@ -255,10 +277,12 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
         if not q:
             return unavailable(
                 "alphavantage",
-                str(
-                    payload.get("Note")
-                    or payload.get("Information")
-                    or f"No quote for '{symbol}'."
+                _redact(
+                    str(
+                        payload.get("Note")
+                        or payload.get("Information")
+                        or f"No quote for '{symbol}'."
+                    )
                 ),
             )
 
@@ -315,10 +339,10 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
         if blocked:
             return unavailable(
                 "alphavantage",
-                f"{function} requires a premium entitlement: {blocked}",
+                f"{function} requires a premium entitlement: {_redact(blocked)}",
             )
         if payload.get("Note"):
-            return error_envelope("alphavantage", str(payload.get("Note"))[:300])
+            return error_envelope("alphavantage", _redact(str(payload.get("Note"))[:300]))
         return live_envelope("alphavantage", payload, delayed=True)
 
     def get_earnings(self, symbol: str) -> dict:
@@ -354,9 +378,9 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
             return error_envelope("alphavantage", f"NEWS_SENTIMENT failed: {exc}")
         blocked = _premium_block(payload)
         if blocked:
-            return unavailable("alphavantage", f"News requires premium: {blocked}")
+            return unavailable("alphavantage", f"News requires premium: {_redact(blocked)}")
         if payload.get("Note"):
-            return error_envelope("alphavantage", str(payload.get("Note"))[:300])
+            return error_envelope("alphavantage", _redact(str(payload.get("Note"))[:300]))
         items = []
         for a in (payload.get("feed") or [])[:limit]:
             items.append(
@@ -397,13 +421,14 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
             return unavailable(
                 "alphavantage",
                 "IPO calendar requires a premium entitlement: "
-                + text[:200].replace("\n", " "),
+                + _redact(text)[:200].replace("\n", " "),
             )
         lines = [ln for ln in text.splitlines() if ln.strip()]
         if len(lines) < 2 or not lines[0].lower().startswith("symbol"):
             return unavailable(
                 "alphavantage",
-                "No IPO calendar data returned: " + text[:200].replace("\n", " "),
+                "No IPO calendar data returned: "
+                + _redact(text)[:200].replace("\n", " "),
             )
         header = [h.strip() for h in lines[0].split(",")]
         rows = []

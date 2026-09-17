@@ -116,6 +116,7 @@ def _rate_limited(detail: str) -> dict:
         "source": "twelvedata",
         "as_of": None,
         "data": None,
+        "code": "RATE_LIMIT",
         "message": f"RATE LIMITED: {detail} Cooling down and falling back.",
     }
 
@@ -155,6 +156,7 @@ class TwelveDataProvider(MarketDataProvider):
             "twelvedata",
             "API KEY NOT CONFIGURED. Set TWELVE_DATA_API_KEY "
             "to enable this fallback leg.",
+            code="NOT_CONFIGURED",
         )
 
     # -- search -----------------------------------------------------

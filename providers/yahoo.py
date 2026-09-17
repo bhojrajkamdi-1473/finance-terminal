@@ -38,6 +38,7 @@ def rate_limited(source: str, detail: str) -> dict:
         "source": source,
         "as_of": None,
         "data": None,
+        "code": "RATE_LIMIT",
         "message": f"RATE LIMITED: {detail} Cooling down and falling back.",
     }
 

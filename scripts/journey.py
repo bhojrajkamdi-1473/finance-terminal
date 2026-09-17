@@ -21,7 +21,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 
 ROUTES = [
-    ("dashboard", "dashboard", ["Dashboard", "Movers (tracked universe)"]),
+    ("dashboard", "dashboard", ["Dashboard", "Movers — tracked universe"]),
     ("markets", "markets", ["Markets", "RELIANCE.NS"]),
     ("screener", "screener", ["Screener", "Run screen"]),
     ("companies", "companies", ["Companies", "Search"]),
@@ -44,12 +44,12 @@ ROUTES = [
     ("company-valuation", "company/RELIANCE.NS/Valuation", ["Valuation"]),
     ("company-news", "company/RELIANCE.NS/News", ["News"]),
     ("watchlist", "watchlist", ["Watchlist"]),
-    ("portfolio", "portfolio", ["Portfolio", "Holdings"]),
-    ("news", "news", ["News", "Headlines"]),
+    ("portfolio", "portfolio", ["Portfolio", "Add / update holding"]),
+    ("news", "news", ["News", "Research feed"]),
     ("research", "research", ["Research"]),
     ("compare", "compare", ["Compare"]),
     ("macro", "macro", ["Macro"]),
-    ("settings", "settings", ["Providers", "Environment", "Twelve Data"]),
+    ("settings", "settings", ["Data providers", "Refresh policy", "Twelve Data"]),
 ]
 
 

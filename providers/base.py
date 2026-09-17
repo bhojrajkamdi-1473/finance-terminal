@@ -24,24 +24,30 @@ def utcnow_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def unavailable(source: str, message: str) -> dict:
-    return {
+def unavailable(source: str, message: str, code: str | None = None) -> dict:
+    env = {
         "status": "unavailable",
         "source": source,
         "as_of": None,
         "data": None,
         "message": message,
     }
+    if code:
+        env["code"] = code
+    return env
 
 
-def error_envelope(source: str, message: str) -> dict:
-    return {
+def error_envelope(source: str, message: str, code: str | None = None) -> dict:
+    env = {
         "status": "error",
         "source": source,
         "as_of": None,
         "data": None,
         "message": message,
     }
+    if code:
+        env["code"] = code
+    return env
 
 
 def live_envelope(source: str, data: Any, delayed: bool = False) -> dict:
@@ -146,6 +152,7 @@ CAPABILITIES = (
     "news",
     "ipo",
     "actions",
+    "holdings",
     "macro",
     "technical",
     "chart",

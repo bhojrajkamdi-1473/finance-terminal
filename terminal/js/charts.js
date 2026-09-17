@@ -1,6 +1,14 @@
-/* Canvas charts: line/area price chart with volume + SMA overlays. No deps. */
+/* Canvas charts: price + volume + SMA overlays, crosshair tooltip. No deps.
+   Light institutional theme. drawPriceChart(canvas, bars, opts) keeps its
+   signature: opts.sma = array of windows (default [20,50]). */
 (function () {
   "use strict";
+  var C = {
+    grid: "#e7ebf0", ink: "#687182", up: "#18794e", dn: "#c03535",
+    upFill: "rgba(24,121,78,.14)", dnFill: "rgba(192,53,53,.14)",
+    volUp: "rgba(24,121,78,.30)", volDn: "rgba(192,53,53,.30)",
+    cross: "#9aa3af", smas: ["#1a56c4", "#9a6b12", "#6d4fc2"],
+  };
   function sma(values, w) {
     var out = [];
     for (var i = 0; i < values.length; i++) {
@@ -14,44 +22,54 @@
     }
     return out;
   }
+  function fmtN(v) {
+    if (v === null || v === undefined || isNaN(v)) return "—";
+    return Number(v).toLocaleString("en-US", { maximumFractionDigits: 2 });
+  }
+  function fmtD(t) {
+    if (!t) return "";
+    var d = new Date(t * 1000);
+    return isNaN(d) ? "" : d.toISOString().slice(0, 10);
+  }
   function drawPriceChart(canvas, bars, opts) {
     opts = opts || {};
+    var smas = opts.sma || [20, 50];
     var dpr = window.devicePixelRatio || 1;
-    var W = canvas.clientWidth || 800, H = canvas.clientHeight || 280;
+    var W = canvas.clientWidth || 800, H = canvas.clientHeight || 300;
     canvas.width = W * dpr; canvas.height = H * dpr;
     var ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, W, H);
-    var closes = bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null; });
+    var closes = bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null && v !== undefined; });
     if (!closes.length) {
-      ctx.fillStyle = "#8b96ab"; ctx.font = "12px sans-serif";
+      ctx.fillStyle = C.ink; ctx.font = "12px sans-serif";
       ctx.fillText("Insufficient data", 16, 30);
       return;
     }
-    var padL = 8, padR = 64, padT = 12, padB = 34;
-    var volH = 44;
+    var padL = 6, padR = 66, padT = 10, padB = 30, volH = 46;
     var lo = Math.min.apply(null, closes), hi = Math.max.apply(null, closes);
-    var span = hi - lo || 1; lo -= span * 0.06; hi += span * 0.06;
+    var span = hi - lo || 1; lo -= span * 0.07; hi += span * 0.07;
     var vols = bars.map(function (b) { return b.v || 0; });
     var vmax = Math.max.apply(null, vols.concat([1]));
     function x(i) { return padL + (i / Math.max(bars.length - 1, 1)) * (W - padL - padR); }
     function y(v) { return padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB - volH); }
-    // gridlines
-    ctx.strokeStyle = "#1c2434"; ctx.fillStyle = "#5b6579"; ctx.font = "10px monospace"; ctx.lineWidth = 1;
+    // grid + y labels
+    ctx.strokeStyle = C.grid; ctx.fillStyle = C.ink;
+    ctx.font = "10px 'IBM Plex Mono',Consolas,monospace"; ctx.lineWidth = 1;
     for (var g = 0; g <= 4; g++) {
-      var gv = lo + (span * 1.12 * g) / 4, gy = y(gv);
+      var gv = lo + ((hi - lo) * g) / 4, gy = Math.round(y(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - padR, gy); ctx.stroke();
-      ctx.fillText(Number(gv).toLocaleString("en-US", { maximumFractionDigits: 2 }), W - padR + 6, gy + 3);
+      ctx.fillText(fmtN(gv), W - padR + 6, gy + 3);
     }
     // volume
-    var vy0 = H - padB - volH;
+    var vy0 = H - padB - volH, bw = Math.max(1, (W - padL - padR) / bars.length - 1);
     bars.forEach(function (b, i) {
       var h = (b.v || 0) / vmax * (volH - 4);
-      var up = (b.c !== null && b.o !== null && b.c >= b.o);
-      ctx.fillStyle = up ? "rgba(47,191,113,.35)" : "rgba(240,85,85,.35)";
-      ctx.fillRect(x(i) - 1, vy0 + (volH - 4 - h), 2, h);
+      var up = b.c !== null && b.o !== null && b.c >= b.o;
+      ctx.fillStyle = up ? C.volUp : C.volDn;
+      ctx.fillRect(x(i) - bw / 2, vy0 + (volH - 4 - h), bw, h);
     });
-    // area + line
+    // area + price line
     function pathOf(vals) {
       ctx.beginPath();
       var started = false;
@@ -63,37 +81,70 @@
       });
     }
     var first = closes[0], last = closes[closes.length - 1];
-    var col = last >= first ? "#2fbf71" : "#f05555";
+    var upTrend = last >= first;
     var grad = ctx.createLinearGradient(0, padT, 0, H - padB - volH);
-    grad.addColorStop(0, last >= first ? "rgba(47,191,113,.25)" : "rgba(240,85,85,.25)");
-    grad.addColorStop(1, "rgba(0,0,0,0)");
-    pathOf(bars.map(function (b) { return b.c; }));
+    grad.addColorStop(0, upTrend ? C.upFill : C.dnFill);
+    grad.addColorStop(1, "rgba(255,255,255,0)");
+    var cl = bars.map(function (b) { return b.c; });
+    pathOf(cl);
     ctx.save();
-    ctx.lineTo(x(bars.length - 1), H - padB - volH); ctx.lineTo(x(0), H - padB - volH); ctx.closePath();
+    ctx.lineTo(x(bars.length - 1), H - padB - volH);
+    ctx.lineTo(x(0), H - padB - volH); ctx.closePath();
     ctx.fillStyle = grad; ctx.fill(); ctx.restore();
-    pathOf(bars.map(function (b) { return b.c; }));
-    ctx.strokeStyle = col; ctx.lineWidth = 1.6; ctx.stroke();
+    pathOf(cl);
+    ctx.strokeStyle = upTrend ? C.up : C.dn; ctx.lineWidth = 1.6; ctx.stroke();
     // SMA overlays
-    var smas = opts.sma || [20, 50];
-    var scols = ["#4da3ff", "#e0a63c", "#c79bff"];
-    smas.forEach(function (w, k) {
-      var s = sma(bars.map(function (b) { return b.c; }), w);
+    var smaSeries = smas.map(function (w) { return sma(cl, w); });
+    smaSeries.forEach(function (s, k) {
       if (s.every(function (v) { return v === null; })) return;
-      pathOf(s); ctx.strokeStyle = scols[k % scols.length]; ctx.lineWidth = 1; ctx.stroke();
+      pathOf(s); ctx.strokeStyle = C.smas[k % C.smas.length]; ctx.lineWidth = 1; ctx.stroke();
     });
-    // x labels (first/mid/last dates)
-    ctx.fillStyle = "#5b6579";
-    function dt(i) {
-      var t = bars[i] && bars[i].t;
-      return t ? new Date(t * 1000).toISOString().slice(0, 10) : "";
-    }
+    // x labels
+    ctx.fillStyle = C.ink;
     if (bars.length) {
-      ctx.fillText(dt(0), padL, H - 8);
-      var mid = dt(Math.floor(bars.length / 2));
-      ctx.fillText(mid, W / 2 - 30, H - 8);
-      var end = dt(bars.length - 1);
-      ctx.fillText(end, W - padR - 60, H - 8);
+      ctx.fillText(fmtD(bars[0].t), padL, H - 8);
+      ctx.fillText(fmtD(bars[Math.floor(bars.length / 2)].t), W / 2 - 30, H - 8);
+      var end = fmtD(bars[bars.length - 1].t);
+      ctx.fillText(end, W - padR - end.length * 6 - 4, H - 8);
+    }
+    // crosshair + tooltip
+    var tip = canvas.parentNode ? canvas.parentNode.querySelector(".chart-tip") : null;
+    function nearest(ev) {
+      var r = canvas.getBoundingClientRect();
+      var mx = ev.clientX - r.left;
+      var i = Math.round((mx - padL) / Math.max(1, (W - padL - padR)) * (bars.length - 1));
+      return Math.max(0, Math.min(bars.length - 1, i));
+    }
+    function hide() {
+      if (tip) tip.style.display = "none";
+      drawStatic();
+    }
+    function drawStatic() {
+      // redraw without crosshair (cheap: full redraw)
+      drawPriceChart(canvas, bars, { sma: smas, _noBind: true });
+    }
+    if (tip && !opts._noBind) {
+      canvas.onmousemove = function (ev) {
+        var i = nearest(ev), b = bars[i];
+        if (!b) return;
+        drawStatic();
+        var c2 = canvas.getContext("2d");
+        c2.setTransform(dpr, 0, 0, dpr, 0, 0);
+        c2.strokeStyle = C.cross; c2.setLineDash([3, 3]); c2.lineWidth = 1;
+        c2.beginPath(); c2.moveTo(x(i), padT); c2.lineTo(x(i), H - padB); c2.stroke();
+        c2.setLineDash([]);
+        c2.fillStyle = "#fff"; c2.strokeStyle = upTrend ? C.up : C.dn; c2.lineWidth = 1.5;
+        c2.beginPath(); c2.arc(x(i), y(b.c), 3, 0, 7); c2.fill(); c2.stroke();
+        tip.innerHTML = "<b>" + fmtD(b.t) + "</b><br>O " + fmtN(b.o) + " · H " + fmtN(b.h) +
+          "<br>L " + fmtN(b.l) + " · C <b>" + fmtN(b.c) + "</b><br>Vol " + fmtN(b.v);
+        tip.style.display = "block";
+        var r = canvas.getBoundingClientRect(), pr = canvas.parentNode.getBoundingClientRect();
+        var lx = r.left - pr.left + x(i) + 12, ly = r.top - pr.top + y(b.c) - 10;
+        if (lx + 150 > pr.width) lx -= 165;
+        tip.style.left = lx + "px"; tip.style.top = Math.max(0, ly) + "px";
+      };
+      canvas.onmouseleave = hide;
     }
   }
-  window.FT_CHART = { drawPriceChart, sma };
+  window.FT_CHART = { drawPriceChart: drawPriceChart, sma: sma };
 })();

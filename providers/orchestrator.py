@@ -26,12 +26,14 @@ from typing import Any
 
 from services import reconcile as _rec
 from services.refresh import TTLCache
+from providers.indian import is_indian
 
 QUOTE_TTL = 30.0
 PROFILE_TTL = 24 * 3600.0
 STATEMENTS_TTL = 7 * 24 * 3600.0
 VALUATION_TTL = 24 * 3600.0
 EARNINGS_TTL = 24 * 3600.0
+ESTIMATES_TTL = 24 * 3600.0
 NEWS_TTL = 10 * 60.0
 ACTIONS_TTL = 24 * 3600.0
 
@@ -48,6 +50,7 @@ class ProviderManager:
         *,
         yahoo=None,
         indian=None,
+        indianapi=None,
         twelvedata=None,
         alphavantage=None,
         news_rss=None,
@@ -56,6 +59,7 @@ class ProviderManager:
     ):
         self.yahoo = yahoo
         self.indian = indian
+        self.indianapi = indianapi
         self.twelvedata = twelvedata
         self.alphavantage = alphavantage
         self.news_rss = news_rss
@@ -66,6 +70,11 @@ class ProviderManager:
         import threading
 
         self._lock = threading.Lock()
+
+    def _indian_leg(self):
+        """Resolved Indian leg: the new keyed provider wins; callers keep
+        passing `indian=` for backward-compatible tests."""
+        return self.indianapi or self.indian
 
     # -- guards ---------------------------------------------------------
     def _td_room(self, cost: int = 2) -> tuple[bool, str]:
@@ -142,6 +151,7 @@ class ProviderManager:
                     "status": "error",
                     "source": name,
                     "message": "Provider timeout.",
+                    "code": "TIMEOUT",
                 }
             except Exception as exc:
                 out[name] = {
@@ -206,14 +216,15 @@ class ProviderManager:
                 calls.append(("yahoo", lambda: self.yahoo.get_quote(symbol)))
             else:
                 skipped.append({"provider": "yahoo", "reason": "Leg not wired."})
-            if self.indian is not None and is_indian(symbol):
-                calls.append(("indian-api", lambda: self.indian.get_quote(symbol)))
+            leg = self._indian_leg()
+            if leg is not None and is_indian(symbol):
+                calls.append(("indian-api", lambda: leg.get_quote(symbol)))
             else:
                 skipped.append(
                     {
                         "provider": "indian-api",
                         "reason": "Leg not wired."
-                        if self.indian is None
+                        if leg is None
                         else "Non-Indian symbol.",
                     }
                 )
@@ -301,11 +312,27 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
+            leg = self._indian_leg()
+            if leg is not None and is_indian(symbol):
+                calls.append(
+                    ("indian-api", lambda: leg.get_company_profile(symbol))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if leg is None
+                        else "Non-Indian symbol.",
+                    }
+                )
             results = self._fanout(key + ":fan", PROFILE_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
+            inapi = results.get("indian-api", {})
             av_d = av.get("data") if _ok(av) else {}
             td_d = td.get("data") if _ok(td) else {}
+            in_d = inapi.get("data") if _ok(inapi) else {}
             q = (
                 (quote_env.get("data") or {})
                 if quote_env and quote_env.get("data")
@@ -314,50 +341,71 @@ class ProviderManager:
             as_of = (
                 av.get("as_of")
                 if _ok(av)
-                else (td.get("as_of") if _ok(td) else (quote_env or {}).get("as_of"))
+                else (
+                    inapi.get("as_of")
+                    if _ok(inapi)
+                    else (td.get("as_of") if _ok(td) else (quote_env or {}).get("as_of"))
+                )
             )
             from providers.schema import field as _f
 
-            def avf(k, period=None, ccy=None):
+            pri_d = av_d or in_d or {}
+            if pri_d is in_d:
+                prim_src, prim_asof = "indian-api", inapi.get("as_of")
+            else:
+                prim_src, prim_asof = "alphavantage", av.get("as_of")
+
+            def ovf(k, alias=None, period=None, ccy=None):
+                v = (pri_d or {}).get(k)
+                if v is None and alias:
+                    v = (pri_d or {}).get(alias)
                 return _f(
-                    (av_d or {}).get(k),
-                    "alphavantage",
-                    av.get("as_of"),
+                    v,
+                    prim_src,
+                    prim_asof,
                     period,
-                    ccy or (av_d or {}).get("Currency"),
+                    ccy or (pri_d or {}).get("Currency")
+                    or (pri_d or {}).get("currency"),
                 )
 
             merged = {
                 "symbol": symbol,
-                "name": (av_d or {}).get("Name") or q.get("name"),
-                "exchange": (av_d or {}).get("Exchange") or q.get("exchange"),
-                "currency": (av_d or {}).get("Currency") or q.get("currency"),
+                "name": (pri_d or {}).get("Name") or (pri_d or {}).get("name")
+                or q.get("name"),
+                "exchange": (pri_d or {}).get("Exchange")
+                or (pri_d or {}).get("exchange") or q.get("exchange"),
+                "currency": (pri_d or {}).get("Currency")
+                or (pri_d or {}).get("currency") or q.get("currency"),
                 "instrument_type": q.get("instrument_type"),
                 "timezone": q.get("timezone"),
-                "sector": (av_d or {}).get("Sector"),
-                "industry": (av_d or {}).get("Industry"),
-                "description": (av_d or {}).get("Description"),
+                "sector": (pri_d or {}).get("Sector")
+                or (pri_d or {}).get("sector"),
+                "industry": (pri_d or {}).get("Industry")
+                or (pri_d or {}).get("industry"),
+                "description": (pri_d or {}).get("Description")
+                or (pri_d or {}).get("description"),
                 "profile_note": (
                     "Identity from quote chain; sector/industry/description "
-                    "from Alpha Vantage overview where a key is configured."
+                    "from the configured fundamental feeds (Alpha Vantage "
+                    "and/or Indian Stock Market API)."
                 ),
             }
             comparisons = []
             pairs = [
                 (
                     "market_cap",
-                    avf("MarketCapitalization"),
+                    ovf("MarketCapitalization"),
                     (td_d or {}).get("market_cap"),
                 ),
-                ("pe", avf("PERatio"), (td_d or {}).get("pe")),
-                ("pb", avf("PriceToBookRatio"), (td_d or {}).get("pb")),
-                ("eps", avf("EPS"), (td_d or {}).get("eps")),
+                ("pe", ovf("PERatio"), (td_d or {}).get("pe")),
+                ("pb", ovf("PriceToBookRatio"), (td_d or {}).get("pb")),
+                ("eps", ovf("EPS"), (td_d or {}).get("eps")),
                 (
                     "dividend_yield",
-                    avf("DividendYield"),
+                    ovf("DividendYield"),
                     (td_d or {}).get("dividend_yield"),
                 ),
-                ("beta", avf("Beta"), (td_d or {}).get("beta")),
+                ("beta", ovf("Beta"), (td_d or {}).get("beta")),
             ]
             for fname, a, t in pairs:
                 others = (
@@ -365,7 +413,7 @@ class ProviderManager:
                 )
                 comparisons.append(_rec.compare(fname, a, others))
             summary = _rec.summarize(comparisons)
-            has_any = bool(av_d or td_d or q)
+            has_any = bool(av_d or td_d or in_d or q)
             status = "live" if has_any else "unavailable"
             return {
                 "status": status,
@@ -380,7 +428,7 @@ class ProviderManager:
                 "reconciliation": {
                     "comparisons": comparisons,
                     "summary": summary,
-                    "primary": "alphavantage",
+                    "primary": prim_src,
                     "skipped": skipped,
                 },
             }
@@ -428,16 +476,37 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
+            leg = self._indian_leg()
+            if leg is not None and is_indian(symbol):
+                calls.append(
+                    (
+                        "indian-api",
+                        lambda: leg.get_financial_statements(
+                            symbol, statement, period
+                        ),
+                    )
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if leg is None
+                        else "Non-Indian symbol.",
+                    }
+                )
             results = self._fanout(key + ":fan", STATEMENTS_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
+            inapi = results.get("indian-api", {})
             av_live = _ok(av) and av.get("data")
             td_live = _ok(td) and td.get("data")
-            if not av_live and not td_live:
+            in_live = _ok(inapi) and inapi.get("data")
+            if not av_live and not td_live and not in_live:
                 first = next(
                     (
                         results.get(n)
-                        for n in ("alphavantage", "twelvedata")
+                        for n in ("alphavantage", "twelvedata", "indian-api")
                         if results.get(n)
                     ),
                     None,
@@ -445,7 +514,13 @@ class ProviderManager:
                 env = dict(first or {"status": "unavailable", "source": "orchestrator"})
                 env["providers_queried"] = _queried(results)
                 return env
-            primary = av if av_live else td
+            if av_live:
+                primary = av
+            elif in_live:
+                primary = inapi
+            else:
+                primary = td
+            in_data = (inapi.get("data") or {}) if in_live else None
             data = dict(primary.get("data") or {})
             comparisons = _reconcile_statements(
                 statement,
@@ -469,6 +544,17 @@ class ProviderManager:
             }
             if td_live and av_live:
                 env["td_reports"] = (td.get("data") or {}).get("reports")
+            elif in_live and not av_live:
+                data.update(
+                    {
+                        "symbol": symbol,
+                        "statement": statement,
+                        "period": period,
+                        "currency": (in_data or {}).get("currency")
+                        or "INR",
+                        "reports": (in_data or {}).get("reports"),
+                    }
+                )
             elif td_live:
                 data.update(
                     {
@@ -512,23 +598,45 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
+            leg = self._indian_leg()
+            if leg is not None and is_indian(symbol):
+                calls.append(("indian-api", lambda: leg.get_ratios(symbol)))
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if leg is None
+                        else "Non-Indian symbol.",
+                    }
+                )
             results = self._fanout(key + ":fan", VALUATION_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
+            inapi = results.get("indian-api", {})
             av_d = av.get("data") if _ok(av) else {}
             td_d = td.get("data") if _ok(td) else {}
-            if not av_d and not td_d:
+            in_d = inapi.get("data") if _ok(inapi) else {}
+            if not av_d and not td_d and not in_d:
                 return {
                     "status": "unavailable",
                     "source": "orchestrator",
                     "as_of": None,
                     "data": None,
-                    "message": "Valuation needs ALPHA_VANTAGE_API_KEY and/or "
-                    "TWELVE_DATA_API_KEY. " + "; ".join(_queried(results)),
+                    "message": "Valuation could not be answered by any provider "
+                    "right now: " + "; ".join(_queried(results)) + ". Common "
+                    "causes: Alpha Vantage free quota spent (25/day), Twelve "
+                    "Data budget/coverage limits, or a symbol outside the "
+                    "Indian Stock Market API (NSE/BSE only).",
                     "providers_queried": _queried(results),
                 }
             from providers.schema import field as _f
 
+            pri_d = av_d or in_d or {}
+            if pri_d is in_d:
+                prim_src, prim_asof = "indian-api", inapi.get("as_of")
+            else:
+                prim_src, prim_asof = "alphavantage", av.get("as_of")
             metrics: dict[str, dict] = {}
             comparisons = []
             amap = [
@@ -543,11 +651,11 @@ class ProviderManager:
             ]
             for fname, akey in amap:
                 a = _f(
-                    (av_d or {}).get(akey),
-                    "alphavantage",
-                    av.get("as_of"),
+                    (pri_d or {}).get(akey),
+                    prim_src,
+                    prim_asof,
                     "TTM",
-                    (av_d or {}).get("Currency"),
+                    (pri_d or {}).get("Currency") or (pri_d or {}).get("currency"),
                 )
                 t = (td_d or {}).get(fname)
                 others = (
@@ -558,7 +666,7 @@ class ProviderManager:
                 metrics[fname] = {
                     "value": a.get("value"),
                     "kind": "REPORTED",
-                    "primary_source": "alphavantage",
+                    "primary_source": prim_src,
                     "cross_check": c["cross_check"],
                     "status": c["status"],
                 }
@@ -569,41 +677,42 @@ class ProviderManager:
             )
             from providers.schema import num as _snum
 
-            eps_v = _snum((av_d or {}).get("EPS"))
+            eps_v = _snum((pri_d or {}).get("EPS"))
             px = _snum(q.get("price"))
             if eps_v and eps_v > 0 and px:
                 metrics["pe_calc"] = {
                     "value": round(px / eps_v, 2),
                     "kind": "CALCULATED",
                     "formula": f"price ÷ reported EPS ({q.get('price')} ÷ "
-                    f"{(av_d or {}).get('EPS')})",
+                    f"{(pri_d or {}).get('EPS')})",
                     "inputs": {
                         "price": {
                             "value": q.get("price"),
                             "source": q.get("source", "quote"),
                         },
                         "eps": {
-                            "value": (av_d or {}).get("EPS"),
-                            "source": "alphavantage",
+                            "value": (pri_d or {}).get("EPS"),
+                            "source": prim_src,
                         },
                     },
                     "status": "CALCULATED",
                 }
+            overview = av_d or in_d or {}
             return {
                 "status": "live",
                 "source": "orchestrator",
-                "as_of": av.get("as_of") or td.get("as_of"),
+                "as_of": av.get("as_of") or inapi.get("as_of") or td.get("as_of"),
                 "timeliness": "DELAYED",
                 "data": {
                     "symbol": symbol,
                     "metrics": metrics,
-                    "overview": av_d or None,
+                    "overview": overview or None,
                 },
                 "providers_queried": _queried(results),
                 "reconciliation": {
                     "comparisons": comparisons,
                     "summary": _rec.summarize(comparisons),
-                    "primary": "alphavantage",
+                    "primary": prim_src,
                     "skipped": skipped,
                 },
                 "message": None,
@@ -640,16 +749,30 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
+            leg = self._indian_leg()
+            if leg is not None and is_indian(symbol):
+                calls.append(("indian-api", lambda: leg.get_earnings(symbol)))
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if leg is None
+                        else "Non-Indian symbol.",
+                    }
+                )
             results = self._fanout(key + ":fan", EARNINGS_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
+            inapi = results.get("indian-api", {})
             av_d = av.get("data") if _ok(av) else {}
             td_rows = ((td.get("data") or {}).get("rows") if _ok(td) else []) or []
-            if not av_d and not td_rows:
+            in_d = inapi.get("data") if _ok(inapi) else {}
+            if not av_d and not td_rows and not in_d:
                 first = next(
                     (
                         results.get(n)
-                        for n in ("alphavantage", "twelvedata")
+                        for n in ("alphavantage", "twelvedata", "indian-api")
                         if results.get(n)
                     ),
                     None,
@@ -688,29 +811,39 @@ class ProviderManager:
                             ],
                         )
                     )
-            data = (
-                dict(av_d)
-                if av_d
-                else {
+            if av_d:
+                data = dict(av_d)
+                primary_env, prim_src = av, "alphavantage"
+            elif in_d:
+                data = {
+                    "symbol": symbol,
+                    "annual": in_d.get("annual") or [],
+                    "quarterly": in_d.get("quarterly") or [],
+                    "note": in_d.get("note")
+                    or "Reported fiscal-year EPS (Indian Stock Market API).",
+                }
+                primary_env, prim_src = inapi, "indian-api"
+            else:
+                data = {
                     "symbol": symbol,
                     "annual": [],
                     "quarterly": [],
                     "note": "Alpha Vantage unavailable; Twelve Data rows below.",
                 }
-            )
+                primary_env, prim_src = td, "twelvedata"
             if td_rows:
                 data["twelvedata_rows"] = td_rows
             return {
                 "status": "live",
-                "source": "orchestrator",
-                "as_of": av.get("as_of") or td.get("as_of"),
+                "source": prim_src,
+                "as_of": av.get("as_of") or inapi.get("as_of") or td.get("as_of"),
                 "timeliness": "END-OF-DAY",
                 "data": data,
                 "providers_queried": _queried(results),
                 "reconciliation": {
                     "comparisons": comparisons,
                     "summary": _rec.summarize(comparisons),
-                    "primary": "alphavantage",
+                    "primary": prim_src,
                     "skipped": skipped,
                 },
                 "message": None,
@@ -753,10 +886,26 @@ class ProviderManager:
                         "reason": av_reason or "Leg not wired.",
                     }
                 )
+            leg = self._indian_leg()
+            if leg is not None and (symbol or "").strip().upper() and is_indian(symbol.upper()):
+                calls.append(
+                    ("indian-api", lambda: leg.get_news(symbol, topic, limit))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if leg is None
+                        else ("Non-Indian symbol."
+                              if (symbol or "").strip().upper()
+                              else "Missing symbol."),
+                    }
+                )
             results = self._fanout(key + ":fan", NEWS_TTL, calls)
             seen: set[str] = set()
             items: list[dict] = []
-            for name in ("yahoo-rss", "alphavantage"):
+            for name in ("yahoo-rss", "alphavantage", "indian-api"):
                 env = results.get(name, {})
                 if env.get("status") != "live":
                     continue
@@ -836,6 +985,20 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
+            leg = self._indian_leg()
+            if leg is not None and is_indian(symbol):
+                calls.append(
+                    ("indian-api", lambda: leg.get_actions(symbol))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if leg is None
+                        else "Non-Indian symbol.",
+                    }
+                )
             results = self._fanout(key + ":fan", ACTIONS_TTL, calls)
             dividends: list[dict] = []
             splits: list[dict] = []
@@ -862,6 +1025,16 @@ class ProviderManager:
             if _ok(tde):
                 dividends += tde["data"].get("dividends", [])
                 splits += tde["data"].get("splits", [])
+            iae = results.get("indian-api", {})
+            if _ok(iae):
+                dividends += [
+                    {**d, "source": "indian-api"}
+                    for d in iae["data"].get("dividends", [])
+                ]
+                splits += [
+                    {**s, "source": "indian-api"}
+                    for s in iae["data"].get("splits", [])
+                ]
             if not dividends and not splits:
                 return {
                     "status": "unavailable",
@@ -891,6 +1064,118 @@ class ProviderManager:
                 "reconciliation": {"skipped": skipped},
                 "message": None,
             }
+
+        return self._cached_or(key, ACTIONS_TTL, compute)
+
+    def get_estimates(self, symbol: str) -> dict:
+        """Analyst estimates: Alpha Vantage EPS/revenue forecasts
+        (non-Indian) plus the Indian API's reported analyst-rating
+        distribution (NSE/BSE). Estimates are never synthesised."""
+        symbol = (symbol or "").strip().upper()
+        key = f"oest:{symbol}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(
+                    ("alphavantage", lambda: self.alphavantage.get_estimates(symbol))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "alphavantage",
+                        "reason": av_reason or "Leg not wired.",
+                    }
+                )
+            leg = self._indian_leg()
+            if leg is not None and is_indian(symbol):
+                calls.append(("indian-api", lambda: leg.get_estimates(symbol)))
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if leg is None
+                        else "Non-Indian symbol.",
+                    }
+                )
+            results = self._fanout(key + ":fan", ESTIMATES_TTL, calls)
+            av = results.get("alphavantage", {})
+            inapi = results.get("indian-api", {})
+            av_d = av.get("data") if _ok(av) else {}
+            in_d = inapi.get("data") if _ok(inapi) else {}
+            if not av_d and not in_d:
+                first = next(
+                    (
+                        results.get(n)
+                        for n in ("alphavantage", "indian-api")
+                        if results.get(n)
+                    ),
+                    None,
+                )
+                env = dict(
+                    first
+                    or {
+                        "status": "unavailable",
+                        "source": "orchestrator",
+                        "message": "No estimates provider answered.",
+                    }
+                )
+                env["providers_queried"] = _queried(results)
+                return env
+            if av_d:
+                data = dict(av_d)
+                as_of = av.get("as_of")
+                prim_src = av.get("source", "alphavantage")
+            else:
+                data = dict(in_d)
+                as_of = inapi.get("as_of")
+                prim_src = inapi.get("source", "indian-api")
+            if (in_d or {}).get("analyst_ratings"):
+                data["analyst_ratings"] = (in_d or {}).get("analyst_ratings")
+            return {
+                "status": "live",
+                "source": prim_src,
+                "as_of": as_of,
+                "timeliness": "END-OF-DAY",
+                "data": data,
+                "providers_queried": _queried(results),
+                "reconciliation": {"skipped": skipped, "primary": prim_src},
+                "message": None,
+            }
+
+        return self._cached_or(key, ESTIMATES_TTL, compute)
+
+    def get_shareholding(self, symbol: str) -> dict:
+        """Ownership split for NSE/BSE symbols (Indian API). Provider-
+        reported filing figures only — never calculated or guessed."""
+        symbol = (symbol or "").strip().upper()
+        key = f"ohold:{symbol}"
+
+        def compute() -> dict:
+            leg = self._indian_leg()
+            if leg is None:
+                return {
+                    "status": "unavailable",
+                    "source": "orchestrator",
+                    "as_of": None,
+                    "data": None,
+                    "message": "Indian leg not wired.",
+                    "providers_queried": [],
+                }
+            if not is_indian(symbol):
+                return {
+                    "status": "unavailable",
+                    "source": "orchestrator",
+                    "as_of": None,
+                    "data": None,
+                    "message": f"Ownership splits are only offered for NSE/BSE "
+                    f"symbols; '{symbol}' was skipped (never guessed).",
+                    "providers_queried": ["indian-api:skipped"],
+                }
+            return leg.get_shareholding(symbol)
 
         return self._cached_or(key, ACTIONS_TTL, compute)
 

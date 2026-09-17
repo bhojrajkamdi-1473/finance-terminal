@@ -73,7 +73,7 @@
     yahoo: "Yahoo Finance", "yahoo-events": "Yahoo Finance",
     "yahoo-rss": "Yahoo Finance", twelvedata: "Twelve Data",
     alphavantage: "Alpha Vantage", estimates: "Estimates feed",
-    fundamentals: "Fundamentals feed",
+    fundamentals: "Fundamentals feed", "indian-api": "Indian Stock Market API",
   };
   function srcName(s) { return SRC_NAMES[s] || s || "?"; }
   function fmtIST(ts) {
@@ -92,8 +92,41 @@
       }) + " IST";
     } catch (e) { return d.toISOString().replace("T", " ").slice(0, 19) + "Z"; }
   }
+  function fmtIN(v, ccy) {
+    /* Indian scale: lakh-crore aware. 1 Cr = 1e7, 1 L Cr = 1e12. */
+    if (v === null || v === undefined || isNaN(Number(v))) return "—";
+    var n = Number(v), a = Math.abs(n), out;
+    if (ccy !== "INR") return fmtMoney(v, ccy);
+    if (a >= 1e12) out = (n / 1e12).toFixed(2) + " L Cr";
+    else if (a >= 1e7) out = (n / 1e7).toFixed(2) + " Cr";
+    else if (a >= 1e5) out = (n / 1e5).toFixed(2) + " L";
+    else if (a >= 1e3) out = (n / 1e3).toFixed(2) + "K";
+    else out = n.toFixed(2);
+    return (ccy ? ccy + " " : "") + out;
+  }
+  function secId(name, symbol, meta) {
+    /* Security identity: human name dominant, ticker + venue secondary. */
+    var base = symbol ? String(symbol).replace(/\.(NS|BO)$/, "") : "";
+    return '<div class="sec"><div class="s-nm">' + esc(name || symbol || "—") + "</div>" +
+      '<div class="s-tk"><b>' + esc(symbol || "—") + "</b>" +
+      (meta ? " · " + esc(meta) : "") + "</div></div>";
+  }
+  function typeBadge(t) {
+    var label = "Equity";
+    if (/index/i.test(t || "")) label = "Index";
+    else if (/etf/i.test(t || "")) label = "ETF";
+    else if (/fund|mutual/i.test(t || "")) label = "Fund";
+    else if (/crypto/i.test(t || "")) label = "Crypto";
+    else if (/forex|currency/i.test(t || "")) label = "FX";
+    return '<span class="sect-tag">' + esc(label) + "</span>";
+  }
+  function prov(source, asOf, status) {
+    /* Quiet provenance microcopy: value first, source tertiary. */
+    return '<div class="prov">Source <b>' + esc(srcName(source)) + "</b> · " +
+      esc(status || "?") + " · as of " + esc(asOf || "unavailable") + "</div>";
+  }
   window.FT_FMT = {
-    fmtNum, fmtInt, fmtPct, fmtMoney, fmtDate, fmtDateTime, esc,
-    dirClass, statusPill, srcName, fmtIST,
+    fmtNum, fmtInt, fmtPct, fmtMoney, fmtIN, fmtDate, fmtDateTime, esc,
+    dirClass, statusPill, srcName, fmtIST, secId, typeBadge, prov,
   };
 })();

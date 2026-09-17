@@ -76,7 +76,7 @@ DEFAULT_SYMBOLS = [
 
 
 def _send_json(handler: BaseHTTPRequestHandler, obj, status: int = 200) -> None:
-    body = json.dumps(obj).encode("utf-8")
+    body = json.dumps(_redact(obj)).encode("utf-8")
     handler.send_response(status)
     handler.send_header("Content-Type", "application/json; charset=utf-8")
     handler.send_header("Content-Length", str(len(body)))
@@ -120,6 +120,38 @@ def _reported_num(value) -> float | None:
 
 # Slow-domain caches (Alpha Vantage free = 25 req/day TOTAL).
 _domain_cache = refresh.TTLCache()
+
+
+# ---------------------------------------------------------------------------
+# Secret redaction: some upstream error texts echo the caller's API key
+# (e.g. Alpha Vantage rate-limit notices include the key). Every JSON
+# response is scrubbed so credential values can never reach clients.
+_SECRET_VALUES: list[str] = []
+for _secret_name in (
+    "ALPHA_VANTAGE_API_KEY",
+    "FUNDAMENTALS_API_KEY",
+    "TWELVE_DATA_API_KEY",
+    "INDIAN_STOCK_MARKET_API_KEY",
+):
+    _secret_val = (os.environ.get(_secret_name) or "").strip()
+    if len(_secret_val) >= 8:
+        _SECRET_VALUES.append(_secret_val)
+
+
+def _redact(obj):
+    """Deep-scrub provider responses: known credential values become
+    [REDACTED] wherever they appear (message text, payloads, errors)."""
+    if isinstance(obj, str):
+        out = obj
+        for _s in _SECRET_VALUES:
+            if _s in out:
+                out = out.replace(_s, "[REDACTED]")
+        return out
+    if isinstance(obj, dict):
+        return {k: _redact(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_redact(v) for v in obj]
+    return obj
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -176,6 +208,9 @@ class Handler(BaseHTTPRequestHandler):
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/actions":
             return self._handle_actions(qs)
+        if path == "/api/holdings":
+            env = registry.manager.get_shareholding(qs.get("symbol", [""])[0])
+            return _send_json(self, env, _envelope_status(env))
         if path == "/api/estimates":
             env = registry.estimates.get_estimates(qs.get("symbol", [""])[0])
             return _send_json(self, env, _envelope_status(env))
@@ -189,6 +224,12 @@ class Handler(BaseHTTPRequestHandler):
                 "ipo:calendar",
                 refresh.IPO_TTL,
                 lambda: registry.fundamentals.get_ipo_calendar(),
+            )
+        if path == "/api/earnings-calendar":
+            return self._handle_cached_domain(
+                "earnings:calendar",
+                refresh.IPO_TTL,
+                lambda: registry.fundamentals.get_earnings_calendar(),
             )
         if path == "/api/macro":
             indicator = (qs.get("indicator", ["GDP"])[0] or "GDP").upper()

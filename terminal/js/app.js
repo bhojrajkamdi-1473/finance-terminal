@@ -57,12 +57,22 @@
             box.innerHTML = '<div class="sr"><span>No matches — ' + F.esc((b && b.message) || "") + "</span></div>";
             box.classList.remove("hidden"); items = []; return;
           }
-          items = b.data.results || [];
+          items = (b.data.results || []).slice(0, 8);
           box.innerHTML = items.map(function (x, i) {
-            return '<div class="sr" data-i="' + i + '"><span><b>' + F.esc(x.symbol) + "</b> · " + F.esc(x.name || "") +
-              "</span><small>" + F.esc(x.exchange || "") + "</small></div>";
+            return '<div class="sr" role="option" data-i="' + i + '"><span><span class="nm">' +
+              F.esc(x.name || x.symbol) + "</span> <span class='tk'>" + F.esc(x.symbol) + "</span> " +
+              F.typeBadge(x.type) + "<br><span class='tk'>" + F.esc([x.exchange, x.type].filter(Boolean).join(" · ") || "—") +
+              "</span></span><span class='px' data-qpx='" + F.esc(x.symbol) + "'>…</span></div>";
           }).join("");
           box.classList.remove("hidden");
+          items.forEach(function (x) {
+            window.FT_API.get("quote", { symbol: x.symbol }).then(function (r) {
+              var q = r.body && r.body.data, cell = box.querySelector("[data-qpx='" + x.symbol.replace(/'/g, "") + "']");
+              if (!q || !cell) return;
+              var c = F.dirClass(q.change_pct);
+              cell.innerHTML = F.fmtNum(q.price) + " <span class='" + c + "'>" + F.fmtPct(q.change_pct) + "</span>";
+            });
+          });
           box.querySelectorAll(".sr").forEach(function (d) {
             d.onclick = function () {
               var it = items[Number(d.getAttribute("data-i"))];
@@ -110,7 +120,8 @@
       var yahoo = list.filter(function (p) { return p.id === "yahoo"; })[0] || {};
       var td = list.filter(function (p) { return p.id === "twelvedata"; })[0] || {};
       var av = list.filter(function (p) { return p.id === "alphavantage"; })[0] || {};
-      var legs = "YAHOO" + (td.key_configured ? "+TD" : "") + (av.key_configured ? "+AV" : "");
+      var ia = list.filter(function (p) { return p.id === "indian-api"; })[0] || {};
+      var legs = "YAHOO" + (td.key_configured ? "+TD" : "") + (av.key_configured ? "+AV" : "") + (ia.key_configured ? "+IA" : "");
       if (yahoo.state === "cooling") {
         pill.className = "pill pill-delayed";
         pill.textContent = "AUTO · YAHOO COOLING · " + legs;

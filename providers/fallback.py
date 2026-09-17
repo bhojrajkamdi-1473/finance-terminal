@@ -22,7 +22,12 @@ import threading
 import time
 from typing import Any
 
-from .base import CompanyProvider, MarketDataProvider, error_envelope
+from .base import (
+    CompanyProvider,
+    MarketDataProvider,
+    error_envelope,
+    unavailable,
+)
 from .yahoo import ALLOWED_INTERVALS, ALLOWED_RANGES
 
 QUOTE_TTL = 30.0
@@ -205,6 +210,10 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
         self, symbol: str, range_: str = "1M", interval: str = "1d"
     ) -> dict:
         symbol = (symbol or "").strip().upper()
+        if not symbol:
+            return error_envelope(
+                "fallback-chain", "Empty symbol — no history requested."
+            )
         range_ = (range_ or "1M").upper()
         interval = (interval or "1d").lower()
         if range_ not in ALLOWED_RANGES:
@@ -225,6 +234,10 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
 
     def search(self, query: str, limit: int = 10) -> dict:
         query = (query or "").strip()
+        if not query:
+            return unavailable(
+                "fallback-chain", "Empty search query — nothing to look up."
+            )
         key = f"s:{query.lower()}:{limit}"
         bound = [
             (n, _Bound(leg, "search", query, limit))

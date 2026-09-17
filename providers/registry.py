@@ -8,12 +8,15 @@ QUOTE (global): yahoo first (indian leg passes non-Indian symbols through)
 HISTORY:
     yahoo -> stooq -> twelvedata -> alphavantage -> UNAVAILABLE
 FUNDAMENTALS / STATEMENTS:
-    alphavantage -> twelvedata
-EARNINGS: alphavantage        ESTIMATES: none (never synthesised)
-NEWS:    yahoo-rss -> alphavantage
+    indian-api (NSE/BSE) else alphavantage -> twelvedata
+EARNINGS:  alphavantage (indian-api annual EPS for NSE/BSE)
+ESTIMATES: alphavantage (non-Indian) | indian-api analyst ratings
+           (NSE/BSE). Never synthesised EPS forecasts.
+NEWS:    yahoo-rss -> alphavantage (indian-api news for NSE/BSE)
 IPO:     alphavantage         MACRO: alphavantage indicators
-ACTIONS: yahoo-events         TECHNICAL: local calc from history
-CHART:   TradingView widget (visualisation only, not a data feed)
+ACTIONS: yahoo-events (indian-api dividends/splits for NSE/BSE)
+HOLDINGS: indian-api ownership split (NSE/BSE only)
+TECHNICAL: local calc from history   CHART: TradingView widget
 
 Swap implementations here (or via env vars) without touching the UI.
 """
@@ -25,7 +28,8 @@ import os
 from . import base as _base
 from .fallback import FallbackMarketData
 from .fundamentals import AlphaVantageFundamentalsProvider
-from .indian import IndianMarketApiProvider
+from .indian import is_indian
+from .indianapi import IndianApiProvider
 from .news import YahooCorporateActionsProvider, YahooRssNewsProvider
 from .orchestrator import ProviderManager
 from .stooq import StooqProvider
@@ -33,7 +37,7 @@ from .twelvedata import TwelveDataProvider, budget_snapshot
 from .yahoo import YahooMarketDataProvider
 
 _yahoo = YahooMarketDataProvider()
-_indian = IndianMarketApiProvider()
+_indianapi = IndianApiProvider()
 _twelvedata = TwelveDataProvider()
 _alphavantage = AlphaVantageFundamentalsProvider()
 _stooq = StooqProvider()
@@ -42,7 +46,7 @@ _stooq = StooqProvider()
 # then Yahoo -> Twelve Data -> Alpha Vantage (scarce, 6 h cache).
 market_data = FallbackMarketData(
     legs=[
-        ("indian-api", _indian),
+        ("indian-api", _indianapi),
         ("yahoo", _yahoo),
         ("twelvedata", _twelvedata),
         ("alphavantage", _alphavantage),
@@ -82,21 +86,23 @@ company = market_data  # identity rides on the quote-chain winner
 fundamentals = _alphavantage
 news = YahooRssNewsProvider()
 corporate_actions = YahooCorporateActionsProvider()
-# Estimates come from Alpha Vantage EARNINGS_ESTIMATES when a key is
-# configured; without a key the same object returns honest unavailable.
-estimates = _alphavantage
 
 # Multi-provider orchestrator: fan-out + normalization + reconciliation.
 # Cheap endpoints (quote/history/search) keep first-healthy chains;
 # company domains below go through the manager.
 manager = ProviderManager(
     yahoo=_yahoo,
-    indian=_indian,
+    indianapi=_indianapi,
     twelvedata=_twelvedata,
     alphavantage=_alphavantage,
     news_rss=news,
     actions_yahoo=corporate_actions,
 )
+# Estimates: Alpha Vantage EARNINGS_ESTIMATES (key configured) for
+# non-Indian symbols; the indian-api analyst-rating distribution for
+# NSE/BSE symbols. Never synthesised EPS forecasts.
+estimates = manager
+holdings = manager
 
 
 def _configured(env_name: str) -> bool:
@@ -117,8 +123,8 @@ def providers_status() -> dict:
         "chain": {
             "quote": ["indian-api", "yahoo", "twelvedata", "alphavantage"],
             "history": ["yahoo", "stooq", "twelvedata", "alphavantage"],
-            "news": ["yahoo-rss", "alphavantage"],
-            "fundamentals": ["alphavantage", "twelvedata"],
+            "news": ["yahoo-rss", "alphavantage", "indian-api"],
+            "fundamentals": ["alphavantage", "twelvedata", "indian-api"],
         },
         "providers": [
             {
@@ -136,19 +142,23 @@ def providers_status() -> dict:
             },
             {
                 "id": "indian-api",
-                "label": "Indian Stock Market API",
+                "label": "Indian Stock Market API (stock.indianapi.in)",
                 "state": "connected"
                 if health.get("indian-api", {}).get("state") == "ok"
                 and health.get("indian-api", {}).get("last_ok")
                 else "unreachable",
-                "detail": "Free, no key. Data via Yahoo Finance "
-                "(labelled as such, never NSE real-time). Documented host "
-                "currently unreachable (upstream issue #9); chain falls "
-                "through to Yahoo automatically.",
-                "key_required": False,
-                "key_configured": True,
-                "capabilities": _base.describe(_indian),
+                "detail": "Keyed NSE/BSE feed (X-API-Key). One delayed "
+                "snapshot powers quote, fundamentals, statements, "
+                "earnings, analyst ratings, ownership, corporate actions "
+                "and news for NSE/BSE symbols. Rate budget self-imposed "
+                "(30/min, 2000/day); responses cached.",
+                "key_required": True,
+                "key_configured": bool(
+                    (os.environ.get("INDIAN_STOCK_MARKET_API_KEY") or "").strip()
+                ),
+                "capabilities": _base.describe(_indianapi),
                 "health": health.get("indian-api", {}),
+                "budget": _indianapi.budget_snapshot(),
             },
             {
                 "id": "alphavantage",
