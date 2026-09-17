@@ -145,18 +145,16 @@ class Handler(BaseHTTPRequestHandler):
             )
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/company":
-            env = registry.company.get_company_profile(qs.get("symbol", [""])[0])
-            return _send_json(self, env, _envelope_status(env))
+            return self._handle_company(qs)
         if path == "/api/fundamentals":
-            env = registry.fundamentals.get_financial_statements(
+            env = registry.manager.get_statements(
                 qs.get("symbol", [""])[0],
                 qs.get("statement", ["income"])[0],
                 qs.get("period", ["annual"])[0],
             )
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/ratios":
-            env = registry.fundamentals.get_ratios(qs.get("symbol", [""])[0])
-            return _send_json(self, env, _envelope_status(env))
+            return self._handle_valuation(qs)
         if path == "/api/news":
             try:
                 limit = int(qs.get("limit", ["20"])[0] or 20)
@@ -177,19 +175,15 @@ class Handler(BaseHTTPRequestHandler):
             )
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/actions":
-            env = registry.corporate_actions.get_corporate_actions(
-                qs.get("symbol", [""])[0]
-            )
-            return _send_json(self, env, _envelope_status(env))
+            return self._handle_actions(qs)
         if path == "/api/estimates":
             env = registry.estimates.get_estimates(qs.get("symbol", [""])[0])
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/earnings":
-            return self._handle_cached_domain(
-                f"earnings:{qs.get('symbol', [''])[0].upper()}",
-                refresh.EARNINGS_TTL,
-                lambda: registry.fundamentals.get_earnings(qs.get("symbol", [""])[0]),
-            )
+            env = registry.manager.get_earnings(qs.get("symbol", [""])[0])
+            return _send_json(self, env, _envelope_status(env))
+        if path == "/api/quality":
+            return self._handle_quality(qs)
         if path == "/api/ipo":
             return self._handle_cached_domain(
                 "ipo:calendar",
@@ -363,6 +357,77 @@ class Handler(BaseHTTPRequestHandler):
             out = list(pool.map(one, DEFAULT_SYMBOLS))
         return _send_json(self, {"ok": True, "items": out})
 
+    def _handle_company(self, qs):
+        """Company profile via the orchestrator: AV overview + TD
+        statistics + quote-chain identity, reconciled per field."""
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        quote_env = registry.market_data.get_quote(symbol)
+        env = registry.manager.get_profile(symbol, quote_env)
+        return _send_json(self, env, _envelope_status(env))
+
+    def _handle_actions(self, qs):
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        env = registry.manager.get_actions(symbol)
+        return _send_json(self, env, _envelope_status(env))
+
+    def _handle_valuation(self, qs):
+        """Valuation via the orchestrator. data keeps the flat overview
+        shape the UI reads (r.PERatio ...), plus metrics + reconciliation."""
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        quote_env = registry.market_data.get_quote(symbol)
+        env = registry.manager.get_valuation(symbol, quote_env)
+        if env.get("status") != "live":
+            return _send_json(self, env, _envelope_status(env))
+        metrics = (env.get("data") or {}).get("metrics") or {}
+        overview = (env.get("data") or {}).get("overview") or {}
+        out = dict(env)
+        out["data"] = overview
+        out["valuation"] = metrics
+        return _send_json(self, out, _envelope_status(out))
+
+    def _handle_quality(self, qs):
+        """Data Quality panel: per-provider connectivity, last response,
+        capabilities, budgets — never key values."""
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        chain_health = {}
+        for chain in (registry.market_data, registry.history):
+            try:
+                chain_health.update(chain.health())
+            except Exception:
+                continue
+        rows = []
+        for p in registry.providers_status().get("providers", []):
+            pid = p.get("id")
+            h = chain_health.get(pid, {})
+            rows.append(
+                {
+                    "id": pid,
+                    "label": p.get("label"),
+                    "state": p.get("state"),
+                    "detail": p.get("detail"),
+                    "capabilities": p.get("capabilities"),
+                    "last_ok": h.get("last_ok"),
+                    "last_error": h.get("last_error"),
+                    "last_latency_ms": h.get("last_latency_ms"),
+                    "consecutive_errors": h.get("consecutive_errors", 0),
+                }
+            )
+        summary = None
+        if symbol:
+            q = registry.manager.get_quote(symbol)
+            rec = (q.get("reconciliation") or {}).get("summary")
+            summary = {
+                "symbol": symbol,
+                "quote_source": q.get("source"),
+                "quote_status": q.get("status"),
+                "quote_timeliness": q.get("timeliness"),
+                "reconciliation": rec,
+            }
+        return _send_json(
+            self,
+            {"ok": True, "symbol": symbol or None, "providers": rows, "quote": summary},
+        )
+
     def _handle_cached_domain(self, cache_key: str, ttl: float, fetch):
         """Slow-domain wrapper: serve TTLCache unless refresh is allowed."""
         hit = _domain_cache.get(cache_key)
@@ -378,17 +443,8 @@ class Handler(BaseHTTPRequestHandler):
         return _send_json(self, env, _envelope_status(env))
 
     def _handle_news(self, symbol, topic, limit: int = 20):
-        """NEWS chain: Yahoo RSS -> Alpha Vantage sentiment."""
-        env = registry.news.get_news(symbol, topic, limit=limit)
-        if env.get("status") == "live" or not (
-            hasattr(registry.fundamentals, "get_av_news")
-        ):
-            return env
-        fallback = registry.fundamentals.get_av_news(symbol or "", topic or "", limit)
-        if fallback.get("status") == "live":
-            fallback["fallback_path"] = ["yahoo-rss:miss", "alphavantage"]
-            return fallback
-        env["fallback_path"] = ["yahoo-rss:miss", "alphavantage:miss"]
+        """NEWS via the orchestrator: Yahoo RSS + AV sentiment, deduped."""
+        env = registry.manager.get_news(symbol, topic, limit)
         return env
 
     def _handle_technical(self, qs):

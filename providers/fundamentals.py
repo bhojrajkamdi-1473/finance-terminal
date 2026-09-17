@@ -64,13 +64,73 @@ def _premium_block(payload: dict) -> str | None:
     return None
 
 
+def _validate(payload: object, function: str) -> tuple[str, str]:
+    """Classify an Alpha Vantage response.
+
+    Returns (kind, message) with kind in:
+    ok | rate_limited | premium | error | empty.
+    Control messages are NEVER treated as financial data.
+    """
+    if not isinstance(payload, dict) or not payload:
+        return ("empty", f"{function} returned an empty payload.")
+    if payload.get("Error Message"):
+        return ("error", str(payload.get("Error Message"))[:300])
+    info = str(payload.get("Information") or "")
+    if info:
+        lowered = info.lower()
+        if "premium" in lowered or "entitlement" in lowered:
+            return ("premium", info[:300])
+        return ("rate_limited", info[:300])
+    if payload.get("Note"):
+        return ("rate_limited", str(payload.get("Note"))[:300])
+    return ("ok", "")
+
+
+def _invalid_envelope(function: str, kind: str, message: str) -> dict:
+    if kind == "rate_limited":
+        return {
+            "status": "rate_limited",
+            "source": "alphavantage",
+            "as_of": None,
+            "data": None,
+            "message": f"RATE LIMITED ({function}): {message}",
+        }
+    if kind == "premium":
+        return unavailable(
+            "alphavantage",
+            f"{function} requires a premium entitlement: {message}",
+        )
+    if kind == "empty":
+        return unavailable("alphavantage", message)
+    return error_envelope("alphavantage", f"{function}: {message}")
+
+
+def _av_symbol(symbol: str) -> dict:
+    """Resolve the Alpha Vantage symbol (cached discovery)."""
+    from . import symbols as _sym
+
+    def _search(query: str) -> list[dict]:
+        try:
+            payload = _av_get({"function": "SYMBOL_SEARCH", "keywords": query})
+        except Exception:
+            return []
+        matches = payload.get("bestMatches") or []
+        out = []
+        for m in matches:
+            if isinstance(m, dict) and m.get("1. symbol"):
+                out.append({"symbol": m.get("1. symbol"), "name": m.get("2. name")})
+        return out
+
+    return _sym.resolve_alphavantage(symbol, _search)
+
+
 class AlphaVantageFundamentalsProvider(FundamentalsProvider):
     name = "alphavantage"
     capabilities: dict[str, bool] = {
         "fundamentals": True,
         "statements": True,
         "earnings": True,
-        "estimates": False,
+        "estimates": True,
         "news": True,
         "ipo": True,
         "macro": True,
@@ -450,6 +510,211 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
         }
         env["timeliness"] = "END-OF-DAY"
         return env
+
+    # -- corporate actions / shares / estimates / calendars --------------
+    def _resolved(self, symbol: str) -> tuple[str | None, dict | None]:
+        """Resolve AV symbol; returns (av_symbol, error_envelope|None)."""
+        if not _api_key():
+            return None, _not_configured()
+        res = _av_symbol(symbol)
+        if "symbol" not in res:
+            return None, unavailable(
+                "alphavantage",
+                str(res.get("unresolved") or "Symbol resolution failed."),
+            )
+        return str(res["symbol"]), None
+
+    def _checked_domain(
+        self, function: str, av_symbol: str, requested: str
+    ) -> tuple[dict | None, dict | None]:
+        """Fetch + validate + mismatch-guard. Returns (payload, err_env)."""
+        from . import symbols as _sym
+
+        try:
+            payload = _av_get({"function": function, "symbol": av_symbol})
+        except Exception as exc:
+            return None, error_envelope("alphavantage", f"{function} failed: {exc}")
+        kind, message = _validate(payload, function)
+        if kind != "ok":
+            return None, _invalid_envelope(function, kind, message)
+        echoed = None
+        if isinstance(payload, dict):
+            echoed = payload.get("Symbol") or (payload.get("Meta Data") or {}).get(
+                "2. Symbol"
+            )
+        if echoed and not _sym.symbols_match(requested, str(echoed)):
+            return None, unavailable(
+                "alphavantage",
+                f"Symbol mismatch: requested '{requested}' but provider "
+                f"returned '{echoed}'. Refusing to attribute.",
+            )
+        assert isinstance(payload, dict)
+        return payload, None
+
+    def get_dividends(self, symbol: str) -> dict:
+        av_symbol, err = self._resolved(symbol)
+        if err:
+            return err
+        assert av_symbol is not None
+        payload, err = self._checked_domain("DIVIDENDS", av_symbol, symbol)
+        if err:
+            return err
+        assert payload is not None
+        rows = [
+            {
+                "date": (d or {}).get("ex_dividend_date") or (d or {}).get("date"),
+                "amount": (d or {}).get("amount"),
+                "currency": (d or {}).get("currency") or payload.get("currency"),
+            }
+            for d in (payload.get("data") or [])
+            if isinstance(d, dict)
+        ]
+        env = live_envelope(
+            "alphavantage",
+            {"symbol": (symbol or "").strip().upper(), "dividends": rows},
+            delayed=True,
+        )
+        env["timeliness"] = "END-OF-DAY"
+        return env
+
+    def get_splits(self, symbol: str) -> dict:
+        av_symbol, err = self._resolved(symbol)
+        if err:
+            return err
+        assert av_symbol is not None
+        payload, err = self._checked_domain("SPLITS", av_symbol, symbol)
+        if err:
+            return err
+        assert payload is not None
+        rows = [
+            {
+                "date": (s or {}).get("effective_date") or (s or {}).get("date"),
+                "numerator": (s or {}).get("split_from") or (s or {}).get("numerator"),
+                "denominator": (s or {}).get("split_to")
+                or (s or {}).get("denominator"),
+            }
+            for s in (payload.get("data") or [])
+            if isinstance(s, dict)
+        ]
+        env = live_envelope(
+            "alphavantage",
+            {"symbol": (symbol or "").strip().upper(), "splits": rows},
+            delayed=True,
+        )
+        env["timeliness"] = "END-OF-DAY"
+        return env
+
+    def get_shares_outstanding(self, symbol: str) -> dict:
+        av_symbol, err = self._resolved(symbol)
+        if err:
+            return err
+        assert av_symbol is not None
+        payload, err = self._checked_domain("SHARES_OUTSTANDING", av_symbol, symbol)
+        if err:
+            return err
+        assert payload is not None
+        rows = [
+            {"date": (r or {}).get("date"), "shares": (r or {}).get("shares")}
+            for r in (payload.get("data") or [])
+            if isinstance(r, dict)
+        ][:8]
+        env = live_envelope(
+            "alphavantage",
+            {"symbol": (symbol or "").strip().upper(), "rows": rows},
+            delayed=True,
+        )
+        env["timeliness"] = "END-OF-DAY"
+        return env
+
+    def get_earnings_estimates(self, symbol: str) -> dict:
+        """EARNINGS_ESTIMATES. Returns estimates only as reported; when the
+        feed has nothing, UNAVAILABLE with the exact reason."""
+        av_symbol, err = self._resolved(symbol)
+        if err:
+            return err
+        assert av_symbol is not None
+        payload, err = self._checked_domain("EARNINGS_ESTIMATES", av_symbol, symbol)
+        if err:
+            return err
+        assert payload is not None
+        annual = payload.get("annualEstimates") or []
+        quarterly = payload.get("quarterlyEstimates") or []
+        if not annual and not quarterly:
+            return unavailable(
+                "alphavantage",
+                "UNAVAILABLE. Reason: Provider returned no estimate data "
+                f"for this symbol (EARNINGS_ESTIMATES empty for '{symbol}').",
+            )
+        env = live_envelope(
+            "alphavantage",
+            {
+                "symbol": (symbol or "").strip().upper(),
+                "annual": annual[:8],
+                "quarterly": quarterly[:12],
+            },
+            delayed=True,
+        )
+        env["timeliness"] = "END-OF-DAY"
+        return env
+
+    def get_estimates(self, symbol: str) -> dict:
+        if not _api_key():
+            return unavailable(
+                "estimates",
+                "Estimates provider not configured. Analyst estimates are "
+                "never synthesised by this terminal.",
+            )
+        return self.get_earnings_estimates(symbol)
+
+    def get_earnings_calendar(self, symbol: str = "") -> dict:
+        if not _api_key():
+            return _not_configured()
+        try:
+            params: dict[str, str] = {"function": "EARNINGS_CALENDAR"}
+            if symbol:
+                params["symbol"] = symbol
+            payload = _av_get(params)
+        except Exception as exc:
+            return error_envelope("alphavantage", f"EARNINGS_CALENDAR failed: {exc}")
+        kind, message = _validate(payload, "EARNINGS_CALENDAR")
+        if kind != "ok":
+            return _invalid_envelope("EARNINGS_CALENDAR", kind, message)
+        assert isinstance(payload, dict)
+        rows = payload.get("data") or []
+        env = live_envelope(
+            "alphavantage",
+            {"rows": rows[:60] if isinstance(rows, list) else rows},
+            delayed=True,
+        )
+        env["timeliness"] = "END-OF-DAY"
+        return env
+
+    def symbol_search(self, query: str) -> dict:
+        if not _api_key():
+            return _not_configured()
+        try:
+            payload = _av_get({"function": "SYMBOL_SEARCH", "keywords": query})
+        except Exception as exc:
+            return error_envelope("alphavantage", f"SYMBOL_SEARCH failed: {exc}")
+        kind, message = _validate(payload, "SYMBOL_SEARCH")
+        if kind != "ok":
+            return _invalid_envelope("SYMBOL_SEARCH", kind, message)
+        assert isinstance(payload, dict)
+        results = [
+            {
+                "symbol": m.get("1. symbol"),
+                "name": m.get("2. name"),
+                "exchange": m.get("4. region"),
+                "type": m.get("3. type"),
+                "sector": None,
+                "industry": None,
+            }
+            for m in (payload.get("bestMatches") or [])
+            if isinstance(m, dict) and m.get("1. symbol")
+        ]
+        if not results:
+            return unavailable("alphavantage", f"No symbols found for '{query}'.")
+        return live_envelope("alphavantage", {"results": results}, delayed=False)
 
 
 class NoEstimatesProvider(EstimatesProvider):

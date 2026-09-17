@@ -1,0 +1,954 @@
+"""ProviderManager: multi-provider orchestration with reconciliation.
+
+Cheap paths (quote/history/search endpoints) keep first-healthy chain
+semantics. IMPORTANT company domains fan OUT here — Yahoo, Indian API,
+Alpha Vantage and Twelve Data are queried in parallel where applicable,
+normalized into ONE internal schema, reconciled field-by-field, and
+returned with full provenance:
+
+    PRIMARY value (provider-selected) + CROSS_CHECK (every source shown)
+    + status CROSS_CHECK_OK | PROVIDER_DISCREPANCY | SINGLE_SOURCE
+
+Conflicting values are NEVER averaged and NEVER hidden.
+
+Quota discipline (free tiers, no paid subscriptions):
+- Twelve Data: dispatched only when budget_snapshot() shows room.
+- Alpha Vantage (25/day): long server TTLs + in-flight coalescing.
+- Identical concurrent requests share one upstream execution.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FuturesTimeout
+from typing import Any
+
+from services import reconcile as _rec
+from services.refresh import TTLCache
+
+QUOTE_TTL = 30.0
+PROFILE_TTL = 24 * 3600.0
+STATEMENTS_TTL = 7 * 24 * 3600.0
+VALUATION_TTL = 24 * 3600.0
+EARNINGS_TTL = 24 * 3600.0
+NEWS_TTL = 10 * 60.0
+ACTIONS_TTL = 24 * 3600.0
+
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).isoformat()
+
+
+class ProviderManager:
+    def __init__(
+        self,
+        *,
+        yahoo=None,
+        indian=None,
+        twelvedata=None,
+        alphavantage=None,
+        news_rss=None,
+        actions_yahoo=None,
+        max_workers: int = 6,
+    ):
+        self.yahoo = yahoo
+        self.indian = indian
+        self.twelvedata = twelvedata
+        self.alphavantage = alphavantage
+        self.news_rss = news_rss
+        self.actions_yahoo = actions_yahoo
+        self._pool = ThreadPoolExecutor(max_workers=max_workers)
+        self._cache = TTLCache()
+        self._inflight: dict[str, Any] = {}
+        import threading
+
+        self._lock = threading.Lock()
+
+    # -- guards ---------------------------------------------------------
+    def _td_room(self, cost: int = 2) -> tuple[bool, str]:
+        if self.twelvedata is None:
+            return False, "Twelve Data leg not wired."
+        try:
+            from providers.twelvedata import _api_key, budget_snapshot
+        except Exception:
+            return False, "Twelve Data unavailable."
+        if not _api_key():
+            return False, "TWELVE_DATA_API_KEY not configured."
+        snap = budget_snapshot()
+        if snap["per_minute_limit"] - snap["per_minute_used"] < cost:
+            return False, "Twelve Data per-minute budget exhausted."
+        if snap["daily_limit"] - snap["daily_used"] < cost:
+            return False, "Twelve Data daily budget exhausted."
+        return True, ""
+
+    def _av_ready(self) -> tuple[bool, str]:
+        if self.alphavantage is None:
+            return False, "Alpha Vantage leg not wired."
+        try:
+            from providers.fundamentals import _api_key
+        except Exception:
+            return False, "Alpha Vantage unavailable."
+        if not _api_key():
+            return False, "ALPHA_VANTAGE_API_KEY not configured."
+        return True, ""
+
+    # -- parallel fan-out with coalescing ---------------------------------
+    def _fanout(
+        self,
+        key: str,
+        ttl: float,
+        calls: list[tuple[str, Callable[[], dict]]],
+        timeout_each: float = 25.0,
+    ) -> dict[str, dict]:
+        """Run independent provider calls concurrently. Identical in-flight
+        requests share one execution (deduplication)."""
+        with self._lock:
+            fut = self._inflight.get(key)
+            if fut is None:
+                fut = self._pool.submit(self._run_calls, calls, timeout_each)
+                self._inflight[key] = fut
+                owner = True
+            else:
+                owner = False
+        try:
+            results = fut.result(timeout=timeout_each + 10)
+            if owner:
+                with self._lock:
+                    self._inflight.pop(key, None)
+            return results
+        except Exception as exc:
+            if owner:
+                with self._lock:
+                    self._inflight.pop(key, None)
+            return {
+                "_manager": {
+                    "status": "error",
+                    "source": "orchestrator",
+                    "message": f"Fan-out failed: {exc}",
+                }
+            }
+
+    def _run_calls(self, calls, timeout_each: float) -> dict[str, dict]:
+        futures = {name: self._pool.submit(fn) for name, fn in calls}
+        out: dict[str, dict] = {}
+        for name, fut in futures.items():
+            try:
+                out[name] = fut.result(timeout=timeout_each)
+            except FuturesTimeout:
+                out[name] = {
+                    "status": "error",
+                    "source": name,
+                    "message": "Provider timeout.",
+                }
+            except Exception as exc:
+                out[name] = {
+                    "status": "error",
+                    "source": name,
+                    "message": f"Leg crashed: {exc}",
+                }
+        return out
+
+    def _cached_or(self, key: str, ttl: float, compute: Callable[[], dict]) -> dict:
+        hit = self._cache.get(key)
+        if hit is not None:
+            env = dict(hit)
+            env["served_from"] = "cache"
+            return env
+        env = compute()
+        if env.get("status") in ("live", "delayed"):
+            self._cache.set(key, env, ttl)
+            env = dict(env)
+        env["served_from"] = env.get("served_from", "provider")
+        return env
+
+    # -- normalization ------------------------------------------------------
+    @staticmethod
+    def _quote_fields(symbol: str, env: dict) -> dict[str, dict]:
+        """Envelope quote dict -> normalized field dict."""
+        from providers.schema import field as _f
+
+        q = (env.get("data") or {}) if env.get("data") else {}
+        src = env.get("source", "?")
+        as_of = env.get("as_of")
+        ccy = q.get("currency")
+        return {
+            "price": _f(q.get("price"), src, as_of, None, ccy),
+            "change_pct": _f(q.get("change_pct"), src, as_of, None, None),
+            "change": _f(q.get("change"), src, as_of, None, ccy),
+            "volume": _f(q.get("volume"), src, as_of, None, None),
+            "day_high": _f(q.get("day_high"), src, as_of, None, ccy),
+            "day_low": _f(q.get("day_low"), src, as_of, None, ccy),
+            "previous_close": _f(q.get("previous_close"), src, as_of, None, ccy),
+            "fifty_two_week_high": _f(
+                q.get("fifty_two_week_high"), src, as_of, None, ccy
+            ),
+            "fifty_two_week_low": _f(
+                q.get("fifty_two_week_low"), src, as_of, None, ccy
+            ),
+        }
+
+    # -- domains --------------------------------------------------------------
+    def get_quote(self, symbol: str) -> dict:
+        """Multi-source quote: Yahoo + Indian (Indian symbols) + Twelve
+        Data (key + budget). Primary by Yahoo > indian > twelvedata."""
+        from providers.indian import is_indian
+
+        symbol = (symbol or "").strip().upper()
+        key = f"oq:{symbol}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            if self.yahoo is not None:
+                calls.append(("yahoo", lambda: self.yahoo.get_quote(symbol)))
+            else:
+                skipped.append({"provider": "yahoo", "reason": "Leg not wired."})
+            if self.indian is not None and is_indian(symbol):
+                calls.append(("indian-api", lambda: self.indian.get_quote(symbol)))
+            else:
+                skipped.append(
+                    {
+                        "provider": "indian-api",
+                        "reason": "Leg not wired."
+                        if self.indian is None
+                        else "Non-Indian symbol.",
+                    }
+                )
+            ok, reason = self._td_room(1)
+            if ok and self.twelvedata is not None:
+                calls.append(("twelvedata", lambda: self.twelvedata.get_quote(symbol)))
+            else:
+                skipped.append(
+                    {"provider": "twelvedata", "reason": reason or "Leg not wired."}
+                )
+            results = self._fanout(key + ":fan", QUOTE_TTL, calls)
+            order = ["yahoo", "indian-api", "twelvedata", "alphavantage"]
+            live = [
+                (n, e)
+                for n in order
+                for (nn, e) in [(n, results.get(n))]
+                if e is not None
+                and isinstance(e, dict)
+                and e.get("status") in ("live", "delayed")
+                and (e.get("data") or {}).get("price") is not None
+            ]
+            if not live:
+                first = next((results.get(n) for n in order if results.get(n)), None)
+                env = dict(
+                    first
+                    or {
+                        "status": "unavailable",
+                        "source": "orchestrator",
+                        "message": "No quote provider answered.",
+                    }
+                )
+                env["providers_queried"] = _queried(results)
+                return env
+            primary_name, primary_env = live[0]
+            fields = {n: self._quote_fields(symbol, e) for n, e in live}
+            comparisons = []
+            for fname in ("price", "change_pct", "volume"):
+                comparisons.append(
+                    _rec.compare(
+                        fname,
+                        fields[primary_name][fname],
+                        [fields[n][fname] for n, _ in live[1:]],
+                    )
+                )
+            summary = _rec.summarize(comparisons)
+            env = dict(primary_env)
+            env["source"] = primary_env.get("source")
+            env["providers_queried"] = _queried(results)
+            env["reconciliation"] = {
+                "comparisons": comparisons,
+                "summary": summary,
+                "primary": primary_name,
+                "skipped": skipped,
+            }
+            return env
+
+        return self._cached_or(key, QUOTE_TTL, compute)
+
+    def get_profile(self, symbol: str, quote_env: dict | None = None) -> dict:
+        """Company overview: AV overview + TD statistics + quote identity."""
+        symbol = (symbol or "").strip().upper()
+        key = f"opro:{symbol}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(
+                    ("alphavantage", lambda: self.alphavantage.get_ratios(symbol))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "alphavantage",
+                        "reason": av_reason or "Leg not wired.",
+                    }
+                )
+            td_ok, td_reason = self._td_room(2)
+            if td_ok and self.twelvedata is not None:
+                calls.append(
+                    ("twelvedata", lambda: self.twelvedata.get_statistics(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
+                )
+            results = self._fanout(key + ":fan", PROFILE_TTL, calls)
+            av = results.get("alphavantage", {})
+            td = results.get("twelvedata", {})
+            av_d = av.get("data") if _ok(av) else {}
+            td_d = td.get("data") if _ok(td) else {}
+            q = (
+                (quote_env.get("data") or {})
+                if quote_env and quote_env.get("data")
+                else {}
+            )
+            as_of = (
+                av.get("as_of")
+                if _ok(av)
+                else (td.get("as_of") if _ok(td) else (quote_env or {}).get("as_of"))
+            )
+            from providers.schema import field as _f
+
+            def avf(k, period=None, ccy=None):
+                return _f(
+                    (av_d or {}).get(k),
+                    "alphavantage",
+                    av.get("as_of"),
+                    period,
+                    ccy or (av_d or {}).get("Currency"),
+                )
+
+            merged = {
+                "symbol": symbol,
+                "name": (av_d or {}).get("Name") or q.get("name"),
+                "exchange": (av_d or {}).get("Exchange") or q.get("exchange"),
+                "currency": (av_d or {}).get("Currency") or q.get("currency"),
+                "instrument_type": q.get("instrument_type"),
+                "timezone": q.get("timezone"),
+                "sector": (av_d or {}).get("Sector"),
+                "industry": (av_d or {}).get("Industry"),
+                "description": (av_d or {}).get("Description"),
+                "profile_note": (
+                    "Identity from quote chain; sector/industry/description "
+                    "from Alpha Vantage overview where a key is configured."
+                ),
+            }
+            comparisons = []
+            pairs = [
+                (
+                    "market_cap",
+                    avf("MarketCapitalization"),
+                    (td_d or {}).get("market_cap"),
+                ),
+                ("pe", avf("PERatio"), (td_d or {}).get("pe")),
+                ("pb", avf("PriceToBookRatio"), (td_d or {}).get("pb")),
+                ("eps", avf("EPS"), (td_d or {}).get("eps")),
+                (
+                    "dividend_yield",
+                    avf("DividendYield"),
+                    (td_d or {}).get("dividend_yield"),
+                ),
+                ("beta", avf("Beta"), (td_d or {}).get("beta")),
+            ]
+            for fname, a, t in pairs:
+                others = (
+                    [t] if isinstance(t, dict) and t.get("value") is not None else []
+                )
+                comparisons.append(_rec.compare(fname, a, others))
+            summary = _rec.summarize(comparisons)
+            has_any = bool(av_d or td_d or q)
+            status = "live" if has_any else "unavailable"
+            return {
+                "status": status,
+                "source": "orchestrator",
+                "as_of": as_of,
+                "timeliness": "DELAYED",
+                "data": merged if has_any else None,
+                "message": None
+                if has_any
+                else ("No profile provider answered: " + "; ".join(_queried(results))),
+                "providers_queried": _queried(results),
+                "reconciliation": {
+                    "comparisons": comparisons,
+                    "summary": summary,
+                    "primary": "alphavantage",
+                    "skipped": skipped,
+                },
+            }
+
+        return self._cached_or(key, PROFILE_TTL, compute)
+
+    def get_statements(
+        self, symbol: str, statement: str = "income", period: str = "annual"
+    ) -> dict:
+        """Statements from AV + TD in parallel; common lines reconciled."""
+        symbol = (symbol or "").strip().upper()
+        key = f"ost:{symbol}:{statement}:{period}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(
+                    (
+                        "alphavantage",
+                        lambda: self.alphavantage.get_financial_statements(
+                            symbol, statement, period
+                        ),
+                    )
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "alphavantage",
+                        "reason": av_reason or "Leg not wired.",
+                    }
+                )
+            td_ok, td_reason = self._td_room(100)
+            if td_ok and self.twelvedata is not None:
+                calls.append(
+                    (
+                        "twelvedata",
+                        lambda: self.twelvedata.get_statement_td(
+                            symbol, statement, period
+                        ),
+                    )
+                )
+            else:
+                skipped.append(
+                    {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
+                )
+            results = self._fanout(key + ":fan", STATEMENTS_TTL, calls)
+            av = results.get("alphavantage", {})
+            td = results.get("twelvedata", {})
+            av_live = _ok(av) and av.get("data")
+            td_live = _ok(td) and td.get("data")
+            if not av_live and not td_live:
+                first = next(
+                    (
+                        results.get(n)
+                        for n in ("alphavantage", "twelvedata")
+                        if results.get(n)
+                    ),
+                    None,
+                )
+                env = dict(first or {"status": "unavailable", "source": "orchestrator"})
+                env["providers_queried"] = _queried(results)
+                return env
+            primary = av if av_live else td
+            data = dict(primary.get("data") or {})
+            comparisons = _reconcile_statements(
+                statement,
+                (av.get("data") or {}) if av_live else None,
+                (td.get("data") or {}) if td_live else None,
+            )
+            env = {
+                "status": "live",
+                "source": primary.get("source"),
+                "as_of": primary.get("as_of"),
+                "timeliness": "END-OF-DAY",
+                "data": data,
+                "providers_queried": _queried(results),
+                "reconciliation": {
+                    "comparisons": comparisons,
+                    "summary": _rec.summarize(comparisons),
+                    "primary": primary.get("source"),
+                    "skipped": skipped,
+                },
+                "message": None,
+            }
+            if td_live and av_live:
+                env["td_reports"] = (td.get("data") or {}).get("reports")
+            elif td_live:
+                data.update(
+                    {
+                        "symbol": symbol,
+                        "statement": statement,
+                        "period": period,
+                        "currency": (td.get("data") or {}).get("currency"),
+                        "reports": (td.get("data") or {}).get("reports"),
+                    }
+                )
+            return env
+
+        return self._cached_or(key, STATEMENTS_TTL, compute)
+
+    def get_valuation(self, symbol: str, quote_env: dict | None = None) -> dict:
+        """Valuation metrics: AV overview + TD statistics, reconciled."""
+        symbol = (symbol or "").strip().upper()
+        key = f"oval:{symbol}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(
+                    ("alphavantage", lambda: self.alphavantage.get_ratios(symbol))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "alphavantage",
+                        "reason": av_reason or "Leg not wired.",
+                    }
+                )
+            td_ok, td_reason = self._td_room(2)
+            if td_ok and self.twelvedata is not None:
+                calls.append(
+                    ("twelvedata", lambda: self.twelvedata.get_statistics(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
+                )
+            results = self._fanout(key + ":fan", VALUATION_TTL, calls)
+            av = results.get("alphavantage", {})
+            td = results.get("twelvedata", {})
+            av_d = av.get("data") if _ok(av) else {}
+            td_d = td.get("data") if _ok(td) else {}
+            if not av_d and not td_d:
+                return {
+                    "status": "unavailable",
+                    "source": "orchestrator",
+                    "as_of": None,
+                    "data": None,
+                    "message": "Valuation needs ALPHA_VANTAGE_API_KEY and/or "
+                    "TWELVE_DATA_API_KEY. " + "; ".join(_queried(results)),
+                    "providers_queried": _queried(results),
+                }
+            from providers.schema import field as _f
+
+            metrics: dict[str, dict] = {}
+            comparisons = []
+            amap = [
+                ("pe", "PERatio"),
+                ("pb", "PriceToBookRatio"),
+                ("eps", "EPS"),
+                ("dividend_yield", "DividendYield"),
+                ("market_cap", "MarketCapitalization"),
+                ("beta", "Beta"),
+                ("week_52_high", "52WeekHigh"),
+                ("week_52_low", "52WeekLow"),
+            ]
+            for fname, akey in amap:
+                a = _f(
+                    (av_d or {}).get(akey),
+                    "alphavantage",
+                    av.get("as_of"),
+                    "TTM",
+                    (av_d or {}).get("Currency"),
+                )
+                t = (td_d or {}).get(fname)
+                others = (
+                    [t] if isinstance(t, dict) and t.get("value") is not None else []
+                )
+                c = _rec.compare(fname, a, others)
+                comparisons.append(c)
+                metrics[fname] = {
+                    "value": a.get("value"),
+                    "kind": "REPORTED",
+                    "primary_source": "alphavantage",
+                    "cross_check": c["cross_check"],
+                    "status": c["status"],
+                }
+            q = (
+                (quote_env.get("data") or {})
+                if quote_env and quote_env.get("data")
+                else {}
+            )
+            from providers.schema import num as _snum
+
+            eps_v = _snum((av_d or {}).get("EPS"))
+            px = _snum(q.get("price"))
+            if eps_v and eps_v > 0 and px:
+                metrics["pe_calc"] = {
+                    "value": round(px / eps_v, 2),
+                    "kind": "CALCULATED",
+                    "formula": f"price ÷ reported EPS ({q.get('price')} ÷ "
+                    f"{(av_d or {}).get('EPS')})",
+                    "inputs": {
+                        "price": {
+                            "value": q.get("price"),
+                            "source": q.get("source", "quote"),
+                        },
+                        "eps": {
+                            "value": (av_d or {}).get("EPS"),
+                            "source": "alphavantage",
+                        },
+                    },
+                    "status": "CALCULATED",
+                }
+            return {
+                "status": "live",
+                "source": "orchestrator",
+                "as_of": av.get("as_of") or td.get("as_of"),
+                "timeliness": "DELAYED",
+                "data": {
+                    "symbol": symbol,
+                    "metrics": metrics,
+                    "overview": av_d or None,
+                },
+                "providers_queried": _queried(results),
+                "reconciliation": {
+                    "comparisons": comparisons,
+                    "summary": _rec.summarize(comparisons),
+                    "primary": "alphavantage",
+                    "skipped": skipped,
+                },
+                "message": None,
+            }
+
+        return self._cached_or(key, VALUATION_TTL, compute)
+
+    def get_earnings(self, symbol: str) -> dict:
+        """AV earnings + TD earnings rows, reported-EPS cross-check."""
+        symbol = (symbol or "").strip().upper()
+        key = f"oearn:{symbol}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(
+                    ("alphavantage", lambda: self.alphavantage.get_earnings(symbol))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "alphavantage",
+                        "reason": av_reason or "Leg not wired.",
+                    }
+                )
+            td_ok, td_reason = self._td_room(2)
+            if td_ok and self.twelvedata is not None:
+                calls.append(
+                    ("twelvedata", lambda: self.twelvedata.get_earnings_td(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
+                )
+            results = self._fanout(key + ":fan", EARNINGS_TTL, calls)
+            av = results.get("alphavantage", {})
+            td = results.get("twelvedata", {})
+            av_d = av.get("data") if _ok(av) else {}
+            td_rows = ((td.get("data") or {}).get("rows") if _ok(td) else []) or []
+            if not av_d and not td_rows:
+                first = next(
+                    (
+                        results.get(n)
+                        for n in ("alphavantage", "twelvedata")
+                        if results.get(n)
+                    ),
+                    None,
+                )
+                env = dict(first or {"status": "unavailable", "source": "orchestrator"})
+                env["providers_queried"] = _queried(results)
+                return env
+            from providers.schema import field as _f
+
+            comparisons = []
+            if av_d:
+                by_date = {}
+                for r in td_rows:
+                    by_date[str(r.get("date") or "")] = r
+                for row in (av_d.get("quarterly") or [])[:8]:
+                    d = str(row.get("fiscalDateEnding") or "")
+                    match = by_date.get(d)
+                    if match is None:
+                        continue
+                    comparisons.append(
+                        _rec.compare(
+                            f"reported EPS {d}",
+                            _f(
+                                row.get("reportedEPS"),
+                                "alphavantage",
+                                av.get("as_of"),
+                                d,
+                            ),
+                            [
+                                _f(
+                                    match.get("reported_eps"),
+                                    "twelvedata",
+                                    td.get("as_of"),
+                                    d,
+                                )
+                            ],
+                        )
+                    )
+            data = (
+                dict(av_d)
+                if av_d
+                else {
+                    "symbol": symbol,
+                    "annual": [],
+                    "quarterly": [],
+                    "note": "Alpha Vantage unavailable; Twelve Data rows below.",
+                }
+            )
+            if td_rows:
+                data["twelvedata_rows"] = td_rows
+            return {
+                "status": "live",
+                "source": "orchestrator",
+                "as_of": av.get("as_of") or td.get("as_of"),
+                "timeliness": "END-OF-DAY",
+                "data": data,
+                "providers_queried": _queried(results),
+                "reconciliation": {
+                    "comparisons": comparisons,
+                    "summary": _rec.summarize(comparisons),
+                    "primary": "alphavantage",
+                    "skipped": skipped,
+                },
+                "message": None,
+            }
+
+        return self._cached_or(key, EARNINGS_TTL, compute)
+
+    def get_news(
+        self,
+        symbol: str | None = None,
+        topic: str | None = None,
+        limit: int = 20,
+    ) -> dict:
+        """Yahoo RSS + AV sentiment merged, deduplicated by URL."""
+        key = f"onews:{symbol or ''}:{topic or ''}:{limit}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            if self.news_rss is not None:
+                calls.append(
+                    ("yahoo-rss", lambda: self.news_rss.get_news(symbol, topic, limit))
+                )
+            else:
+                skipped.append({"provider": "yahoo-rss", "reason": "Leg not wired."})
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(
+                    (
+                        "alphavantage",
+                        lambda: self.alphavantage.get_av_news(
+                            symbol or "", topic or "", limit
+                        ),
+                    )
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "alphavantage",
+                        "reason": av_reason or "Leg not wired.",
+                    }
+                )
+            results = self._fanout(key + ":fan", NEWS_TTL, calls)
+            seen: set[str] = set()
+            items: list[dict] = []
+            for name in ("yahoo-rss", "alphavantage"):
+                env = results.get(name, {})
+                if env.get("status") != "live":
+                    continue
+                for it in (env.get("data") or {}).get("items") or []:
+                    url = str(it.get("url") or "")
+                    if not url or url in seen:
+                        continue
+                    seen.add(url)
+                    items.append({**it, "via": name})
+            if not items:
+                first = next(
+                    (
+                        results.get(n)
+                        for n in ("yahoo-rss", "alphavantage")
+                        if results.get(n)
+                    ),
+                    None,
+                )
+                env = dict(first or {"status": "unavailable", "source": "orchestrator"})
+                env["providers_queried"] = _queried(results)
+                env["reconciliation"] = {"skipped": skipped}
+                return env
+            return {
+                "status": "live",
+                "source": "orchestrator",
+                "as_of": _now_iso(),
+                "timeliness": "DELAYED",
+                "data": {"items": items[:limit]},
+                "providers_queried": _queried(results),
+                "reconciliation": {"skipped": skipped},
+                "message": None,
+            }
+
+        return self._cached_or(key, NEWS_TTL, compute)
+
+    def get_actions(self, symbol: str) -> dict:
+        """Yahoo events + AV + TD actions, every row source-tagged."""
+        symbol = (symbol or "").strip().upper()
+        key = f"oact:{symbol}"
+
+        def compute() -> dict:
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            if self.actions_yahoo is not None:
+                calls.append(
+                    (
+                        "yahoo-events",
+                        lambda: self.actions_yahoo.get_corporate_actions(symbol),
+                    )
+                )
+            else:
+                skipped.append({"provider": "yahoo-events", "reason": "Leg not wired."})
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(
+                    (
+                        "alphavantage-div",
+                        lambda: self.alphavantage.get_dividends(symbol),
+                    )
+                )
+                calls.append(
+                    ("alphavantage-split", lambda: self.alphavantage.get_splits(symbol))
+                )
+            else:
+                skipped.append(
+                    {
+                        "provider": "alphavantage",
+                        "reason": av_reason or "Leg not wired.",
+                    }
+                )
+            td_ok, td_reason = self._td_room(4)
+            if td_ok and self.twelvedata is not None:
+                calls.append(
+                    ("twelvedata", lambda: self.twelvedata.get_actions_td(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
+                )
+            results = self._fanout(key + ":fan", ACTIONS_TTL, calls)
+            dividends: list[dict] = []
+            splits: list[dict] = []
+            ye = results.get("yahoo-events", {})
+            if _ok(ye):
+                dividends += [
+                    {**d, "source": "yahoo-events"}
+                    for d in (ye["data"].get("dividends") or [])
+                ]
+                splits += [
+                    {**s, "source": "yahoo-events"}
+                    for s in (ye["data"].get("splits") or [])
+                ]
+            for name in ("alphavantage-div", "alphavantage-split"):
+                env = results.get(name, {})
+                if _ok(env):
+                    rows = (
+                        env["data"].get("dividends") or env["data"].get("splits") or []
+                    )
+                    for row in rows:
+                        tagged = {**row, "source": "alphavantage"}
+                        (dividends if "div" in name else splits).append(tagged)
+            tde = results.get("twelvedata", {})
+            if _ok(tde):
+                dividends += tde["data"].get("dividends", [])
+                splits += tde["data"].get("splits", [])
+            if not dividends and not splits:
+                return {
+                    "status": "unavailable",
+                    "source": "orchestrator",
+                    "as_of": None,
+                    "data": None,
+                    "message": "No corporate actions from any provider: "
+                    + "; ".join(_queried(results)),
+                    "providers_queried": _queried(results),
+                    "reconciliation": {"skipped": skipped},
+                }
+            dividends.sort(key=lambda d: str(d.get("date") or ""), reverse=True)
+            splits.sort(key=lambda s: str(s.get("date") or ""), reverse=True)
+            return {
+                "status": "live",
+                "source": "orchestrator",
+                "as_of": _now_iso(),
+                "timeliness": "END-OF-DAY",
+                "data": {
+                    "symbol": symbol,
+                    "dividends": dividends[:40],
+                    "splits": splits[:40],
+                    "note": "Every row carries its source. Nothing "
+                    "inferred from price moves.",
+                },
+                "providers_queried": _queried(results),
+                "reconciliation": {"skipped": skipped},
+                "message": None,
+            }
+
+        return self._cached_or(key, ACTIONS_TTL, compute)
+
+
+def _ok(env: dict) -> bool:
+    """A leg answered with usable data (live OR delayed)."""
+    return (
+        isinstance(env, dict)
+        and env.get("status") in ("live", "delayed")
+        and env.get("data") is not None
+    )
+
+
+def _queried(results: dict[str, dict]) -> list[str]:
+    out = []
+    for name, env in results.items():
+        if not isinstance(env, dict):
+            continue
+        out.append(f"{name}:{env.get('status', '?')}")
+    return out
+
+
+def _reconcile_statements(
+    statement: str, av_data: dict | None, td_data: dict | None
+) -> list[dict]:
+    """Reconcile headline lines (revenue, net income) matched by period."""
+    from providers.schema import field as _f
+
+    if not av_data or not td_data:
+        return []
+    aliases = {
+        "revenue": (
+            ["totalRevenue", "total_revenue", "revenue", "revenues", "sales"],
+            ["totalRevenue", "revenue", "revenues", "sales", "total_revenues"],
+        ),
+        "net_income": (
+            ["netIncome", "net_income", "netEarnings"],
+            ["netIncome", "net_income", "netEarnings", "net_earnings"],
+        ),
+    }
+    av_reports = av_data.get("reports") or []
+    td_reports = td_data.get("reports") or []
+    if not av_reports or not td_reports:
+        return []
+    av0, td0 = av_reports[0], td_reports[0]
+    av_end = str(av0.get("fiscalDateEnding") or av0.get("date") or "")
+    td_end = str(td0.get("fiscalDateEnding") or td0.get("date") or "")
+    av_ccy = av_data.get("currency")
+    td_ccy = td_data.get("currency")
+    comparisons = []
+    for label, (av_keys, td_keys) in aliases.items():
+        av_v = next((av0.get(k) for k in av_keys if av0.get(k) is not None), None)
+        td_v = next((td0.get(k) for k in td_keys if td0.get(k) is not None), None)
+        comparisons.append(
+            _rec.compare(
+                f"{statement} {label}",
+                _f(av_v, "alphavantage", None, av_end, av_ccy),
+                [_f(td_v, "twelvedata", None, td_end, td_ccy)],
+            )
+        )
+    return comparisons

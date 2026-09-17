@@ -106,7 +106,8 @@
   }
   function newsItem(n) {
     return '<div class="news-item"><a href="' + F.esc(n.url) + '" target="_blank" rel="noopener">' +
-      F.esc(n.title) + "</a><div class='meta'>" + F.esc(n.source || "") + " · " + F.esc(n.published_at || "") + "</div></div>";
+      F.esc(n.title) + "</a><div class='meta'>" + F.esc(n.source || "") + " · " + F.esc(n.published_at || "") +
+      (n.via ? " · via " + F.esc(n.via) : "") + (n.sentiment ? " · " + F.esc(n.sentiment) : "") + "</div></div>";
   }
 
   /* ---------- markets ---------- */
@@ -215,7 +216,7 @@
     view().innerHTML = "<div id='co-head' class='card'>" + skel(3) + "</div>" +
       "<div class='tabs' id='co-tabs'>" + CTABS.map(function (t) {
         return "<button data-t='" + t + "' class='" + (t === tab ? "on" : "") + "'>" + t + "</button>";
-      }).join("") + "</div><div id='co-body'></div>";
+      }).join("") + "</div><div id='co-body'></div><div id='co-quality' style='margin-top:12px'></div>";
     Array.prototype.forEach.call(document.querySelectorAll("#co-tabs button"), function (b) {
       b.onclick = function () { location.hash = "#/company/" + encodeURIComponent(sym) + "/" + b.getAttribute("data-t"); };
     });
@@ -224,6 +225,7 @@
         if (!el("co-head")) return;
         renderHead(sym, rc.body, rq.body);
         renderTab(sym, tab);
+        loadQuality(sym);
         // Free-automatic mode: browser polls every 10s; the backend
         // serves cache unless an upstream refresh is allowed.
         every(10000, function () {
@@ -234,6 +236,29 @@
         });
       });
     });
+    function loadQuality(sym) {
+      API.get("quality", { symbol: sym }).then(function (r) {
+        if (!el("co-quality")) return;
+        var b = r.body || {}, rows = b.providers || [], q = b.quote || {};
+        var sum = (q.reconciliation || {});
+        function dot(st) {
+          return st === "connected" ? "● " : (st === "cooling" ? "◐ " : "○ ");
+        }
+        el("co-quality").innerHTML = "<div class='card'><h3>Data Quality / Sources</h3>" +
+          "<div class='grid g3'>" + rows.map(function (p) {
+            var last = p.last_ok ? new Date(p.last_ok * 1000).toISOString().slice(11, 19) + "Z" :
+              (p.last_error ? "err: " + F.esc(String(p.last_error).slice(0, 80)) : "—");
+            return "<div><b>" + dot(p.state) + F.esc(p.label) + "</b><div class='src'>Last response: " + last +
+              (p.last_latency_ms !== null && p.last_latency_ms !== undefined ? " · " + p.last_latency_ms + " ms" : "") + "</div></div>";
+          }).join("") + "</div>" +
+          "<div class='src' style='margin-top:8px'>Quote: " + F.esc(q.quote_source || "?") + " · " +
+          F.esc(q.quote_status || "?") + "/" + F.esc(q.quote_timeliness || "?") +
+          " · Fields cross-checked: " + (sum.fields_compared === undefined ? "—" : sum.fields_compared) +
+          " · Provider discrepancies: " + (sum.discrepancies === undefined ? "—" : sum.discrepancies) +
+          ((sum.discrepancy_fields || []).length ? " (" + F.esc(sum.discrepancy_fields.join(", ")) + ")" : "") +
+          "</div></div>";
+      });
+    }
     function patchHead(qenv) {
       var q = (qenv && qenv.data) || {};
       if (!q.price && q.price !== 0) return;
@@ -309,7 +334,7 @@
   function tOverview(sym, b) {
     b.innerHTML = "<div class='grid g2'><div class='card' id='ov-q'>" + skel(6) + "</div>" +
       "<div class='card' id='ov-r'>" + skel(6) + "</div></div><div id='ov-brief'></div>";
-    var quote = null, history = null, ratios = null, settled = 0;
+    var quote = null, history = null, ratios = null, recon = null, settled = 0;
     API.get("quote", { symbol: sym }).then(function (r) {
       var q = r.body && r.body.data;
       quote = q;
@@ -324,6 +349,7 @@
     });
     API.get("ratios", { symbol: sym }).then(function (r) {
       ratios = (r.body && r.body.data) || null;
+      recon = (r.body && r.body.reconciliation) || null;
       el("ov-r").innerHTML = "<h3>Key metrics " + F.statusPill(r.body.status) + "</h3>" + (ratios ?
         "<dl class='kv'>" + ["MarketCapitalization", "PERatio", "PriceToBookRatio", "EVToEBITDA",
           "DividendYield", "EPS", "ProfitMargin", "ROE", "Beta"].map(function (k) {
@@ -340,7 +366,7 @@
       if (++settled < 3) return;
       if (el("ov-brief").getAttribute("data-done")) return;
       el("ov-brief").setAttribute("data-done", "1");
-      var brief = window.FT_ANALYSIS.brief(sym, quote, history, ratios);
+      var brief = window.FT_ANALYSIS.brief(sym, quote, history, ratios, recon);
       window.FT_ANALYSIS.renderBrief(el("ov-brief"), brief);
     }
   }
@@ -391,7 +417,7 @@
             "</td><td>" + tag + "</td></tr>";
         }
         el("v-out").innerHTML = "<h3>Valuation " + F.statusPill(rr.body.status) + "</h3>" +
-          "<div class='src'>provider values: REPORTED · nothing calculated here · period: TTM unless labeled</div>" +
+          "<div class='src'>provider values: REPORTED · calculated rows: CALCULATED with formula + inputs · period: TTM unless labeled</div>" +
           '<table class="t"><tr><th>Metric</th><th class="num">Value</th><th>Kind</th></tr>' +
           row("Price", q && q.price !== undefined ? F.fmtNum(q.price) + " " + (q.currency || "") : "—", F.statusPill("delayed")) +
           row("Market cap", r.MarketCapitalization, "REPORTED") +
@@ -402,16 +428,69 @@
           row("EV/EBITDA", r.EVToEBITDA, "REPORTED") +
           row("PEG", r.PEGRatio, "REPORTED") +
           row("Dividend yield", r.DividendYield, "REPORTED") +
+          calcPeRow() +
           "</table>" + srcLine(rr.body) +
-          "<div class='src'>forward P/E shown only when the feed returns it — never estimated in-terminal.</div>";
+          "<div class='src'>forward P/E shown only when the feed returns it — never estimated in-terminal.</div>" +
+          reconHtml(rr.body);
+        function reconHtml(env) {
+          var rec = env.reconciliation;
+          if (!rec || !rec.comparisons || !rec.comparisons.length) return "";
+          function pill(st) {
+            return F.statusPill(st === "CROSS_CHECK_OK" ? "CALCULATED" :
+              (st === "PROVIDER_DISCREPANCY" ? "UNAVAILABLE" : "STALE"));
+          }
+          return "<h3 style='margin-top:10px'>Cross-check (Alpha Vantage × Twelve Data)</h3>" +
+            "<table class='t'><tr><th>Field</th><th>Primary</th><th>Other source</th><th>Status</th></tr>" +
+            rec.comparisons.map(function (c) {
+              var other = (c.cross_check || []).map(function (o) {
+                return F.esc(o.source) + ": " + F.esc(o.value === null || o.value === undefined ? "—" : o.value) +
+                  (o.difference_pct !== null && o.difference_pct !== undefined ? " (" + o.difference_pct.toFixed(2) + "%)" : "") +
+                  (o.reason ? " [" + F.esc(o.reason) + "]" : "");
+              }).join("<br>") || "—";
+              return "<tr><td>" + F.esc(c.field) + "</td><td class='num'>" +
+                F.esc(c.primary.value === null || c.primary.value === undefined ? "—" : c.primary.value) +
+                " <span class='sect-tag'>" + F.esc(c.primary.source) + "</span></td><td>" + other +
+                "</td><td>" + pill(c.status) + "<div class='src'>" + F.esc(c.status) + "</div></td></tr>";
+            }).join("") + "</table>" +
+            "<div class='src'>" + F.esc(rec.summary ? (rec.summary.cross_check_ok + " agree · " + rec.summary.discrepancies + " disagree · " + rec.summary.single_source + " single-source") : "") + "</div>";
+        }
+        function calcPeRow() {
+          var eps = (r.EPS && r.EPS !== "None" && r.EPS !== "-") ? Number(r.EPS) : null;
+          var px = q && q.price !== undefined ? Number(q.price) : null;
+          if (eps === null || isNaN(eps) || eps <= 0 || px === null || isNaN(px)) return "";
+          return "<tr><td>P/E (calc: price ÷ reported EPS " + F.esc(String(r.EPS)) + ")</td><td class='num'>" +
+            (px / eps).toFixed(2) + "</td><td>CALCULATED</td></tr>";
+        }
       });
     });
   }
   function tEstimates(sym, b) {
     b.innerHTML = "<div class='card' id='e-out'>" + skel(3) + "</div>";
     API.get("estimates", { symbol: sym }).then(function (r) {
-      el("e-out").innerHTML = "<h3>Analyst estimates " + F.statusPill(r.body.status) + "</h3>" +
-        unavail((r.body && r.body.message) || "Estimates unavailable.") + srcLine(r.body);
+      if (!el("e-out")) return;
+      var d = r.body && r.body.data;
+      if (!d) {
+        el("e-out").innerHTML = "<h3>Analyst estimates " + F.statusPill(r.body.status) + "</h3>" +
+          unavail((r.body && r.body.message) || "Estimates unavailable.") + srcLine(r.body);
+        return;
+      }
+      function estRows(list) {
+        return (list || []).map(function (x) {
+          return "<tr><td>" + F.esc(x.fiscalDateEnding || x.horizon || "—") + "</td>" +
+            "<td class='num'>" + F.esc(x.epsAvgEstimate !== undefined ? x.epsAvgEstimate : (x.eps !== undefined ? x.eps : "—")) + "</td>" +
+            "<td class='num'>" + F.esc(x.revenueAvgEstimate !== undefined ? x.revenueAvgEstimate : (x.revenue !== undefined ? x.revenue : "—")) + "</td>" +
+            "<td class='num'>" + F.esc(x.numAnalysts !== undefined ? x.numAnalysts : "—") + "</td></tr>";
+        }).join("");
+      }
+      el("e-out").innerHTML = "<h3>Analyst estimates · " + F.esc(sym) + " " + F.statusPill(r.body.status) + "</h3>" +
+        "<div class='src'>REPORTED estimates only (Alpha Vantage EARNINGS_ESTIMATES). Nothing synthesised; empty feed means UNAVAILABLE, not zero.</div>" +
+        "<h2>Annual</h2>" +
+        ((d.annual && d.annual.length) ? '<table class="t"><tr><th>Period</th><th class="num">EPS est</th><th class="num">Revenue est</th><th class="num"># analysts</th></tr>' + estRows(d.annual) + "</table>"
+          : unavail("No annual estimate rows reported.")) +
+        "<h2>Quarterly</h2>" +
+        ((d.quarterly && d.quarterly.length) ? '<table class="t"><tr><th>Period</th><th class="num">EPS est</th><th class="num">Revenue est</th><th class="num"># analysts</th></tr>' + estRows(d.quarterly) + "</table>"
+          : unavail("No quarterly estimate rows reported.")) +
+        srcLine(r.body);
     });
   }
   function tEarnings(sym, b) {
@@ -452,28 +531,61 @@
   function tActions(sym, b) {
     b.innerHTML = "<div class='card' id='a-out'>" + skel(4) + "</div>";
     API.get("actions", { symbol: sym }).then(function (r) {
+      if (!el("a-out")) return;
       var d = r.body && r.body.data;
       if (!d) { el("a-out").innerHTML = "<h3>Corporate actions</h3>" + unavail((r.body && r.body.message) || "Unavailable.") + srcLine(r.body); return; }
+      function shownDate(x) {
+        if (typeof x === "number") return F.fmtDate(x);
+        return F.esc(x || "—");
+      }
+      function divRows(list) {
+        return list.slice(0, 20).map(function (x) {
+          return "<tr><td>" + shownDate(x.date) + "</td><td class='num'>" + F.fmtNum(x.amount, 4) + " " + F.esc(x.currency || "") +
+            "</td><td><span class='sect-tag'>" + F.esc(x.source || "?") + "</span></td></tr>";
+        }).join("");
+      }
+      function splitRows(list) {
+        return list.map(function (x) {
+          return "<tr><td>" + shownDate(x.date) + "</td><td class='num'>" + F.esc(x.numerator + ":" + x.denominator) +
+            "</td><td><span class='sect-tag'>" + F.esc(x.source || "?") + "</span></td></tr>";
+        }).join("");
+      }
       el("a-out").innerHTML = "<h3>Corporate actions " + F.statusPill(r.body.status) + "</h3>" +
         "<h2>Dividends (" + d.dividends.length + ")</h2>" +
-        (d.dividends.length ? '<table class="t"><tr><th>Date</th><th class="num">Amount</th></tr>' +
-          d.dividends.slice(0, 20).map(function (x) {
-            return "<tr><td>" + F.fmtDate(x.date) + "</td><td class='num'>" + F.fmtNum(x.amount, 4) + " " + F.esc(x.currency || "") + "</td></tr>";
-          }).join("") + "</table>" : unavail("No dividends in the last 2 years.")) +
+        (d.dividends.length ? '<table class="t"><tr><th>Date</th><th class="num">Amount</th><th>Source</th></tr>' +
+          divRows(d.dividends) + "</table>" : unavail("No dividends reported by configured sources.")) +
         "<h2>Splits (" + d.splits.length + ")</h2>" +
-        (d.splits.length ? '<table class="t"><tr><th>Date</th><th class="num">Ratio</th></tr>' +
-          d.splits.map(function (x) {
-            return "<tr><td>" + F.fmtDate(x.date) + "</td><td class='num'>" + F.esc(x.numerator + ":" + x.denominator) + "</td></tr>";
-          }).join("") + "</table>" : unavail("No splits in the last 2 years.")) +
+        (d.splits.length ? '<table class="t"><tr><th>Date</th><th class="num">Ratio</th><th>Source</th></tr>' +
+          splitRows(d.splits) + "</table>" : unavail("No splits reported by configured sources.")) +
         "<div class='src'>" + F.esc(d.note || "") + "</div>" + srcLine(r.body);
     });
   }
   function tHoldings(sym, b) {
-    b.innerHTML = "<div class='card'>" + skel(3) + "</div>";
-    API.get("ratios", { symbol: sym }).then(function (r) {
-      b.innerHTML = "<h2>Shareholding</h2><div class='card'><h3>Ownership " + F.statusPill("unavailable") + "</h3>" +
-        unavail("Shareholding requires a fundamentals/ownership feed. Provider not configured — promoter/FII/DII splits are never guessed.") +
-        srcLine(r.body) + "</div>";
+    b.innerHTML = "<div class='card' id='h-out'>" + skel(3) + "</div>";
+    API.get("quote", { symbol: sym }).then(function (rq) {
+      API.get("ratios", { symbol: sym }).then(function (rr) {
+        if (!el("h-out")) return;
+        var q = (rq.body && rq.body.data) || {}, r = (rr.body && rr.body.data) || null;
+        var rows = "";
+        function row(l, v, src) {
+          return "<tr><td>" + l + "</td><td class='num'>" + (v === undefined || v === null || v === "None" || v === "-" ? "—" : F.esc(String(v))) +
+            "</td><td><span class='sect-tag'>" + src + "</span></td></tr>";
+        }
+        if (r) {
+          rows += row("Shares outstanding", r.SharesOutstanding, "REPORTED · Alpha Vantage");
+          rows += row("Market cap", r.MarketCapitalization, "REPORTED · Alpha Vantage");
+          rows += row("Book value / share", r.BookValue, "REPORTED · Alpha Vantage");
+        }
+        var price = q.price, mcap = r ? FLT(r.MarketCapitalization) : null;
+        function FLT(v) { var n = Number(v); return isNaN(n) ? null : n; }
+        var implShares = (price && mcap) ? mcap / price : null;
+        if (implShares) rows += row("Implied shares (mktcap ÷ price)", Math.round(implShares).toLocaleString("en-US"), "CALCULATED · quote × overview");
+        el("h-out").innerHTML = "<h2>Shareholding</h2>" +
+          (rows ? '<table class="t"><tr><th>Metric</th><th class="num">Value</th><th>Kind</th></tr>' + rows + "</table>" : "") +
+          "<div class='card' style='margin-top:10px'><h3>Ownership split " + F.statusPill("unavailable") + "</h3>" +
+          unavail("Promoter / FII / DII / public splits need an ownership feed. None is configured — splits are never guessed.") + "</div>" +
+          srcLine(rr.body);
+      });
     });
   }
   /* Yahoo symbol -> TradingView symbol for the official widget embed.

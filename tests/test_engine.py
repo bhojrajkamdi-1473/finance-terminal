@@ -191,5 +191,99 @@ class TestCapabilities(unittest.TestCase):
         self.assertEqual(set(caps), set(CAPABILITIES))
 
 
+class TestSymbols(unittest.TestCase):
+    def test_canonical(self):
+        from providers import symbols as S
+
+        self.assertEqual(S.canonical("  tatasteel.ns "), "TATASTEEL.NS")
+
+    def test_match(self):
+        from providers import symbols as S
+
+        self.assertTrue(S.symbols_match("TATASTEEL.NS", "TATASTEEL.BSE"))
+        self.assertTrue(S.symbols_match("AAPL", "AAPL"))
+        self.assertFalse(S.symbols_match("TATASTEEL.NS", "RELIANCE.NS"))
+        self.assertFalse(S.symbols_match("TATASTEEL.NS", None))
+        self.assertFalse(S.symbols_match("AB", "AB"))
+
+    def test_av_resolution_caches_discovery(self):
+        from providers import symbols as S
+
+        calls = []
+
+        def fake_search(q):
+            calls.append(q)
+            return [{"symbol": "TATASTEEL.BSE", "name": "Tata Steel"}]
+
+        out = S.resolve_alphavantage("TATASTEEL.NS", fake_search)
+        self.assertEqual(out.get("symbol"), "TATASTEEL.BSE")
+        out2 = S.resolve_alphavantage("TATASTEEL.NS", fake_search)
+        self.assertEqual(out2.get("symbol"), "TATASTEEL.BSE")
+        self.assertEqual(len(calls), 1)  # second hit from 7-day cache
+
+    def test_av_resolution_rejects_foreign_match(self):
+        from providers import symbols as S
+
+        def fake_search(q):
+            return [{"symbol": "AAPL", "name": "Apple"}]
+
+        out = S.resolve_alphavantage("RELIANCE.NS", fake_search)
+        self.assertIn("unresolved", out)
+
+
+class TestAvValidation(unittest.TestCase):
+    def test_states(self):
+        from providers.fundamentals import _validate
+
+        self.assertEqual(_validate({}, "X")[0], "empty")
+        self.assertEqual(_validate({"Error Message": "bad"}, "X")[0], "error")
+        self.assertEqual(_validate({"Information": "premium only"}, "X")[0], "premium")
+        self.assertEqual(
+            _validate({"Information": "25 per day"}, "X")[0], "rate_limited"
+        )
+        self.assertEqual(_validate({"Note": "frequency"}, "X")[0], "rate_limited")
+        self.assertEqual(_validate({"Symbol": "AAPL"}, "X")[0], "ok")
+
+    def test_no_key_paths(self):
+        import os
+
+        from providers.fundamentals import AlphaVantageFundamentalsProvider
+
+        old = (
+            os.environ.pop("ALPHA_VANTAGE_API_KEY", None),
+            os.environ.pop("FUNDAMENTALS_API_KEY", None),
+        )
+        try:
+            p = AlphaVantageFundamentalsProvider()
+            for fn in (
+                p.get_dividends,
+                p.get_splits,
+                p.get_shares_outstanding,
+                p.get_earnings_estimates,
+                p.get_estimates,
+                p.get_earnings_calendar,
+                p.symbol_search,
+            ):
+                env = fn("AAPL")
+                self.assertEqual(env["status"], "unavailable")
+        finally:
+            if old[0] is not None:
+                os.environ["ALPHA_VANTAGE_API_KEY"] = old[0]
+            if old[1] is not None:
+                os.environ["FUNDAMENTALS_API_KEY"] = old[1]
+
+    def test_ttl_cache(self):
+        import time
+
+        from services.refresh import TTLCache
+
+        c = TTLCache()
+        self.assertIsNone(c.get("k"))
+        c.set("k", {"v": 1}, 0.05)
+        self.assertEqual(c.get("k"), {"v": 1})
+        time.sleep(0.07)
+        self.assertIsNone(c.get("k"))
+
+
 if __name__ == "__main__":
     unittest.main()

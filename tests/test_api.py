@@ -132,7 +132,7 @@ class ApiTest(unittest.TestCase):
         status, body = _get(self.base, "/api/ratios?symbol=AAPL")
         self.assertEqual(status, 200)
         self.assertEqual(body["status"], "unavailable")
-        self.assertIn("not configured", body["message"].lower())
+        self.assertIn("alpha_vantage_api_key", body["message"].lower())
 
     def test_estimates_always_unavailable(self):
         status, body = _get(self.base, "/api/estimates?symbol=AAPL")

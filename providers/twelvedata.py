@@ -138,7 +138,15 @@ def _num(v: Any) -> float | None:
 
 class TwelveDataProvider(MarketDataProvider):
     name = "twelvedata"
-    capabilities: dict[str, bool] = {"quote": True, "history": True, "search": True}
+    capabilities: dict[str, bool] = {
+        "quote": True,
+        "history": True,
+        "search": True,
+        "fundamentals": True,
+        "statements": True,
+        "earnings": True,
+        "actions": True,
+    }
 
     def _need_key(self) -> dict | None:
         if _api_key():
@@ -340,4 +348,247 @@ class TwelveDataProvider(MarketDataProvider):
             delayed=True,
         )
         env["timeliness"] = "DELAYED"
+        return env
+
+    # -- fundamentals / earnings / actions (free-tier, budget-guarded) --
+    def _domain(self, endpoint: str, td_symbol: str, cost: int = 2) -> dict:
+        """Fetch a TD domain endpoint. Returns (payload | error-envelope)."""
+        blocked = _budget_take(cost)
+        if blocked:
+            return unavailable("twelvedata", f"Rate budget exhausted: {blocked}.")
+        try:
+            payload = _get(endpoint, {"symbol": td_symbol})
+        except Exception as exc:
+            if _is_rate_limit(exc):
+                return _rate_limited(f"{endpoint} throttled: {exc}")
+            return error_envelope("twelvedata", f"{endpoint} failed: {exc}")
+        if isinstance(payload, dict) and (
+            payload.get("status") == "error" or "code" in payload
+        ):
+            return unavailable(
+                "twelvedata",
+                str(payload.get("message") or f"{endpoint} not covered."),
+            )
+        return live_envelope("twelvedata", payload, delayed=True)
+
+    def _prep(self, symbol: str) -> tuple[str | None, dict | None]:
+        missing = self._need_key()
+        if missing:
+            return None, missing
+        td_symbol = to_td_symbol(symbol)
+        if td_symbol is None:
+            return None, unavailable(
+                "twelvedata",
+                f"Symbol '{symbol}' is not addressable on Twelve Data.",
+            )
+        return td_symbol, None
+
+    def get_statistics(self, symbol: str) -> dict:
+        """Company statistics: valuation metrics where the plan covers."""
+        from .schema import field, num, text
+
+        td_symbol, err = self._prep(symbol)
+        if err:
+            return err
+        assert td_symbol is not None
+        env = self._domain("/statistics", td_symbol)
+        if env.get("status") != "live":
+            return env
+        p = env["data"] or {}
+        stats = p.get("statistics") or p
+        if not isinstance(stats, dict):
+            return unavailable("twelvedata", "Statistics payload malformed.")
+
+        def pick(*ks: str):
+            return next(
+                (stats.get(k) for k in ks if stats.get(k) is not None),
+                None,
+            )
+
+        as_of = env.get("as_of")
+        out = {
+            "symbol": (symbol or "").strip().upper(),
+            "market_cap": field(
+                num(pick("market_capitalization", "market_cap")), "twelvedata", as_of
+            ),
+            "pe": field(
+                num(pick("pe_ratio", "trailing_pe", "pe")), "twelvedata", as_of
+            ),
+            "pb": field(num(pick("pb_ratio", "price_book", "pb")), "twelvedata", as_of),
+            "eps": field(
+                num(pick("eps", "eps_ttm", "trailing_eps")), "twelvedata", as_of
+            ),
+            "dividend_yield": field(
+                num(pick("dividend_yield", "dividend_yield_ttm")), "twelvedata", as_of
+            ),
+            "beta": field(num(pick("beta")), "twelvedata", as_of),
+            "week_52_high": field(
+                num(pick("week_52_high", "fifty_two_week_high")), "twelvedata", as_of
+            ),
+            "week_52_low": field(
+                num(pick("week_52_low", "fifty_two_week_low")), "twelvedata", as_of
+            ),
+            "shares_outstanding": field(
+                num(pick("shares_outstanding", "shares_float")), "twelvedata", as_of
+            ),
+            "company_name": field(
+                text(pick("name", "company_name", "short_name")), "twelvedata", as_of
+            ),
+            "exchange": field(text(pick("exchange")), "twelvedata", as_of),
+        }
+        env["data"] = out
+        env["timeliness"] = "END-OF-DAY"
+        return env
+
+    def get_earnings_td(self, symbol: str) -> dict:
+        td_symbol, err = self._prep(symbol)
+        if err:
+            return err
+        assert td_symbol is not None
+        env = self._domain("/earnings", td_symbol)
+        if env.get("status") != "live":
+            return env
+        p = env["data"] or {}
+        rows: list = []
+        _earn = p.get("earnings")
+        if isinstance(_earn, list):
+            rows = _earn
+        elif isinstance(p, list):
+            rows = p
+        clean = [
+            {
+                "date": r.get("date") or r.get("fiscal_date"),
+                "reported_eps": r.get("eps_actual") or r.get("reported_eps"),
+                "estimated_eps": r.get("eps_estimate") or r.get("estimated_eps"),
+                "surprise": r.get("surprise"),
+                "source": "twelvedata",
+            }
+            for r in rows
+            if isinstance(r, dict)
+        ][:12]
+        if not clean:
+            return unavailable(
+                "twelvedata", f"No earnings rows for '{symbol}' on this plan."
+            )
+        env["data"] = {"symbol": (symbol or "").strip().upper(), "rows": clean}
+        env["timeliness"] = "END-OF-DAY"
+        return env
+
+    def get_actions_td(self, symbol: str) -> dict:
+        """Dividends + splits with per-row sources."""
+        td_symbol, err = self._prep(symbol)
+        if err:
+            return err
+        assert td_symbol is not None
+        dividends: list[dict] = []
+        splits: list[dict] = []
+        notes: list[str] = []
+        for endpoint, bucket, keys in (
+            ("/dividends", dividends, ("ex_date", "date")),
+            ("/splits", splits, ("effective_date", "date")),
+        ):
+            env = self._domain(endpoint, td_symbol)
+            if env.get("status") != "live":
+                notes.append(f"{endpoint}: {env.get('message')}")
+                continue
+            p = env["data"] or {}
+            items: list = []
+            if isinstance(p, list):
+                items = p
+            elif isinstance(p, dict):
+                cand = p.get("dividends") or p.get("splits") or p.get("data")
+                if isinstance(cand, list):
+                    items = cand
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                date = next((it.get(k) for k in keys if it.get(k) is not None), None)
+                if endpoint == "/dividends":
+                    bucket.append(
+                        {
+                            "date": date,
+                            "amount": it.get("amount"),
+                            "currency": it.get("currency"),
+                            "source": "twelvedata",
+                        }
+                    )
+                else:
+                    bucket.append(
+                        {
+                            "date": date,
+                            "numerator": it.get("split_from") or it.get("numerator"),
+                            "denominator": it.get("split_to") or it.get("denominator"),
+                            "source": "twelvedata",
+                        }
+                    )
+        if not dividends and not splits:
+            return unavailable(
+                "twelvedata",
+                "No TD actions rows. " + " ".join(notes),
+            )
+        out = live_envelope(
+            "twelvedata",
+            {
+                "symbol": (symbol or "").strip().upper(),
+                "dividends": dividends[:40],
+                "splits": splits[:40],
+                "note": " ".join(notes),
+            },
+            delayed=True,
+        )
+        out["timeliness"] = "END-OF-DAY"
+        return out
+
+    def get_statement_td(
+        self, symbol: str, statement: str = "income", period: str = "annual"
+    ) -> dict:
+        """Income/balance/cashflow statements (weight ~100 credits each).
+        Only called on explicit user request; results cached 7 days."""
+        from .schema import text
+
+        td_symbol, err = self._prep(symbol)
+        if err:
+            return err
+        assert td_symbol is not None
+        fn = {
+            "income": "/income_statement",
+            "balance": "/balance_sheet",
+            "cashflow": "/cash_flow",
+        }.get((statement or "income").lower())
+        if not fn:
+            return error_envelope("twelvedata", f"Unknown statement '{statement}'.")
+        env = self._domain(fn, td_symbol, cost=100)
+        if env.get("status") != "live":
+            return env
+        p = env["data"] or {}
+        key = "annual" if period != "quarterly" else "quarter"
+        reports = (
+            p.get(f"{key}_reports")
+            or p.get(f"{key}Reports")
+            or p.get("financials")
+            or p.get("data")
+            or []
+        )
+        if not isinstance(reports, list) or not reports:
+            return unavailable(
+                "twelvedata", f"No {period} {statement} rows on this plan."
+            )
+        normalized = []
+        for rep in reports[:8]:
+            if not isinstance(rep, dict):
+                continue
+            normalized.append({str(k): v for k, v in rep.items()})
+        currency = text(
+            (reports[0] or {}).get("reportedCurrency")
+            or (reports[0] or {}).get("currency")
+            or p.get("currency")
+        )
+        env["data"] = {
+            "symbol": (symbol or "").strip().upper(),
+            "statement": statement,
+            "period": period,
+            "currency": currency,
+            "reports": normalized,
+        }
+        env["timeliness"] = "END-OF-DAY"
         return env

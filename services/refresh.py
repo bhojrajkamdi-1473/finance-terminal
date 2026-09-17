@@ -22,6 +22,8 @@ except Exception:  # minimal fallback if tzdata missing
 
 NEWS_TTL = 10 * 60.0
 FUNDAMENTALS_TTL = 24 * 3600.0
+OVERVIEW_TTL = 24 * 3600.0
+STATEMENTS_TTL = 7 * 24 * 3600.0
 QUOTE_STALE_AFTER = 120.0  # screener marks quotes older than this STALE
 EARNINGS_TTL = 24 * 3600.0
 IPO_TTL = 7 * 24 * 3600.0

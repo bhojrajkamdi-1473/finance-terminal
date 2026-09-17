@@ -14,7 +14,7 @@
     return (Number(a) - Number(b)) / Math.abs(Number(b)) * 100;
   }
 
-  function brief(symbol, quote, history, ratios) {
+  function brief(symbol, quote, history, ratios, recon) {
     var f = fmt(), facts = [], calcs = [], interp = [], questions = [], risks = [];
     var src = [];
     if (quote) {
@@ -72,6 +72,15 @@
     questions.push("What drove the largest single-day move in the window — results, guidance, or flows?");
     questions.push("Is volume confirming the price move, or diverging?");
     interp.push("Quality of the move is unverified without statements: price action alone cannot confirm earnings support.");
+    var sum = recon && recon.summary;
+    if (sum && sum.discrepancies > 0) {
+      risks.push("PROVIDER DISCREPANCY on " + (sum.discrepancy_fields || []).join(", ") +
+        " — providers disagree; treat any conclusion on these fields as INSUFFICIENT EVIDENCE until resolved.");
+      questions.push("Which provider's " + (sum.discrepancy_fields || [])[0] + " figure matches the company's own filings?");
+    }
+    if (sum && sum.fields_compared > 0 && sum.discrepancies === 0) {
+      facts.push("Cross-checked " + sum.fields_compared + " field(s) across providers with no material disagreement.");
+    }
     return {
       symbol: symbol, sources: src,
       facts: facts, calculations: calcs, interpretation: interp,

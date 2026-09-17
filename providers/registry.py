@@ -24,9 +24,10 @@ import os
 
 from . import base as _base
 from .fallback import FallbackMarketData
-from .fundamentals import AlphaVantageFundamentalsProvider, NoEstimatesProvider
+from .fundamentals import AlphaVantageFundamentalsProvider
 from .indian import IndianMarketApiProvider
 from .news import YahooCorporateActionsProvider, YahooRssNewsProvider
+from .orchestrator import ProviderManager
 from .stooq import StooqProvider
 from .twelvedata import TwelveDataProvider, budget_snapshot
 from .yahoo import YahooMarketDataProvider
@@ -81,7 +82,21 @@ company = market_data  # identity rides on the quote-chain winner
 fundamentals = _alphavantage
 news = YahooRssNewsProvider()
 corporate_actions = YahooCorporateActionsProvider()
-estimates = NoEstimatesProvider()
+# Estimates come from Alpha Vantage EARNINGS_ESTIMATES when a key is
+# configured; without a key the same object returns honest unavailable.
+estimates = _alphavantage
+
+# Multi-provider orchestrator: fan-out + normalization + reconciliation.
+# Cheap endpoints (quote/history/search) keep first-healthy chains;
+# company domains below go through the manager.
+manager = ProviderManager(
+    yahoo=_yahoo,
+    indian=_indian,
+    twelvedata=_twelvedata,
+    alphavantage=_alphavantage,
+    news_rss=news,
+    actions_yahoo=corporate_actions,
+)
 
 
 def _configured(env_name: str) -> bool:
