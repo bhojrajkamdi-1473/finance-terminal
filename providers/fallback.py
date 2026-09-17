@@ -148,8 +148,17 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
             path.append(f"{name}:{status}")
             last_env = env
             with self._lock:
-                self._record(name, False, str(env.get("message"))[:200], latency)
-
+                if status == "unavailable":
+                    # Definitive answer (bad symbol, no key, out of
+                    # coverage): not a failure — never triggers cooldown.
+                    h = self._health[name]
+                    h["last_latency_ms"] = latency
+                    h["last_error"] = None
+                    if h["state"] != "cooling":
+                        h["state"] = "ok"
+                else:
+                    self._record(name, False,
+                                 str(env.get("message"))[:200], latency)
         # total failure: serve stale cache if any, else honest miss
         with self._lock:
             entry = self._cache.get(key)

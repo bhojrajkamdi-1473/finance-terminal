@@ -105,6 +105,20 @@ class TestFallbackOrder(unittest.TestCase):
         self.assertIn("yahoo:cooling", env["fallback_path"])
         self.assertEqual(env["source"], "twelvedata")
 
+    def test_unavailable_never_cools_down(self):
+        # Definitive unavailable (no key / bad symbol) must not penalize:
+        # regression test from live incident where keyless legs cooled.
+        a = StubLeg([unavailable("twelvedata", "no key")])
+        b = StubLeg([_live("yahoo", 11)])
+        chain = FallbackMarketData([("twelvedata", a), ("yahoo", b)])
+        for _ in range(4):
+            chain._cache.clear()
+            env = chain.get_quote("X")
+            self.assertEqual(env["source"], "yahoo")
+        health = chain.health()["twelvedata"]
+        self.assertEqual(health["consecutive_errors"], 0)
+        self.assertNotEqual(health["state"], "cooling")
+
     def test_scarce_leg_gets_long_ttl(self):
         a = StubLeg([error_envelope("yahoo", "down")])
         b = StubLeg([_live("alphavantage", 12)])
