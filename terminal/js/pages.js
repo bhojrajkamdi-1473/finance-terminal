@@ -246,8 +246,8 @@
             res.map(function (x) {
               var t = x.technical || {}, f = x.fundamental || {};
               return "<tr><td class='txt'><a href='#/company/" + F.esc(x.symbol) + "'>" +
-                secCell(x.symbol, x.quote && x.quote.name, x.quote && x.quote.exchange) + "</a></td><td class='num'>" +
-                quoteRow(x.quote) + "</td><td class='num " + F.dirClass(x.quote.change_pct) + "'>" + F.fmtPct(x.quote.change_pct) +
+                secCell(x.symbol, x.quote && x.quote.name, x.quote && x.quote.exchange) + "</a></td><td class='num'><b>" +
+                F.fmtNum(x.quote.price) + " " + F.esc(x.quote.currency || "") + "</b></td><td class='num " + F.dirClass(x.quote.change_pct) + "'>" + F.fmtPct(x.quote.change_pct) +
                 "</td><td class='num'>" + (t.rsi14 === undefined || t.rsi14 === null ? "—" : F.fmtNum(t.rsi14) + " <span class='pill pill-calc'>CALC</span>") +
                 "</td><td class='num'>" + (f.PERatio === undefined || f.PERatio === null ? "—" : F.esc(String(f.PERatio))) +
                 "</td><td>" + F.statusPill(x.timeliness || x.status) + (x.stale ? " " + F.statusPill("STALE") : "") +
