@@ -41,8 +41,13 @@ def _timeit(fn):
 def probe_yahoo(provider, symbol: str) -> dict:
     env, err, ms = _timeit(lambda: provider.get_quote(symbol))
     if err is not None:
-        return {"provider": "yahoo", "symbol": symbol, "status": "crash",
-                "latency_ms": ms, "message": f"{type(err).__name__}: {err}"}
+        return {
+            "provider": "yahoo",
+            "symbol": symbol,
+            "status": "crash",
+            "latency_ms": ms,
+            "message": f"{type(err).__name__}: {err}",
+        }
     q = env.get("data") or {}
     return {
         "provider": "yahoo",
@@ -60,8 +65,13 @@ def probe_yahoo(provider, symbol: str) -> dict:
 def probe_twelvedata(provider, symbol: str) -> dict:
     env, err, ms = _timeit(lambda: provider.get_quote(symbol))
     if err is not None:
-        return {"provider": "twelvedata", "symbol": symbol, "status": "crash",
-                "latency_ms": ms, "message": f"{type(err).__name__}: {err}"}
+        return {
+            "provider": "twelvedata",
+            "symbol": symbol,
+            "status": "crash",
+            "latency_ms": ms,
+            "message": f"{type(err).__name__}: {err}",
+        }
     q = env.get("data") or {}
     return {
         "provider": "twelvedata",
@@ -85,29 +95,36 @@ def probe_alphavantage(provider, symbol: str) -> dict:
 
     def quote_call():
         py = _av_get({"function": "GLOBAL_QUOTE", "symbol": symbol})
-        info = (
-            str(py.get("Information") or "")
-            if isinstance(py, dict)
-            else ""
-        )
+        info = str(py.get("Information") or "") if isinstance(py, dict) else ""
         if info and "premium" in info.lower():
             out["plan_block"] = "premium-required"
-            return {"status": "unavailable",
-                    "message": info[:200]}
+            return {"status": "unavailable", "message": info[:200]}
         gq = (py or {}).get("Global Quote") or {}
         if not gq:
-            return {"status": "unavailable",
-                    "message": str((py or {}).get("Note") or (py or {}).get(
-                        "Information") or "no quote")[:200]}
-        return {"status": "live",
-                "price": (gq.get("05. price") or "").strip(),
-                "echoed_symbol": (gq.get("01. symbol") or "").strip()}
+            return {
+                "status": "unavailable",
+                "message": str(
+                    (py or {}).get("Note")
+                    or (py or {}).get("Information")
+                    or "no quote"
+                )[:200],
+            }
+        return {
+            "status": "live",
+            "price": (gq.get("05. price") or "").strip(),
+            "echoed_symbol": (gq.get("01. symbol") or "").strip(),
+        }
 
     try:
         env, err, ms = _timeit(quote_call)
     except Exception as exc:  # noqa: BLE001
-        out.update({"status": "crash", "latency_ms": ms,
-                    "message": f"{type(exc).__name__}: {exc}"})
+        out.update(
+            {
+                "status": "crash",
+                "latency_ms": ms,
+                "message": f"{type(exc).__name__}: {exc}",
+            }
+        )
         return out
     out["latency_ms"] = ms
     if err is not None:
@@ -133,15 +150,19 @@ def probe_av_resolution(symbol: str) -> dict:
             return []
 
     res = _sym.resolve_alphavantage(symbol, _search)
-    return {"provider": "alphavantage", "symbol": symbol,
-            "resolution": res}
+    return {"provider": "alphavantage", "symbol": symbol, "resolution": res}
 
 
 def probe_stooq(provider, symbol: str) -> dict:
     env, err, ms = _timeit(lambda: provider.get_historical_prices(symbol, "1M", "1d"))
     if err is not None:
-        return {"provider": "stooq", "symbol": symbol, "status": "crash",
-                "latency_ms": ms, "message": f"{type(err).__name__}: {err}"}
+        return {
+            "provider": "stooq",
+            "symbol": symbol,
+            "status": "crash",
+            "latency_ms": ms,
+            "message": f"{type(err).__name__}: {err}",
+        }
     bars = (env.get("data") or {}).get("bars") or []
     return {
         "provider": "stooq",
@@ -157,8 +178,7 @@ def probe_stooq(provider, symbol: str) -> dict:
 def probe_indianapi(symbol: str) -> dict:
     """indianapi.in hosted 'Indian Stock Market' API (X-API-Key header)."""
     key = (os.environ.get("INDIAN_STOCK_MARKET_API_KEY") or "").strip()
-    out = {"provider": "indianapi.in", "symbol": symbol,
-           "key_configured": bool(key)}
+    out = {"provider": "indianapi.in", "symbol": symbol, "key_configured": bool(key)}
     if not key:
         out.update({"status": "no_key", "message": "INDIAN_STOCK_MARKET_API_KEY unset"})
         return out
@@ -168,6 +188,7 @@ def probe_indianapi(symbol: str) -> dict:
         ("https://dev.indianapi.in/search", {"query": symbol.replace(".NS", "")}),
     ]
     for url, params in attempts:
+
         def call():
             u = url + "?" + urllib.parse.urlencode(params)
             req = urllib.request.Request(u, headers={**UA, "X-API-Key": key})
@@ -177,25 +198,41 @@ def probe_indianapi(symbol: str) -> dict:
         env, err, ms = _timeit(call)
         if err is not None:
             out.setdefault("attempts", []).append(
-                {"url": url.split("/")[2], "latency_ms": ms,
-                 "status": "unreachable", "message": f"{type(err).__name__}: {err}"}
+                {
+                    "url": url.split("/")[2],
+                    "latency_ms": ms,
+                    "status": "unreachable",
+                    "message": f"{type(err).__name__}: {err}",
+                }
             )
             continue
         code, text = env
         out["attempts"] = out.get("attempts") or [
-            {"url": url.split("/")[2], "latency_ms": ms, "status": code,
-             "status_line": text[:120].replace("\n", " ")}
+            {
+                "url": url.split("/")[2],
+                "latency_ms": ms,
+                "status": code,
+                "status_line": text[:120].replace("\n", " "),
+            }
         ]
         if code == 200:
             try:
                 body = json.loads(text)
             except Exception:
                 body = text
-            out.update({"status": "live", "http": code, "latency_ms": ms,
-                        "body_keys": list(body.keys()) if isinstance(body, dict)
-                        else type(body).__name__,
-                        "price": (body or {}).get("price")
-                        if isinstance(body, dict) else None})
+            out.update(
+                {
+                    "status": "live",
+                    "http": code,
+                    "latency_ms": ms,
+                    "body_keys": list(body.keys())
+                    if isinstance(body, dict)
+                    else type(body).__name__,
+                    "price": (body or {}).get("price")
+                    if isinstance(body, dict)
+                    else None,
+                }
+            )
             return out
     return out
 
@@ -211,7 +248,9 @@ def main(argv: list[str]) -> int:
     print("== Credentials (booleans only, values never printed) ==")
     print(f"  ALPHA_VANTAGE_API_KEY configured:     {_has('ALPHA_VANTAGE_API_KEY')}")
     print(f"  TWELVE_DATA_API_KEY configured:         {_has('TWELVE_DATA_API_KEY')}")
-    print(f"  INDIAN_STOCK_MARKET_API_KEY configured: {_has('INDIAN_STOCK_MARKET_API_KEY')}")
+    print(
+        f"  INDIAN_STOCK_MARKET_API_KEY configured: {_has('INDIAN_STOCK_MARKET_API_KEY')}"
+    )
     print()
 
     yah = YahooMarketDataProvider()
@@ -225,45 +264,61 @@ def main(argv: list[str]) -> int:
         print(f"===== {sym} =====")
         r = probe_yahoo(yah, sym)
         results.append(r)
-        print(f"  yahoo:         {r['status']:12s} {r.get('latency_ms')}ms "
-              f"price={r.get('price')} echoed={r.get('echoed_symbol')}")
+        print(
+            f"  yahoo:         {r['status']:12s} {r.get('latency_ms')}ms "
+            f"price={r.get('price')} echoed={r.get('echoed_symbol')}"
+        )
         r = probe_twelvedata(td, sym)
         results.append(r)
-        print(f"  twelvedata:    {r['status']:12s} {r.get('latency_ms')}ms "
-              f"price={r.get('price')} echoed={r.get('echoed_symbol')} "
-              f"timeliness={r.get('timeliness')} msg={r.get('message')}")
+        print(
+            f"  twelvedata:    {r['status']:12s} {r.get('latency_ms')}ms "
+            f"price={r.get('price')} echoed={r.get('echoed_symbol')} "
+            f"timeliness={r.get('timeliness')} msg={r.get('message')}"
+        )
         r = probe_av_resolution(sym)
         results.append(r)
         print(f"  av-resolve:    {r.get('resolution')}")
         time.sleep(1.2)
         r = probe_alphavantage(av, sym)
         results.append(r)
-        print(f"  alphavantage:  {r.get('status')} {r.get('latency_ms')}ms "
-              f"price={r.get('price')} echoed={r.get('echoed_symbol')} "
-              f"msg={r.get('message')}")
+        print(
+            f"  alphavantage:  {r.get('status')} {r.get('latency_ms')}ms "
+            f"price={r.get('price')} echoed={r.get('echoed_symbol')} "
+            f"msg={r.get('message')}"
+        )
         time.sleep(1.2)
         if sym == "MSFT":
             r = probe_stooq(stooq, sym)
             results.append(r)
-            print(f"  stooq:         {r['status']:12s} {r.get('latency_ms')}ms "
-                  f"bars={r.get('bars')} msg={r.get('message')}")
+            print(
+                f"  stooq:         {r['status']:12s} {r.get('latency_ms')}ms "
+                f"bars={r.get('bars')} msg={r.get('message')}"
+            )
         if sym.endswith(".NS"):
             r = probe_indianapi(sym)
             results.append(r)
             for a in r.get("attempts", []):
-                print(f"                 {a.get('url')}: {a.get('status')} "
-                      f"{a.get('latency_ms')}ms {a.get('status_line') or a.get('message')}")
-            print(f"  indianapi.in:  {r.get('status')} price={r.get('price')} "
-                  f"body_keys={r.get('body_keys')}")
+                print(
+                    f"                 {a.get('url')}: {a.get('status')} "
+                    f"{a.get('latency_ms')}ms {a.get('status_line') or a.get('message')}"
+                )
+            print(
+                f"  indianapi.in:  {r.get('status')} price={r.get('price')} "
+                f"body_keys={r.get('body_keys')}"
+            )
         echo = ind_leg.get_quote(sym)
-        print(f"  indian-leg:    {echo.get('status')} (existing provider; "
-              f"host via {ind_leg.base_url() if hasattr(ind_leg, 'base_url') else 'n/a'})")
+        print(
+            f"  indian-leg:    {echo.get('status')} (existing provider; "
+            f"host via {ind_leg.base_url() if hasattr(ind_leg, 'base_url') else 'n/a'})"
+        )
         print()
 
     print("== Summary ==")
     for r in results:
-        print(f"  {r['provider']:22s} {r['symbol']:12s} {str(r.get('status')):12s}"
-              f" {r.get('latency_ms')}ms")
+        print(
+            f"  {r['provider']:22s} {r['symbol']:12s} {str(r.get('status')):12s}"
+            f" {r.get('latency_ms')}ms"
+        )
     return 0
 
 

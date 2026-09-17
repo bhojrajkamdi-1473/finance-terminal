@@ -14,11 +14,10 @@ import urllib.request
 from http.server import ThreadingHTTPServer
 
 import server as server_mod
-from server import Handler
-
 from providers import fundamentals as _fund
 from providers import twelvedata as _td
 from providers import yahoo as _yahoo
+from server import Handler
 
 _FAKE_KEY = "TEST_FAKE_SECRET_9f0a00"  # name-only test string; not a real key
 
@@ -36,17 +35,24 @@ def _real_key_values():
 
 class RedactUnitTest(unittest.TestCase):
     def test_deep_redact_replaces_nested_secrets(self):
-        secrets = _real_key_values() or [_FAKE_KEY]
-        probe = "prefix " + secrets[0] + " suffix"
-        payload = {
-            "message": probe,
-            "nested": {"items": [probe, "clean", {"deep": probe}]},
-            "num": 42,
-        }
-        out = server_mod._redact(payload)
-        raw = json.dumps(out)
-        self.assertNotIn(secrets[0], raw)
-        self.assertIn("[REDACTED]", raw)
+        old = os.environ.get("ALPHA_VANTAGE_API_KEY")
+        os.environ["ALPHA_VANTAGE_API_KEY"] = _FAKE_KEY
+        try:
+            probe = "prefix " + _FAKE_KEY + " suffix"
+            payload = {
+                "message": probe,
+                "nested": {"items": [probe, "clean", {"deep": probe}]},
+                "num": 42,
+            }
+            out = server_mod._redact(payload)
+            raw = json.dumps(out)
+            self.assertNotIn(_FAKE_KEY, raw)
+            self.assertIn("[REDACTED]", raw)
+        finally:
+            if old is not None:
+                os.environ["ALPHA_VANTAGE_API_KEY"] = old
+            else:
+                os.environ.pop("ALPHA_VANTAGE_API_KEY", None)
 
     def test_redact_leaves_clean_data_alone(self):
         out = server_mod._redact({"a": "plain text", "b": [1, 2, 3], "c": None})

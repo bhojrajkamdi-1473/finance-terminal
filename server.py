@@ -122,20 +122,21 @@ def _reported_num(value) -> float | None:
 _domain_cache = refresh.TTLCache()
 
 
-# ---------------------------------------------------------------------------
-# Secret redaction: some upstream error texts echo the caller's API key
-# (e.g. Alpha Vantage rate-limit notices include the key). Every JSON
-# response is scrubbed so credential values can never reach clients.
-_SECRET_VALUES: list[str] = []
-for _secret_name in (
-    "ALPHA_VANTAGE_API_KEY",
-    "FUNDAMENTALS_API_KEY",
-    "TWELVE_DATA_API_KEY",
-    "INDIAN_STOCK_MARKET_API_KEY",
-):
-    _secret_val = (os.environ.get(_secret_name) or "").strip()
-    if len(_secret_val) >= 8:
-        _SECRET_VALUES.append(_secret_val)
+def _secret_values() -> list[str]:
+    """Read credential values fresh on every call: keys may be configured
+    after process start (tests, Render env changes), and rotation must
+    take effect immediately."""
+    out = []
+    for _secret_name in (
+        "ALPHA_VANTAGE_API_KEY",
+        "FUNDAMENTALS_API_KEY",
+        "TWELVE_DATA_API_KEY",
+        "INDIAN_STOCK_MARKET_API_KEY",
+    ):
+        _secret_val = (os.environ.get(_secret_name) or "").strip()
+        if len(_secret_val) >= 8:
+            out.append(_secret_val)
+    return out
 
 
 def _redact(obj):
@@ -143,7 +144,7 @@ def _redact(obj):
     [REDACTED] wherever they appear (message text, payloads, errors)."""
     if isinstance(obj, str):
         out = obj
-        for _s in _SECRET_VALUES:
+        for _s in _secret_values():
             if _s in out:
                 out = out.replace(_s, "[REDACTED]")
         return out

@@ -66,9 +66,7 @@ def _api_key() -> str:
 
 
 def base_url() -> str:
-    return (
-        os.environ.get("INDIAN_API_BASE_URL") or DEFAULT_BASE
-    ).rstrip("/")
+    return (os.environ.get("INDIAN_API_BASE_URL") or DEFAULT_BASE).rstrip("/")
 
 
 def budget_snapshot() -> dict:
@@ -190,14 +188,17 @@ class IndianApiProvider(MarketDataProvider):
         if not _api_key():
             raise _UpstreamError(
                 unavailable(
-                    SOURCE, "API KEY NOT CONFIGURED. Set "
+                    SOURCE,
+                    "API KEY NOT CONFIGURED. Set "
                     "INDIAN_STOCK_MARKET_API_KEY to enable this leg.",
                     code="NOT_CONFIGURED",
                 )
             )
         blocked = _budget_take(1)
         if blocked:
-            raise _UpstreamError(unavailable(SOURCE, f"Rate budget exhausted: {blocked}."))
+            raise _UpstreamError(
+                unavailable(SOURCE, f"Rate budget exhausted: {blocked}.")
+            )
         url = base_url() + "/stock?" + urllib.parse.urlencode({"name": name})
         req = urllib.request.Request(url, headers={**UA, "X-API-Key": _api_key()})
         try:
@@ -308,9 +309,10 @@ class IndianApiProvider(MarketDataProvider):
         else:
             return unavailable(SOURCE, f"No price for '{symbol}' in the feed.")
         pct = _num(sd.get("percentChange"))
-        vm = lambda p: p
-        change = vm(price) - vm(price) / (1.0 + (vm(pct) / 100.0)) if pct is not None and pct != -100.0 else None
-        change = round(change, 2) if change is not None else None
+        if pct is not None and pct != -100.0:
+            change = round(price - price / (1.0 + (pct / 100.0)), 2)
+        else:
+            change = None
         previous_close = round(price - change, 2) if change is not None else None
         quote = {
             "symbol": symbol,
@@ -326,13 +328,16 @@ class IndianApiProvider(MarketDataProvider):
             "volume": None,
             "change": change,
             "change_pct": pct,
-            "fifty_two_week_high": _num(sd.get("yhigh")) or _num(payload.get("yearHigh")),
+            "fifty_two_week_high": _num(sd.get("yhigh"))
+            or _num(payload.get("yearHigh")),
             "fifty_two_week_low": _num(sd.get("ylow")) or _num(payload.get("yearLow")),
             "market_time": _asof_epoch(sd.get("date"), sd.get("time")),
             "timezone": "Asia/Kolkata",
             "market_cap": _num(sd.get("marketCap")),
             "pe": _num(sd.get("pPerEBasicExcludingExtraordinaryItemsTTM")),
-            "dividend_yield": _num(sd.get("currentDividendYieldCommonStockPrimaryIssueLTM")),
+            "dividend_yield": _num(
+                sd.get("currentDividendYieldCommonStockPrimaryIssueLTM")
+            ),
             "sector": payload.get("industry"),
         }
         env = live_envelope(SOURCE, quote, delayed=True)
@@ -365,7 +370,9 @@ class IndianApiProvider(MarketDataProvider):
             officers.append(
                 {
                     "name": name or None,
-                    "title": title.get("description") if isinstance(title, dict) else title,
+                    "title": title.get("description")
+                    if isinstance(title, dict)
+                    else title,
                     "since": o.get("since"),
                 }
             )
@@ -433,7 +440,9 @@ class IndianApiProvider(MarketDataProvider):
                     row[key] = it.get("value")
             rows.append(row)
         if not rows:
-            return unavailable(SOURCE, f"No {statement} rows for '{symbol}' in the feed.")
+            return unavailable(
+                SOURCE, f"No {statement} rows for '{symbol}' in the feed."
+            )
         env = live_envelope(
             SOURCE,
             {
@@ -467,7 +476,6 @@ class IndianApiProvider(MarketDataProvider):
             return err
         assert payload is not None
         km = payload.get("keyMetrics") or {}
-        sd = payload.get("stockDetailsReusableData") or {}
         cp = payload.get("companyProfile") or {}
 
         def m(cat: str, key: str) -> float | None:
@@ -512,14 +520,22 @@ class IndianApiProvider(MarketDataProvider):
             "ProfitMargin": m("margins", "netProfitMarginPercentTrailing12Month"),
             "OperatingMarginTTM": m("margins", "operatingMarginTrailing12Month"),
             "GrossMarginTTM": m("margins", "grossMarginTrailing12Month"),
-            "DebtToEquity": m("financialstrength", "totalDebtPerTotalEquityMostRecentFiscalYear"),
+            "DebtToEquity": m(
+                "financialstrength", "totalDebtPerTotalEquityMostRecentFiscalYear"
+            ),
             "CurrentRatio": m("financialstrength", "currentRatioMostRecentFiscalYear"),
             "PayoutRatio": m("financialstrength", "payoutRatioTrailing12Month"),
-            "DividendYield": m("valuation", "currentDividendYieldCommonStockPrimaryIssueLTM"),
-            "DividendPerShare": m("persharedata", "dividendPerShareMostRecentFiscalYear"),
+            "DividendYield": m(
+                "valuation", "currentDividendYieldCommonStockPrimaryIssueLTM"
+            ),
+            "DividendPerShare": m(
+                "persharedata", "dividendPerShareMostRecentFiscalYear"
+            ),
             "Beta": m("priceandVolume", "beta"),
-            "52WeekHigh": m("priceandVolume", "52WeekHigh") or _num(payload.get("yearHigh")),
-            "52WeekLow": m("priceandVolume", "52WeekLow") or _num(payload.get("yearLow")),
+            "52WeekHigh": m("priceandVolume", "52WeekHigh")
+            or _num(payload.get("yearHigh")),
+            "52WeekLow": m("priceandVolume", "52WeekLow")
+            or _num(payload.get("yearLow")),
             "SharesOutstanding": _shares_outstanding(payload),
             "_period": fy_period(),
             "_metric_source": "indian-api keyMetrics",
@@ -566,7 +582,12 @@ class IndianApiProvider(MarketDataProvider):
                     "source": SOURCE,
                 }
             )
-        annual = [a for a in annual if (a.get("reportedEPS") is not None and a.get("reportedEPS") != 0) or a.get("fiscalDateEnding")]
+        annual = [
+            a
+            for a in annual
+            if (a.get("reportedEPS") is not None and a.get("reportedEPS") != 0)
+            or a.get("fiscalDateEnding")
+        ]
         if not annual:
             return unavailable(SOURCE, f"No earnings rows for '{symbol}' in the feed.")
         env = live_envelope(
@@ -616,7 +637,7 @@ class IndianApiProvider(MarketDataProvider):
                 SOURCE, f"No analyst coverage data for '{symbol}' in the feed."
             )
         stock_analyst = []
-        for row in (recos.get("stockAnalyst") or []):
+        for row in recos.get("stockAnalyst") or []:
             if isinstance(row, dict) and row.get("ratingName"):
                 stock_analyst.append(
                     {
@@ -668,7 +689,7 @@ class IndianApiProvider(MarketDataProvider):
         assert payload is not None
         limit = max(1, min(int(limit or 20), 50))
         items = []
-        for row in (payload.get("recentNews") or [])[:limit * 3]:
+        for row in (payload.get("recentNews") or [])[: limit * 3]:
             if not isinstance(row, dict):
                 continue
             url = str(row.get("url") or row.get("metadata") or "").strip()
@@ -679,7 +700,11 @@ class IndianApiProvider(MarketDataProvider):
             headline = (row.get("headline") or "").strip()
             if not headline:
                 continue
-            if topic and topic.lower() not in (headline + " " + str(row.get("summary") or "")).lower():
+            if (
+                topic
+                and topic.lower()
+                not in (headline + " " + str(row.get("summary") or "")).lower()
+            ):
                 continue
             items.append(
                 {
@@ -698,8 +723,11 @@ class IndianApiProvider(MarketDataProvider):
             return unavailable(SOURCE, f"No news items for '{symbol}' in the feed.")
         env = live_envelope(
             SOURCE,
-            {"items": items, "note": "Headlines/links are the feed's; no "
-             "sentiment is attached unless the feed reports it."},
+            {
+                "items": items,
+                "note": "Headlines/links are the feed's; no "
+                "sentiment is attached unless the feed reports it.",
+            },
             delayed=False,
         )
         return env
@@ -788,7 +816,7 @@ class IndianApiProvider(MarketDataProvider):
             return err
         assert payload is not None
         ownership = []
-        for cat in (payload.get("shareholding") or []):
+        for cat in payload.get("shareholding") or []:
             if not isinstance(cat, dict):
                 continue
             rows = []
@@ -805,7 +833,12 @@ class IndianApiProvider(MarketDataProvider):
 
             hit = latest(cat.get("categories"))
             if hit is not None:
-                rows.append({"holding_date": hit[0], "percentage": _num(hit[1].get("percentage"))})
+                rows.append(
+                    {
+                        "holding_date": hit[0],
+                        "percentage": _num(hit[1].get("percentage")),
+                    }
+                )
             else:
                 rows = []
             ownership.append(
@@ -824,9 +857,12 @@ class IndianApiProvider(MarketDataProvider):
             )
         env = live_envelope(
             SOURCE,
-            {"symbol": symbol, "ownership": ownership,
-             "note": "Ownership split is provider-reported (latest filing "
-                     "date per category); not inferred."},
+            {
+                "symbol": symbol,
+                "ownership": ownership,
+                "note": "Ownership split is provider-reported (latest filing "
+                "date per category); not inferred.",
+            },
             delayed=True,
         )
         env["timeliness"] = "END-OF-DAY"
@@ -849,7 +885,7 @@ class IndianApiProvider(MarketDataProvider):
 def _shares_outstanding(payload: dict) -> float | None:
     """Total common shares from the latest balance sheet (₹ Cr scale —
     the feed reports them in crore shares)."""
-    for rep in (payload.get("financials") or []):
+    for rep in payload.get("financials") or []:
         if not isinstance(rep, dict):
             continue
         bal = (rep.get("stockFinancialMap") or {}).get("BAL") or []
@@ -864,7 +900,9 @@ def _asof_epoch(date: Any, time_: Any) -> int | None:
     if not date or not time_:
         return None
     try:
-        dt = datetime.strptime(str(date).strip() + " " + str(time_).strip(), "%d %b %Y %H:%M:%S")
+        dt = datetime.strptime(
+            str(date).strip() + " " + str(time_).strip(), "%d %b %Y %H:%M:%S"
+        )
         try:
             from zoneinfo import ZoneInfo
 

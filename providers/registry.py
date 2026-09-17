@@ -28,7 +28,6 @@ import os
 from . import base as _base
 from .fallback import FallbackMarketData
 from .fundamentals import AlphaVantageFundamentalsProvider
-from .indian import is_indian
 from .indianapi import IndianApiProvider
 from .news import YahooCorporateActionsProvider, YahooRssNewsProvider
 from .orchestrator import ProviderManager

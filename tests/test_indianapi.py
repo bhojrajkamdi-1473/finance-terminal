@@ -10,14 +10,14 @@ Run: python -m unittest discover -s tests -v
 
 import os
 import unittest
-from datetime import datetime, timezone
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 
 from providers.indianapi import IndianApiProvider
 
 
 def _fixture() -> dict:
     """Realistic payload (subset of a live TATASTEEL response)."""
+
     def row(key, value, display="") -> dict:
         return {"key": key, "displayName": display or (key + " "), "value": value}
 
@@ -53,19 +53,31 @@ def _fixture() -> dict:
                 "stockFinancialMap": {
                     "INC": [
                         row("NetIncome", "10793.87", "Net Income "),
-                        row("DilutedWeightedAverageShares", "1247.18",
-                            "Diluted Weighted Average Shares "),
-                        row("DilutedEPSExcludingExtraOrdItems", "8.65",
-                            "Diluted EPS Excluding Extra Ord Items "),
+                        row(
+                            "DilutedWeightedAverageShares",
+                            "1247.18",
+                            "Diluted Weighted Average Shares ",
+                        ),
+                        row(
+                            "DilutedEPSExcludingExtraOrdItems",
+                            "8.65",
+                            "Diluted EPS Excluding Extra Ord Items ",
+                        ),
                         row("TotalRevenue", "236395.00", "Total Revenue "),
                     ],
                     "BAL": [
-                        row("TotalCommonSharesOutstanding", "1247.18",
-                            "Total Common Shares Outstanding "),
+                        row(
+                            "TotalCommonSharesOutstanding",
+                            "1247.18",
+                            "Total Common Shares Outstanding ",
+                        ),
                     ],
                     "CAS": [
-                        row("NetIncomeStartingLine", "10793.87",
-                            "Net Income/Starting Line "),
+                        row(
+                            "NetIncomeStartingLine",
+                            "10793.87",
+                            "Net Income/Starting Line ",
+                        ),
                     ],
                 },
             },
@@ -74,8 +86,11 @@ def _fixture() -> dict:
                 "EndDate": "2025-03-31",
                 "stockFinancialMap": {
                     "INC": [
-                        row("DilutedEPSExcludingExtraOrdItems", "6.10",
-                            "Diluted EPS Excluding Extra Ord Items "),
+                        row(
+                            "DilutedEPSExcludingExtraOrdItems",
+                            "6.10",
+                            "Diluted EPS Excluding Extra Ord Items ",
+                        ),
                     ],
                     "BAL": [],
                     "CAS": [],
@@ -115,18 +130,36 @@ def _fixture() -> dict:
             ],
         },
         "analystView": [
-            {"ratingName": "Strong Buy", "ratingValue": 1, "numberOfAnalystsLatest": "10"},
+            {
+                "ratingName": "Strong Buy",
+                "ratingValue": 1,
+                "numberOfAnalystsLatest": "10",
+            },
             {"ratingName": "Buy", "ratingValue": 2, "numberOfAnalystsLatest": "8"},
             {"ratingName": "Hold", "ratingValue": 3, "numberOfAnalystsLatest": "9"},
             {"ratingName": "Sell", "ratingValue": 4, "numberOfAnalystsLatest": "4"},
-            {"ratingName": "Strong Sell", "ratingValue": 5, "numberOfAnalystsLatest": "3"},
+            {
+                "ratingName": "Strong Sell",
+                "ratingValue": 5,
+                "numberOfAnalystsLatest": "3",
+            },
         ],
         "recosBar": {
             "stockAnalyst": [
-                {"ratingName": "Strong Buy", "ratingValue": 1, "numberOfAnalysts": 10,
-                 "minValue": 1, "maxValue": 1.8},
-                {"ratingName": "Buy", "ratingValue": 2, "numberOfAnalysts": 8,
-                 "minValue": 1.8, "maxValue": 2.6},
+                {
+                    "ratingName": "Strong Buy",
+                    "ratingValue": 1,
+                    "numberOfAnalysts": 10,
+                    "minValue": 1,
+                    "maxValue": 1.8,
+                },
+                {
+                    "ratingName": "Buy",
+                    "ratingValue": 2,
+                    "numberOfAnalysts": 8,
+                    "minValue": 1.8,
+                    "maxValue": 2.6,
+                },
             ],
             "tickerRatingValue": "2.47",
             "noOfRecommendations": "34",
@@ -190,10 +223,7 @@ def _fixture() -> dict:
 
 class IndianApiTest(unittest.TestCase):
     def setUp(self):
-        self._old = {
-            k: os.environ.get(k)
-            for k in ("INDIAN_STOCK_MARKET_API_KEY",)
-        }
+        self._old = {k: os.environ.get(k) for k in ("INDIAN_STOCK_MARKET_API_KEY",)}
         os.environ["INDIAN_STOCK_MARKET_API_KEY"] = "test-key"
 
     def tearDown(self):
@@ -267,10 +297,12 @@ class TestQuote(IndianApiTest):
         self.assertEqual(calls["n"], 0)
 
     def test_upstream_err_message_surfaces(self):
+        from providers.indianapi import _UpstreamError
+
         p = IndianApiProvider()
 
         def fetch(name):
-            raise Exception("boom")
+            raise _UpstreamError({"status": "error", "message": "boom"})
 
         p._fetch = fetch
         env = p.get_quote("TATASTEEL.NS")
@@ -317,8 +349,7 @@ class TestDomainData(IndianApiTest):
         self.assertEqual(d["unit"], "₹ Crore")
         self.assertEqual(len(d["reports"]), 2)
         self.assertEqual(d["reports"][0]["Net Income"], "10793.87")
-        self.assertIn("Diluted EPS Excluding Extra Ord Items",
-                      d["reports"][0])
+        self.assertIn("Diluted EPS Excluding Extra Ord Items", d["reports"][0])
 
     def test_statements_quarterly_never_synthesised(self):
         p, calls = self._prov()
@@ -383,7 +414,9 @@ class TestDomainData(IndianApiTest):
 
     def test_history_and_search_pass_through(self):
         p, _ = self._prov()
-        self.assertEqual(p.get_historical_prices("TATASTEEL.NS")["status"], "unavailable")
+        self.assertEqual(
+            p.get_historical_prices("TATASTEEL.NS")["status"], "unavailable"
+        )
         self.assertEqual(p.search("tata")["status"], "unavailable")
 
 

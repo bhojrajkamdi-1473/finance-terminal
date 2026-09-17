@@ -24,9 +24,9 @@ from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Any
 
+from providers.indian import is_indian
 from services import reconcile as _rec
 from services.refresh import TTLCache
-from providers.indian import is_indian
 
 QUOTE_TTL = 30.0
 PROFILE_TTL = 24 * 3600.0
@@ -314,9 +314,7 @@ class ProviderManager:
                 )
             leg = self._indian_leg()
             if leg is not None and is_indian(symbol):
-                calls.append(
-                    ("indian-api", lambda: leg.get_company_profile(symbol))
-                )
+                calls.append(("indian-api", lambda: leg.get_company_profile(symbol)))
             else:
                 skipped.append(
                     {
@@ -344,7 +342,9 @@ class ProviderManager:
                 else (
                     inapi.get("as_of")
                     if _ok(inapi)
-                    else (td.get("as_of") if _ok(td) else (quote_env or {}).get("as_of"))
+                    else (
+                        td.get("as_of") if _ok(td) else (quote_env or {}).get("as_of")
+                    )
                 )
             )
             from providers.schema import field as _f
@@ -364,22 +364,25 @@ class ProviderManager:
                     prim_src,
                     prim_asof,
                     period,
-                    ccy or (pri_d or {}).get("Currency")
+                    ccy
+                    or (pri_d or {}).get("Currency")
                     or (pri_d or {}).get("currency"),
                 )
 
             merged = {
                 "symbol": symbol,
-                "name": (pri_d or {}).get("Name") or (pri_d or {}).get("name")
+                "name": (pri_d or {}).get("Name")
+                or (pri_d or {}).get("name")
                 or q.get("name"),
                 "exchange": (pri_d or {}).get("Exchange")
-                or (pri_d or {}).get("exchange") or q.get("exchange"),
+                or (pri_d or {}).get("exchange")
+                or q.get("exchange"),
                 "currency": (pri_d or {}).get("Currency")
-                or (pri_d or {}).get("currency") or q.get("currency"),
+                or (pri_d or {}).get("currency")
+                or q.get("currency"),
                 "instrument_type": q.get("instrument_type"),
                 "timezone": q.get("timezone"),
-                "sector": (pri_d or {}).get("Sector")
-                or (pri_d or {}).get("sector"),
+                "sector": (pri_d or {}).get("Sector") or (pri_d or {}).get("sector"),
                 "industry": (pri_d or {}).get("Industry")
                 or (pri_d or {}).get("industry"),
                 "description": (pri_d or {}).get("Description")
@@ -481,9 +484,7 @@ class ProviderManager:
                 calls.append(
                     (
                         "indian-api",
-                        lambda: leg.get_financial_statements(
-                            symbol, statement, period
-                        ),
+                        lambda: leg.get_financial_statements(symbol, statement, period),
                     )
                 )
             else:
@@ -550,8 +551,7 @@ class ProviderManager:
                         "symbol": symbol,
                         "statement": statement,
                         "period": period,
-                        "currency": (in_data or {}).get("currency")
-                        or "INR",
+                        "currency": (in_data or {}).get("currency") or "INR",
                         "reports": (in_data or {}).get("reports"),
                     }
                 )
@@ -624,10 +624,12 @@ class ProviderManager:
                     "as_of": None,
                     "data": None,
                     "message": "Valuation could not be answered by any provider "
-                    "right now: " + "; ".join(_queried(results)) + ". Common "
-                    "causes: Alpha Vantage free quota spent (25/day), Twelve "
-                    "Data budget/coverage limits, or a symbol outside the "
-                    "Indian Stock Market API (NSE/BSE only).",
+                    "right now: " + "; ".join(_queried(results)) + ". Set "
+                    "ALPHA_VANTAGE_API_KEY and/or TWELVE_DATA_API_KEY and/or "
+                    "INDIAN_STOCK_MARKET_API_KEY to enable. (Common causes: "
+                    "Alpha Vantage free quota spent (25/day), Twelve Data "
+                    "budget/coverage limits, or a symbol outside the "
+                    "Indian Stock Market API (NSE/BSE only).)",
                     "providers_queried": _queried(results),
                 }
             from providers.schema import field as _f
@@ -813,7 +815,7 @@ class ProviderManager:
                     )
             if av_d:
                 data = dict(av_d)
-                primary_env, prim_src = av, "alphavantage"
+                prim_src = "alphavantage"
             elif in_d:
                 data = {
                     "symbol": symbol,
@@ -822,7 +824,7 @@ class ProviderManager:
                     "note": in_d.get("note")
                     or "Reported fiscal-year EPS (Indian Stock Market API).",
                 }
-                primary_env, prim_src = inapi, "indian-api"
+                prim_src = "indian-api"
             else:
                 data = {
                     "symbol": symbol,
@@ -830,7 +832,7 @@ class ProviderManager:
                     "quarterly": [],
                     "note": "Alpha Vantage unavailable; Twelve Data rows below.",
                 }
-                primary_env, prim_src = td, "twelvedata"
+                prim_src = "twelvedata"
             if td_rows:
                 data["twelvedata_rows"] = td_rows
             return {
@@ -859,6 +861,7 @@ class ProviderManager:
     ) -> dict:
         """Yahoo RSS + AV sentiment merged, deduplicated by URL."""
         key = f"onews:{symbol or ''}:{topic or ''}:{limit}"
+        symbol = (symbol or "").strip().upper() or None
 
         def compute() -> dict:
             calls: list[tuple[str, Callable[[], dict]]] = []
@@ -887,19 +890,19 @@ class ProviderManager:
                     }
                 )
             leg = self._indian_leg()
-            if leg is not None and (symbol or "").strip().upper() and is_indian(symbol.upper()):
-                calls.append(
-                    ("indian-api", lambda: leg.get_news(symbol, topic, limit))
-                )
+            if leg is not None and symbol is not None and is_indian(symbol):
+                calls.append(("indian-api", lambda: leg.get_news(symbol, topic, limit)))
             else:
                 skipped.append(
                     {
                         "provider": "indian-api",
                         "reason": "Leg not wired."
                         if leg is None
-                        else ("Non-Indian symbol."
-                              if (symbol or "").strip().upper()
-                              else "Missing symbol."),
+                        else (
+                            "Non-Indian symbol."
+                            if (symbol or "").strip().upper()
+                            else "Missing symbol."
+                        ),
                     }
                 )
             results = self._fanout(key + ":fan", NEWS_TTL, calls)
@@ -987,9 +990,7 @@ class ProviderManager:
                 )
             leg = self._indian_leg()
             if leg is not None and is_indian(symbol):
-                calls.append(
-                    ("indian-api", lambda: leg.get_actions(symbol))
-                )
+                calls.append(("indian-api", lambda: leg.get_actions(symbol)))
             else:
                 skipped.append(
                     {
@@ -1032,8 +1033,7 @@ class ProviderManager:
                     for d in iae["data"].get("dividends", [])
                 ]
                 splits += [
-                    {**s, "source": "indian-api"}
-                    for s in iae["data"].get("splits", [])
+                    {**s, "source": "indian-api"} for s in iae["data"].get("splits", [])
                 ]
             if not dividends and not splits:
                 return {
@@ -1130,7 +1130,7 @@ class ProviderManager:
                 as_of = av.get("as_of")
                 prim_src = av.get("source", "alphavantage")
             else:
-                data = dict(in_d)
+                data = dict(in_d or {})
                 as_of = inapi.get("as_of")
                 prim_src = inapi.get("source", "indian-api")
             if (in_d or {}).get("analyst_ratings"):

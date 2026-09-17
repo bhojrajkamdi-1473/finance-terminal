@@ -41,9 +41,10 @@ def _redact(text: str) -> str:
     """Strip credential values from upstream text before it can reach
     clients (Alpha Vantage error notices echo the caller's API key)."""
     out = str(text)
-    for _key in (os.environ.get("ALPHA_VANTAGE_API_KEY") or "").strip(), (
-        os.environ.get("FUNDAMENTALS_API_KEY") or ""
-    ).strip():
+    for _key in (
+        (os.environ.get("ALPHA_VANTAGE_API_KEY") or "").strip(),
+        (os.environ.get("FUNDAMENTALS_API_KEY") or "").strip(),
+    ):
         if len(_key) >= 8 and _key in out:
             out = out.replace(_key, "[REDACTED]")
     return out
@@ -117,9 +118,7 @@ def _invalid_envelope(function: str, kind: str, message: str) -> dict:
             code="PLAN_LIMITATION",
         )
     if kind == "empty":
-        return unavailable(
-            "alphavantage", message, code="EMPTY_RESULT"
-        )
+        return unavailable("alphavantage", message, code="EMPTY_RESULT")
     return error_envelope("alphavantage", f"{function}: {message}")
 
 
@@ -342,7 +341,9 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
                 f"{function} requires a premium entitlement: {_redact(blocked)}",
             )
         if payload.get("Note"):
-            return error_envelope("alphavantage", _redact(str(payload.get("Note"))[:300]))
+            return error_envelope(
+                "alphavantage", _redact(str(payload.get("Note"))[:300])
+            )
         return live_envelope("alphavantage", payload, delayed=True)
 
     def get_earnings(self, symbol: str) -> dict:
@@ -378,9 +379,13 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
             return error_envelope("alphavantage", f"NEWS_SENTIMENT failed: {exc}")
         blocked = _premium_block(payload)
         if blocked:
-            return unavailable("alphavantage", f"News requires premium: {_redact(blocked)}")
+            return unavailable(
+                "alphavantage", f"News requires premium: {_redact(blocked)}"
+            )
         if payload.get("Note"):
-            return error_envelope("alphavantage", _redact(str(payload.get("Note"))[:300]))
+            return error_envelope(
+                "alphavantage", _redact(str(payload.get("Note"))[:300])
+            )
         items = []
         for a in (payload.get("feed") or [])[:limit]:
             items.append(

@@ -162,8 +162,7 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
                     if h["state"] != "cooling":
                         h["state"] = "ok"
                 else:
-                    self._record(name, False,
-                                 str(env.get("message"))[:200], latency)
+                    self._record(name, False, str(env.get("message"))[:200], latency)
         # total failure: serve stale cache if any, else honest miss
         with self._lock:
             entry = self._cache.get(key)
