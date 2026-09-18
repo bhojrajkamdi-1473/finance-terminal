@@ -298,6 +298,7 @@
     sym = (sym || "").toUpperCase();
     tab = tab || "Overview";
     view().innerHTML = "<div id='co-head' class='card'>" + skel(3) + "</div>" +
+      "<div id='co-hub'></div>" +
       "<div class='tabs' role='tablist' id='co-tabs'>" + CTABS.map(function (t) {
         return "<button role='tab' aria-selected='" + (t === tab ? "true" : "false") + "' data-t='" + t + "' class='" + (t === tab ? "on" : "") + "'>" + t + "</button>";
       }).join("") + "</div><div class='lay-8-4'><div id='co-body'></div>" +
@@ -311,6 +312,7 @@
         renderHead(sym, rc.body, rq.body);
         renderTab(sym, tab);
         loadQuality(sym);
+        loadHub(sym);
         loadKpis(sym, (rq.body && rq.body.data) || {});
         every(10000, function () {
           if (!el("co-price")) return;
@@ -369,6 +371,34 @@
           " · Discrepancies: " + (sum.discrepancies === undefined ? "—" : sum.discrepancies) +
           ((sum.discrepancy_fields || []).length ? " (" + F.esc(sum.discrepancy_fields.join(", ")) + ")" : "") +
           "</div></div>";
+      });
+    }
+    function loadHub(sym) {
+      API.get("research-links", { symbol: sym }).then(function (r) {
+        if (!el("co-hub")) return;
+        var b = r.body || {};
+        if (!b.ok) { el("co-hub").innerHTML = ""; return; }
+        function rows(list) {
+          return list.map(function (d) {
+            var badge = d.badge === "OFFICIAL"
+              ? "<span class='pill pill-live'>OFFICIAL</span>"
+              : "<span class='pill pill-calc'>EXTERNAL</span>";
+            var action = d.url
+              ? "<a class='btn sm' href='" + F.esc(d.url) + "' target='_blank' rel='noopener noreferrer' " +
+                "aria-label='Open " + F.esc(d.name) + " in a new tab'>Open ↗</a>"
+              : "<span class='src'>" + F.esc(d.reason || "No verified URL available") + "</span>";
+            return "<tr><td class='txt'><b>" + F.esc(d.name) + "</b> " + badge +
+              "<br><span class='src'>" + F.esc(d.description || "") + "</span></td>" +
+              "<td class='num'>" + action + "</td></tr>";
+          }).join("");
+        }
+        el("co-hub").innerHTML = "<div class='card sect'><h3>Research Hub</h3>" +
+          "<div class='grid g2'>" +
+          "<div><div class='lbl' style='margin-bottom:4px'>Official &amp; market data</div>" +
+          '<div class="twrap hub"><table class="t"><tbody>' + rows(b.official || []) + "</tbody></table></div></div>" +
+          "<div><div class='lbl' style='margin-bottom:4px'>External research</div>" +
+          '<div class="twrap hub"><table class="t"><tbody>' + rows(b.research || []) + "</tbody></table></div></div>" +
+          "</div><div class='prov' style='margin-top:6px'>" + F.esc(b.notice || "") + "</div></div>";
       });
     }
     function patchHead(qenv) {
@@ -1212,6 +1242,14 @@
     view().innerHTML = "<h1 class='h-page'>Settings</h1>" +
       "<div class='sub'>Provider wiring &amp; data transparency — free-automatic mode, no paid subscription required</div>" +
       "<div class='card sect'><h3>Data providers</h3><div id='s-prov'>" + skel(5) + "</div></div>" +
+      "<div class='card sect'><h3>Data sources — internal vs external</h3>" +
+      "<div class='grid g2'><div><div class='lbl' style='margin-bottom:4px'>Internal data</div>" +
+      "<div class='src'>Yahoo Finance · Alpha Vantage · Twelve Data · Indian Stock Market API · Stooq (history). " +
+      "Fetched server-side, cached, reconciled, attributed per field.</div></div>" +
+      "<div><div class='lbl' style='margin-bottom:4px'>External research</div>" +
+      "<div class='src'>Screener · Trendlyne · Tickertape · NSE · BSE · Company IR. " +
+      "Links open the original source. The terminal does not scrape or mirror proprietary research databases.</div></div>" +
+      "</div></div>" +
       "<div class='grid g2' style='margin-top:12px'><div class='card'><h3>Refresh policy</h3><div class='src'>" +
       "Browser polls quotes every 10s (company) / 30s (watchlist) / 60s (dashboard, news). " +
       "The backend serves cache unless an upstream refresh is allowed: quotes 30s, intraday history 15m, daily history 4h, " +

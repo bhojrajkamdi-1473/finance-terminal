@@ -220,6 +220,8 @@ class Handler(BaseHTTPRequestHandler):
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/quality":
             return self._handle_quality(qs)
+        if path == "/api/research-links":
+            return self._handle_research_links(qs)
         if path == "/api/ipo":
             return self._handle_cached_domain(
                 "ipo:calendar",
@@ -469,6 +471,22 @@ class Handler(BaseHTTPRequestHandler):
             self,
             {"ok": True, "symbol": symbol or None, "providers": rows, "quote": summary},
         )
+
+    def _handle_research_links(self, qs):
+        """Research Hub destinations: pure URL construction, zero external
+        fetching. Company name comes from the cached quote chain."""
+        from services import research_links as _rl
+
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        if not symbol:
+            return _send_json(self, {"ok": False, "error": "symbol required"}, 400)
+        name = ""
+        try:
+            q = registry.market_data.get_quote(symbol)
+            name = (q.get("data") or {}).get("name") or ""
+        except Exception:
+            name = ""
+        return _send_json(self, {"ok": True, **_rl.destinations(symbol, name)})
 
     def _handle_cached_domain(self, cache_key: str, ttl: float, fetch):
         """Slow-domain wrapper: serve TTLCache unless refresh is allowed."""

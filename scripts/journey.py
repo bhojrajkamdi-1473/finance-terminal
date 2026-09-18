@@ -28,7 +28,7 @@ ROUTES = [
     (
         "company-overview",
         "company/RELIANCE.NS",
-        ["RELIANCE", "Overview", "Last updated", "52W high"],
+        ["RELIANCE", "Overview", "Last updated", "52W high", "Research Hub"],
     ),
     (
         "company-charts",

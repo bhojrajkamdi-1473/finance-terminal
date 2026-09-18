@@ -98,6 +98,7 @@ h2,.h-sec{font-size:12.5px;margin:16px 0 8px;font-weight:700;letter-spacing:.01e
 .sec .s-tk b{color:var(--ink-2)}
 /* ---------- tables ---------- */
 .twrap{overflow-x:auto}
+.hub td{white-space:normal !important;vertical-align:top}
 table.t{width:100%;border-collapse:collapse;font-size:12px}
 table.t th{position:sticky;top:0;background:var(--surface);text-align:left;color:var(--slate);font-weight:650;font-size:10px;text-transform:uppercase;letter-spacing:.07em;padding:6px var(--cell-x);border-bottom:1px solid var(--line-2);white-space:nowrap;z-index:1}
 table.t td{padding:var(--cell-y) var(--cell-x);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11.5px;white-space:nowrap;min-height:var(--row-h)}

@@ -275,6 +275,25 @@ class ApiTest(unittest.TestCase):
             else:
                 self.fail(f"expected 404 for {path}")
 
+    def test_research_links_endpoint(self):
+        import json as _json
+
+        status, body = _get(self.base, "/api/research-links?symbol=TATASTEEL.NS")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        by_id = {x["id"]: x for x in body["official"] + body["research"]}
+        self.assertIn("screener.in/company/TATASTEEL/", by_id["screener"]["url"])
+        for x in body["official"] + body["research"]:
+            if x["url"]:
+                self.assertTrue(x["url"].startswith("https://"))
+        raw = _json.dumps(body)
+        for token in ("API_KEY", "apikey", "secret"):
+            self.assertNotIn(token, raw)
+
+    def test_research_links_requires_symbol(self):
+        status, _body = _get(self.base, "/api/research-links?symbol=")
+        self.assertEqual(status, 400)
+
     def test_earnings_ipo_macro_technical_unavailable_without_key(self):
         if os.environ.get("ALPHA_VANTAGE_API_KEY") or os.environ.get(
             "FUNDAMENTALS_API_KEY"
