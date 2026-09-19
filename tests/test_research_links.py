@@ -121,9 +121,7 @@ class TestUSDestinations(unittest.TestCase):
         )
         d = rl.destinations("MSFT", "Microsoft", "NasdaqGS")
         gf = next(x for x in d["research"] if x["id"] == "googlefinance")
-        self.assertEqual(
-            _up.unquote(gf["url"].split("/quote/")[1]), "MSFT:NASDAQ"
-        )
+        self.assertEqual(_up.unquote(gf["url"].split("/quote/")[1]), "MSFT:NASDAQ")
 
     def test_google_finance_unknown_venue_omitted(self):
         d = rl.destinations("MSFT", "Microsoft", "UNKNOWN_VENUE_XYZ")

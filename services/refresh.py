@@ -29,6 +29,7 @@ EARNINGS_TTL = 24 * 3600.0
 IPO_TTL = 7 * 24 * 3600.0
 MACRO_TTL = 7 * 24 * 3600.0
 TECHNICAL_TTL = 3600.0
+BREADTH_TTL = 4 * 3600.0
 
 
 def now_ist_str() -> str:

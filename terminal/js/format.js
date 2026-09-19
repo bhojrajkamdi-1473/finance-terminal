@@ -66,6 +66,17 @@
       rate_limited: ["pill-na", "RATE LIMITED"],
       AVAILABLE: ["pill-live", "AVAILABLE"],
       STALE: ["pill-na", "STALE"],
+      CACHED: ["pill-calc", "CACHED"],
+      CROSS_CHECK_OK: ["pill-live", "CROSS-CHECKED"],
+      SINGLE_SOURCE: ["pill-delayed", "SINGLE SOURCE"],
+      PROVIDER_DISCREPANCY: ["pill-bad", "DISCREPANCY"],
+      DISCREPANCY: ["pill-bad", "DISCREPANCY"],
+      NOT_COMPARABLE: ["pill-na", "NOT COMPARABLE"],
+      PLAN_LIMITATION: ["pill-na", "PLAN LIMITED"],
+      PLAN_LIMITED: ["pill-na", "PLAN LIMITED"],
+      AUTH_REQUIRED: ["pill-na", "AUTH REQUIRED"],
+      KEY_GATED: ["pill-na", "KEY GATED"],
+      AUTHORIZATION_REQUIRED: ["pill-na", "AUTH REQUIRED"],
     }[status] || ["pill-na", String(status || "—").toUpperCase()];
     return '<span class="pill ' + m[0] + '">' + m[1] + "</span>";
   }

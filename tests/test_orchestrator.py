@@ -278,5 +278,46 @@ class TestManagerDomains(KeyedTestCase):
         self.assertEqual(env["status"], "unavailable")
 
 
+class TestFailureIsolation(KeyedTestCase):
+    """Phase 19: any single leg may die; the manager must stay honest.
+
+    Fake key VALUES only flip the configured-flags so stub legs
+    dispatch; stubs never touch the network.
+    """
+
+    def _boom(self, *a, **k):
+        raise ConnectionError("upstream down")
+
+    def test_yahoo_down_others_cover(self):
+        yahoo = Stub(get_quote=self._boom)
+        td = Stub(
+            get_quote=lambda s: _q("twelvedata", price=50.0),
+        )
+        m = _manager(yahoo=yahoo, td=td)
+        env = m.get_quote("X")
+        self.assertIn(env["status"], ("live", "delayed"))
+        self.assertEqual(env["data"]["price"], 50.0)
+
+    def test_all_legs_raise_is_unavailable(self):
+        yahoo = Stub(get_quote=self._boom)
+        td = Stub(get_quote=self._boom)
+        m = _manager(yahoo=yahoo, td=td)
+        env = m.get_quote("X")
+        # honest failure envelope: never a crash, never fake data
+        self.assertIn(env["status"], ("unavailable", "error"))
+        self.assertTrue(env.get("message"))
+        self.assertIsNone(env.get("data"))
+
+    def test_one_analytics_module_failure_isolated(self):
+        # technicals functions degrade independently; compute_all still
+        # returns what it can with Nones, never crashes.
+        from services import technicals as t
+
+        out = t.compute_all([None, None, None])
+        self.assertIsNone(out["sma20"])
+        self.assertIsNone(out["rsi14"])
+        self.assertEqual(out["periods"], 0)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1161,8 +1161,32 @@
         "VCP: " + F.esc(vcp.method || "Minervini-style contraction screen") + "<br>" +
         "Source: calculated locally from verified backend history (" + F.esc(d.history_source || "?") +
         ") · " + F.esc(d.history_range || "") + " · not provider-reported.</div>" +
+        "<h3 style='margin-top:12px'>Market breadth (tracked universe)</h3>" +
+        "<div id='tq-breadth'><button class='btn sm' id='tq-bload'>Compute breadth</button> " +
+        "<span class='src'>30 histories max · cached 4h server-side · explicit universe only</span></div>" +
         srcLine(r.body);
       el("tq-out").innerHTML = h;
+      el("tq-bload").onclick = function () {
+        if (!el("tq-breadth")) return;
+        el("tq-breadth").innerHTML = skel(3);
+        API.get("breadth").then(function (br) {
+          if (!el("tq-breadth")) return;
+          var bd = br.body && br.body.data;
+          if (!bd) {
+            el("tq-breadth").innerHTML = unavail((br.body && br.body.message) || "Breadth unavailable.") + srcLine(br.body);
+            return;
+          }
+          el("tq-breadth").innerHTML = "<div class='kpis'>" +
+            kpi("Phase 2", bd.phase2_pct + "%", "of scored") +
+            kpi("Phase 4", bd.phase4_pct + "%", "of scored") +
+            kpi("Advancers", bd.advancers, "last bar") +
+            kpi("Decliners", bd.decliners, "last bar") +
+            kpi("Coverage", bd.coverage_pct + "%", bd.coverage_note) +
+            kpi("Scored", bd.scored + "/" + bd.universe_size, "universe: tracked-symbols") + "</div>" +
+            ((bd.missing_symbols || []).length ? "<div class='prov'>Missing: <b>" + F.esc(bd.missing_symbols.join(", ")) + "</b></div>" : "") +
+            srcLine(br.body);
+        });
+      };
     });
   }
   function loadTvWidget(sym) {

@@ -265,6 +265,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_technical(qs)
         if path == "/api/analytics":
             return self._handle_analytics(qs)
+        if path == "/api/breadth":
+            return self._handle_breadth(qs)
         if path == "/api/screener":
             return self._handle_screener(qs)
         if path == "/api/watchlist":
@@ -763,6 +765,54 @@ class Handler(BaseHTTPRequestHandler):
             "served_from": "calculated",
         }
         _domain_cache.set(cache_key, env, refresh.TECHNICAL_TTL)
+        return _send_json(self, env, _envelope_status(env))
+
+    def _handle_breadth(self, qs):
+        """Market breadth over the EXPLICIT tracked universe only.
+
+        Cached 4h. Reports universe size, scored count and coverage —
+        PARTIAL COVERAGE is stated, never presented as the whole market.
+        """
+        from services import technicals as _t
+
+        cache_key = "breadth:tracked"
+        hit = _domain_cache.get(cache_key)
+        if hit is not None:
+            env = dict(hit)
+            env["served_from"] = "cache"
+            return _send_json(self, env, _envelope_status(env))
+        universe = [s for s in DEFAULT_SYMBOLS if not s.startswith("^")][:30]
+        series: dict[str, list] = {}
+        missing: list[str] = []
+        for sym in universe:
+            try:
+                hh = registry.history.get_historical_prices(sym, "1Y", "1d")
+            except Exception:
+                missing.append(sym)
+                continue
+            if hh.get("data") and hh["data"].get("bars"):
+                series[sym] = [b.get("c") for b in hh["data"]["bars"]]
+            else:
+                missing.append(sym)
+        out = _t.breadth(series)
+        out["universe"] = "tracked-symbols"
+        out["universe_symbols"] = universe
+        out["missing_symbols"] = missing
+        out["coverage_pct"] = (
+            round(len(series) / len(universe) * 100, 1) if universe else 0.0
+        )
+        out["coverage_note"] = "FULL_COVERAGE" if not missing else "PARTIAL_COVERAGE"
+        env = {
+            "status": "live",
+            "source": "terminal-calc",
+            "as_of": out["as_of"],
+            "timeliness": "CALCULATED",
+            "timeliness_note": "Breadth over the tracked universe only.",
+            "data": out,
+            "message": None,
+            "served_from": "calculated",
+        }
+        _domain_cache.set(cache_key, env, refresh.BREADTH_TTL)
         return _send_json(self, env, _envelope_status(env))
 
     # Screener metric registry: getter kind + value extractor.

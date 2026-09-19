@@ -280,8 +280,7 @@ class ProviderManager:
             failed = {
                 name: str(e.get("message") or e.get("status"))[:200]
                 for name, e in results.items()
-                if isinstance(e, dict)
-                and e.get("status") not in ("live", "delayed")
+                if isinstance(e, dict) and e.get("status") not in ("live", "delayed")
             }
             if failed:
                 env["leg_errors"] = failed
@@ -630,8 +629,11 @@ class ProviderManager:
                     "as_of": None,
                     "data": None,
                     "message": "Valuation could not be answered by any provider "
-                    "right now: " + "; ".join(_queried(results)) + ". "
-                    + "; ".join(_leg_detail(results)) + " Set "
+                    "right now: "
+                    + "; ".join(_queried(results))
+                    + ". "
+                    + "; ".join(_leg_detail(results))
+                    + " Set "
                     "ALPHA_VANTAGE_API_KEY and/or TWELVE_DATA_API_KEY and/or "
                     "INDIAN_STOCK_MARKET_API_KEY to enable. (Common causes: "
                     "Alpha Vantage free quota spent (25/day), Twelve Data "

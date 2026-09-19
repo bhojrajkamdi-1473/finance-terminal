@@ -131,6 +131,7 @@ tr.hl-dn td{background:var(--dn-soft)}
 .pill-calc{color:var(--acc-ink);border-color:#c3d4f5;background:var(--acc-soft)}
 .pill-ai{color:#6d4fc2;border-color:#d9cdf3;background:#f1ebfd}
 .pill-na{color:var(--faint);border-color:var(--line-2)}
+.pill-bad{color:var(--dn);border-color:#eecaca;background:var(--dn-soft)}
 .src{font-size:var(--fs-micro);color:var(--faint);font-family:var(--mono)}
 /* ---------- controls ---------- */
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
