@@ -231,6 +231,184 @@ class TestSymbols(unittest.TestCase):
         self.assertIn("unresolved", out)
 
 
+class TestAnalyticsPhase(unittest.TestCase):
+    def test_phase2_uptrend(self):
+        # steady rise: price above rising long averages, within band
+        closes = [100.0 + i * 0.35 + (i % 7) * 0.1 for i in range(260)]
+        out = t.phase(closes)
+        self.assertEqual(out["phase"], "Phase 2")
+        self.assertTrue(out["checks"]["price_above_200_sma"])
+        self.assertIn("Weinstein", out["method"])
+
+    def test_phase4_downtrend(self):
+        closes = [300.0 - i * 0.5 - (i % 5) * 0.1 for i in range(260)]
+        out = t.phase(closes)
+        self.assertEqual(out["phase"], "Phase 4")
+
+    def test_phase_insufficient(self):
+        out = t.phase([100.0] * 50)
+        self.assertEqual(out["phase"], "UNKNOWN")
+        self.assertIn("INSUFFICIENT_DATA", out["reason"])
+
+    def test_sma_slope_sign(self):
+        rising = [100.0 + i for i in range(60)]
+        falling = [200.0 - i for i in range(60)]
+        flat = [100.0] * 60
+        self.assertGreater(t.sma_slope(rising, 20), 0)
+        self.assertLess(t.sma_slope(falling, 20), 0)
+        self.assertEqual(t.sma_slope(flat, 20), 0.0)
+        self.assertIsNone(t.sma_slope([1.0, 2.0], 20))
+
+
+class TestRelativeStrength(unittest.TestCase):
+    def test_outperformance(self):
+        asset = [100.0 * (1.002**i) for i in range(120)]
+        bench = [100.0 * (1.001**i) for i in range(120)]
+        out = t.relative_strength(asset, bench, "NIFTY 50", lookback=63)
+        self.assertEqual(out["status"], "OK")
+        self.assertEqual(out["benchmark"], "NIFTY 50")
+        self.assertGreater(out["rs_pp"], 0)
+        self.assertGreater(out["stock_return_pct"], out["benchmark_return_pct"])
+
+    def test_no_benchmark(self):
+        out = t.relative_strength([100.0] * 120, None)
+        self.assertEqual(out["status"], "NO_BENCHMARK")
+
+    def test_short_series(self):
+        out = t.relative_strength([1.0, 2.0], [1.0, 2.0])
+        self.assertEqual(out["status"], "INSUFFICIENT_DATA")
+
+
+class TestVCPBreakout(unittest.TestCase):
+    def test_insufficient(self):
+        self.assertEqual(t.vcp([100.0] * 30)["status"], "INSUFFICIENT_DATA")
+        self.assertEqual(t.breakout([100.0] * 10)["status"], "INSUFFICIENT_DATA")
+
+    def test_vcp_constructed(self):
+        # three successively shallower pullbacks off rising peaks
+        closes = []
+        base = 100.0
+        for leg, drop in ((120.0, 12.0), (130.0, 8.0), (138.0, 4.0)):
+            steps = 20
+            for i in range(steps):
+                closes.append(base + (leg - base) * (i + 1) / steps)
+            base = leg
+            for i in range(10):
+                closes.append(leg - drop * (i + 1) / 10)
+            base = leg - drop
+        vols = [1000.0 - i * 2 for i in range(len(closes))]
+        out = t.vcp(closes, volumes=vols)
+        self.assertEqual(out["status"], "OK")
+        self.assertGreaterEqual(out["contraction_count"], 2)
+        self.assertTrue(out["detected"])
+
+    def test_breakout_levels(self):
+        flat = [100.0] * 100 + [130.0]
+        out = t.breakout(flat)
+        self.assertEqual(out["status"], "ABOVE_LEVEL")
+        self.assertEqual(out["reference_level"], 100.0)
+        low = [100.0] * 100 + [50.0]
+        self.assertEqual(t.breakout(low)["status"], "BELOW_LEVEL")
+
+
+class TestTrendTemplateBreadthRegime(unittest.TestCase):
+    def test_template_full(self):
+        closes = [100.0 + i * 0.3 for i in range(260)]
+        out = t.trend_template(closes)
+        self.assertIn("conditions", out)
+        self.assertEqual(out["total"], 9)
+        self.assertEqual(out["conditions"]["price_above_200_sma"], "pass")
+
+    def test_template_short(self):
+        out = t.trend_template([1.0, 2.0, 3.0])
+        self.assertEqual(out["status"], "INSUFFICIENT_DATA")
+
+    def test_breadth_explicit_universe(self):
+        up = [100.0 + i * 0.35 for i in range(260)]
+        dn = [300.0 - i * 0.5 for i in range(260)]
+        out = t.breadth({"AAA": up, "BBB": dn, "CCC": [1.0, 2.0]})
+        self.assertEqual(out["universe_size"], 3)
+        self.assertEqual(out["scored"], 2)
+        self.assertEqual(out["advancers"] + out["decliners"] + out["unchanged"], 2)
+        self.assertIn("as_of", out)
+
+    def test_regime(self):
+        rising = [100.0 + i * 0.4 for i in range(260)]
+        falling = [300.0 - i * 0.5 for i in range(260)]
+        self.assertEqual(t.market_regime(rising)["status"], "RISK_ON")
+        self.assertEqual(t.market_regime(falling)["status"], "RISK_OFF")
+        self.assertEqual(t.market_regime([1.0, 2.0])["status"], "UNKNOWN")
+
+
+class TestRiskRewardScoringFundamentals(unittest.TestCase):
+    def test_risk_reward(self):
+        out = t.risk_reward(100.0, 2.0, 110.0)
+        self.assertEqual(out["status"], "OK")
+        self.assertAlmostEqual(out["technical_stop"], 96.0)
+        self.assertAlmostEqual(out["risk_pct"], 4.0)
+        self.assertAlmostEqual(out["reward_pct"], 10.0)
+        self.assertAlmostEqual(out["risk_reward_ratio"], 2.5)
+        self.assertIn("not investment advice", out["label"].lower())
+
+    def test_risk_reward_missing(self):
+        self.assertEqual(
+            t.risk_reward(100.0, None, 110.0)["status"], "INSUFFICIENT_DATA"
+        )
+        self.assertEqual(t.risk_reward(None, None, None)["status"], "INSUFFICIENT_DATA")
+
+    def test_scoring_transparent(self):
+        out = t.score_snapshot(
+            {
+                "components": {
+                    "trend": {"value": 8, "max": 10},
+                    "momentum": {"value": 3, "max": 10},
+                    "missing": {"value": None, "max": 10},
+                }
+            }
+        )
+        self.assertEqual(out["components"]["trend"]["state"], "strong")
+        self.assertEqual(out["components"]["momentum"]["state"], "weak")
+        self.assertEqual(out["components"]["missing"]["state"], "UNKNOWN")
+        self.assertIn("Technical Structure", out["overall"])
+
+    def test_scoring_empty(self):
+        out = t.score_snapshot({})
+        self.assertIn("INSUFFICIENT_DATA", out["overall"])
+
+    def test_fundamental_trends(self):
+        reps = [
+            {
+                "_period": "FY25",
+                "totalRevenue": "1100",
+                "netIncome": "110",
+                "eps": "11",
+            },
+            {
+                "_period": "FY25",
+                "totalRevenue": "1000",
+                "netIncome": "100",
+                "eps": "10",
+            },
+        ]
+        out = t.fundamental_trends(reps)
+        self.assertEqual(out["status"], "OK")
+        self.assertAlmostEqual(out["revenue_growth_pct"], 10.0)
+        self.assertAlmostEqual(out["net_margin_pct"], 10.0)
+
+    def test_fundamental_mixed_period(self):
+        reps = [
+            {"_period": "FY25", "totalRevenue": "1100"},
+            {"_period": "Q1", "totalRevenue": "300"},
+        ]
+        self.assertEqual(t.fundamental_trends(reps)["status"], "NOT_COMPARABLE")
+
+    def test_fundamental_single(self):
+        self.assertEqual(
+            t.fundamental_trends([{"totalRevenue": "5"}])["status"],
+            "INSUFFICIENT_DATA",
+        )
+
+
 class TestAvValidation(unittest.TestCase):
     def test_states(self):
         from providers.fundamentals import _validate

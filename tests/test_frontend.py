@@ -46,9 +46,7 @@ class TestJsSyntax(unittest.TestCase):
             code = re.sub(r"'(?:[^'\\\n]|\\.)*'", "''", code)
             code = re.sub(r'"(?:[^"\\\n]|\\.)*"', '""', code)
             self.assertNotIn("`", code, f"{name} must not use template literals")
-            self.assertNotRegex(
-                code, r"=>", f"{name} must not use arrow functions"
-            )
+            self.assertNotRegex(code, r"=>", f"{name} must not use arrow functions")
 
 
 class TestFrontendHygiene(unittest.TestCase):

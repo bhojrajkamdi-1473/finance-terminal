@@ -36,6 +36,11 @@ ROUTES = [
         ["1Y", "SMA20", "TradingView"],
     ),
     (
+        "company-technicals",
+        "company/RELIANCE.NS/Technicals",
+        ["Technical regime", "Trend template", "Methodology"],
+    ),
+    (
         "company-earnings",
         "company/RELIANCE.NS/Earnings",
         ["Earnings"],

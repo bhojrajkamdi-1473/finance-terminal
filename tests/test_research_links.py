@@ -18,6 +18,8 @@ ALLOWED_HOSTS = (
     "trendlyne.com",
     "www.tickertape.in",
     "www.sec.gov",
+    "www.moneycontrol.com",
+    "www.google.com",
 )
 
 
@@ -98,6 +100,41 @@ class TestUSDestinations(unittest.TestCase):
         d = rl.destinations("AAPL", "Apple Inc")
         sec = next(x for x in d["official"] if x["id"] == "sec")
         self.assertIn("browse-edgar", sec["url"])
+
+    def test_moneycontrol_landing_present(self):
+        for sym in ("TATASTEEL.NS", "MSFT"):
+            d = rl.destinations(sym, "X")
+            mc = [x for x in d["research"] if x["id"] == "moneycontrol"]
+            self.assertEqual(len(mc), 1)
+            self.assertIn("moneycontrol.com/stocksmarketsindia", mc[0]["url"])
+            self.assertEqual(mc[0]["badge"], "EXTERNAL")
+
+    def test_google_finance_mapped_venues(self):
+        import urllib.parse as _up
+
+        d = rl.destinations("TATASTEEL.NS", "Tata Steel", "NSE")
+        gf = next(x for x in d["research"] if x["id"] == "googlefinance")
+        self.assertIn("TATASTEEL%3ANSE", gf["url"])
+        self.assertEqual(
+            _up.unquote(gf["url"].split("/quote/")[1]),
+            "TATASTEEL:NSE",
+        )
+        d = rl.destinations("MSFT", "Microsoft", "NasdaqGS")
+        gf = next(x for x in d["research"] if x["id"] == "googlefinance")
+        self.assertEqual(
+            _up.unquote(gf["url"].split("/quote/")[1]), "MSFT:NASDAQ"
+        )
+
+    def test_google_finance_unknown_venue_omitted(self):
+        d = rl.destinations("MSFT", "Microsoft", "UNKNOWN_VENUE_XYZ")
+        ids = [x["id"] for x in d["research"]]
+        self.assertNotIn("googlefinance", ids)
+
+    def test_gf_exchange_map(self):
+        self.assertEqual(rl._gf_exchange("NasdaqGS"), "NASDAQ")
+        self.assertEqual(rl._gf_exchange("XNYS"), "NYSE")
+        self.assertEqual(rl._gf_exchange("XBOM"), "BSE")
+        self.assertIsNone(rl._gf_exchange("SOMETHING_ELSE"))
 
 
 class TestEdgeCases(unittest.TestCase):

@@ -32,6 +32,8 @@ from .indianapi import IndianApiProvider
 from .news import YahooCorporateActionsProvider, YahooRssNewsProvider
 from .orchestrator import ProviderManager
 from .stooq import StooqProvider
+from .tradingview import TradingViewProvider
+from .tradingview import authorization_scope as _tradingview_scope
 from .twelvedata import TwelveDataProvider, budget_snapshot
 from .yahoo import YahooMarketDataProvider
 
@@ -40,6 +42,7 @@ _indianapi = IndianApiProvider()
 _twelvedata = TwelveDataProvider()
 _alphavantage = AlphaVantageFundamentalsProvider()
 _stooq = StooqProvider()
+_tradingview = TradingViewProvider()
 
 # QUOTE chain: Indian leg first (passes non-Indian symbols through),
 # then Yahoo -> Twelve Data -> Alpha Vantage (scarce, 6 h cache).
@@ -212,11 +215,14 @@ def providers_status() -> dict:
                 "label": "TradingView",
                 "state": "widget_available",
                 "detail": "Official chart widget embed only (chart "
-                "visualisation, not a backend data feed). Never scraped, "
-                "never presented as our data.",
+                "visualisation, not a backend data feed). Data feeds "
+                "stay disabled without TRADINGVIEW_ENABLED=1 plus a "
+                "documented authorized scope. Never scraped, never "
+                "presented as our data.",
                 "key_required": False,
                 "key_configured": True,
-                "capabilities": {"chart": True},
+                "capabilities": _base.describe(_tradingview),
+                "authorization_scope": _tradingview_scope(),
             },
         ],
     }

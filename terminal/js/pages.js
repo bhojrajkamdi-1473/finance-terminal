@@ -401,7 +401,7 @@
   }
 
   /* ---------- company detail ---------- */
-  var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings", "News", "Actions", "Holdings", "Charts", "Research"];
+  var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings", "News", "Actions", "Holdings", "Charts", "Technicals", "Research"];
   function pCompany(sym, tab) {
     sym = (sym || "").toUpperCase();
     tab = tab || "Overview";
@@ -590,6 +590,7 @@
     if (tab === "Actions") return tActions(sym, b);
     if (tab === "Holdings") return tHoldings(sym, b);
     if (tab === "Charts") return tCharts(sym, b, "1Y", "1d");
+    if (tab === "Technicals") return tTechnicals(sym, b);
     if (tab === "Research") return tResearch(sym, b);
   }
   function tOverview(sym, b) {
@@ -1095,6 +1096,73 @@
     el("ch-t1").onclick = function () { tCharts(sym, b, range, interval); };
     Array.prototype.forEach.call(document.querySelectorAll("#ch-ranges button"), function (btn) {
       btn.onclick = function () { tCharts(sym, b, btn.getAttribute("data-r"), range === "1D" ? "5m" : "1d"); };
+    });
+  }
+  function tTechnicals(sym, b) {
+    b.innerHTML = "<div class='card' id='tq-out'>" + skel(6) + "</div>";
+    API.get("analytics", { symbol: sym }).then(function (r) {
+      if (!el("tq-out")) return;
+      var d = r.body && r.body.data;
+      if (!d) {
+        el("tq-out").innerHTML = "<h3>Technical analytics " + F.statusPill("CALCULATED") + "</h3>" +
+          unavail((r.body && r.body.message) || "Needs verified history.") + srcLine(r.body);
+        return;
+      }
+      function kv(label, v, suffix) {
+        return "<div class='metric'><div class='l'>" + label + "</div><div class='v' style='font-size:13px'>" +
+          (v === null || v === undefined ? "—" : F.fmtNum(v) + (suffix || "")) + "</div></div>";
+      }
+      function condTable(conds) {
+        var keys = Object.keys(conds || {});
+        if (!keys.length) return unavail("Trend checklist unavailable (insufficient history).");
+        return '<div class="twrap"><table class="t"><thead><tr><th scope="col">Condition</th><th scope="col">Result</th></tr></thead><tbody>' +
+          keys.map(function (k) {
+            var v = conds[k];
+            var pill = v === "pass" ? "<span class='pill pill-live'>PASS</span>" :
+              (v === "fail" ? "<span class='pill pill-na'>FAIL</span>" : "<span class='pill pill-delayed'>UNKNOWN</span>");
+            return "<tr><td class='txt'>" + F.esc(k.replace(/_/g, " ")) + "</td><td>" + pill + "</td></tr>";
+          }).join("") + "</tbody></table></div>";
+      }
+      var ph = d.phase || {}, rs = d.relative_strength || {}, vcp = d.vcp || {},
+        bo = d.breakout || {}, tt = d.trend_template || {}, rr = d.risk_reward || {},
+        sc = d.score || {}, rg = d.regime || {};
+      var comps = (sc.components || {});
+      var h = "<h3>Technical regime " + F.statusPill("CALCULATED") + "</h3>" +
+        "<div class='kpis'>" +
+        kpi("Phase", ph.phase || "—", "descriptive, not a forecast") +
+        kpi("Regime", rg.status || "—", "benchmark gauge") +
+        kpi("RS vs " + F.esc(d.benchmark || "—"), rs.rs_pp === null || rs.rs_pp === undefined ? "—" : F.fmtPct(rs.rs_pp), "pp over lookback") +
+        kpi("VCP", vcp.detected === null || vcp.detected === undefined ? "—" : (vcp.detected ? "Detected" : "Not detected"), vcp.quality || "") +
+        kpi("Breakout", bo.status || "—", bo.distance_pct === null || bo.distance_pct === undefined ? "" : F.fmtPct(bo.distance_pct) + " vs level") +
+        kpi("Setup score", sc.overall || "—", "components below") + "</div>" +
+        "<h3 style='margin-top:12px'>Trend template (" + (tt.passed === undefined ? "—" : tt.passed + "/" + tt.total) + ")</h3>" +
+        condTable(tt.conditions) +
+        (tt.measurements && tt.measurements.relative_strength && tt.measurements.relative_strength.status === "OK" ? "" :
+          "<div class='prov'>Relative-strength benchmark: <b>" + F.esc(d.benchmark || "none") + "</b></div>") +
+        "<h3 style='margin-top:12px'>Risk / reward (technical reference)</h3>" +
+        (rr.status === "OK"
+          ? "<div class='grid g4'>" + kv("Entry ref", rr.reference_entry) + kv("Stop ref", rr.technical_stop) +
+            kv("Risk", rr.risk_pct, "%") + kv("Target ref", rr.reference_target) +
+            kv("Reward", rr.reward_pct, "%") + kv("R/R", rr.risk_reward_ratio) + "</div>" +
+            "<div class='prov'>TECHNICAL REFERENCE — not investment advice. No target invented: requires a real level.</div>"
+          : unavail("Risk/reward needs price, ATR and a real resistance level.")) +
+        "<h3 style='margin-top:12px'>Score components</h3>" +
+        '<div class="twrap"><table class="t"><thead><tr><th scope="col">Component</th><th scope="col" class="num">Value</th><th scope="col" class="num">Max</th><th scope="col">State</th></tr></thead><tbody>' +
+        Object.keys(comps).map(function (k) {
+          var c = comps[k];
+          return "<tr><td class='txt'>" + F.esc(c.label || k) + "</td><td class='num'>" +
+            (c.value === null || c.value === undefined ? "—" : c.value) + "</td><td class='num'>" + c.max +
+            "</td><td>" + F.esc(c.state) + (c.note ? " <span class='src'>" + F.esc(c.note) + "</span>" : "") + "</td></tr>";
+        }).join("") + "</tbody></table></div>" +
+        "<div class='prov'>Overall: <b>" + F.esc(sc.overall || "?") + "</b> (" + F.esc(sc.total) + "/" + F.esc(sc.maximum) + ")" +
+        " · score methodology: equal-weighted transparent components, descriptive labels only.</div>" +
+        "<h3 style='margin-top:12px'>Methodology</h3><div class='src'>" +
+        "Phase: " + F.esc(ph.method || "Weinstein stage rules") + "<br>" +
+        "VCP: " + F.esc(vcp.method || "Minervini-style contraction screen") + "<br>" +
+        "Source: calculated locally from verified backend history (" + F.esc(d.history_source || "?") +
+        ") · " + F.esc(d.history_range || "") + " · not provider-reported.</div>" +
+        srcLine(r.body);
+      el("tq-out").innerHTML = h;
     });
   }
   function loadTvWidget(sym) {

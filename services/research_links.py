@@ -42,6 +42,24 @@ def _country(symbol: str) -> str:
     return "??"
 
 
+def _gf_exchange(exchange: str = "") -> str | None:
+    """Map a Yahoo-style exchange name to a Google Finance suffix.
+
+    Only well-known mappings; unknown venues return None (link omitted,
+    never guessed). Verified live: NASDAQ, NSE (+BSE by same pattern).
+    """
+    e = (exchange or "").strip().upper()
+    if e in ("NASDAQGS", "NASDAQ", "NMS", "XNMS", "XNAS"):
+        return "NASDAQ"
+    if e in ("NYSE", "XNYS"):
+        return "NYSE"
+    if e in ("NSE", "XNSE"):
+        return "NSE"
+    if e in ("BSE", "XBOM"):
+        return "BSE"
+    return None
+
+
 def _is_index(symbol: str) -> bool:
     return (symbol or "").strip().upper().startswith("^")
 
@@ -70,11 +88,13 @@ def _dest(
     }
 
 
-def destinations(symbol: str, company_name: str = "") -> dict:
+def destinations(symbol: str, company_name: str = "", exchange: str = "") -> dict:
     """Build the Research Hub destination list for a symbol.
 
     Never raises; unknown symbols get search/landing fallbacks or
     explicit unavailable entries — never invented deep links.
+    `exchange` (Yahoo-style venue name) enables the Google Finance
+    reference link only for well-known venue mappings.
     """
     symbol = (symbol or "").strip().upper()
     country = _country(symbol)
@@ -82,6 +102,9 @@ def destinations(symbol: str, company_name: str = "") -> dict:
     is_index = _is_index(symbol)
     official: list[dict] = []
     research: list[dict] = []
+    gf_suffix = _gf_exchange(exchange)
+    if country == "IN" and bare and not is_index:
+        gf_suffix = gf_suffix or ("NSE" if symbol.endswith(".NS") else "BSE")
 
     if country == "IN" and not is_index:
         official.append(
@@ -161,6 +184,30 @@ def destinations(symbol: str, company_name: str = "") -> dict:
                 "https://www.tickertape.in/screener/equity",
             )
         )
+        research.append(
+            _dest(
+                "moneycontrol",
+                "Moneycontrol",
+                EXTERNAL,
+                "EXTERNAL",
+                "Moneycontrol markets landing (per-company pages and "
+                "search are bot-gated; no scraping, no API)",
+                "https://www.moneycontrol.com/stocksmarketsindia/",
+            )
+        )
+        if gf_suffix:
+            research.append(
+                _dest(
+                    "googlefinance",
+                    "Google Finance",
+                    EXTERNAL,
+                    "EXTERNAL",
+                    "Google Finance reference quote page (navigation only, "
+                    "not a backend data feed)",
+                    "https://www.google.com/finance/quote/"
+                    + urllib.parse.quote(f"{bare}:{gf_suffix}"),
+                )
+            )
     elif country == "US" and not is_index:
         q = urllib.parse.quote(company_name or bare)
         official.append(
@@ -200,6 +247,30 @@ def destinations(symbol: str, company_name: str = "") -> dict:
                 "Domains are never guessed.",
             )
         )
+        research.append(
+            _dest(
+                "moneycontrol",
+                "Moneycontrol",
+                EXTERNAL,
+                "EXTERNAL",
+                "Moneycontrol markets landing (per-company pages and "
+                "search are bot-gated; no scraping, no API)",
+                "https://www.moneycontrol.com/stocksmarketsindia/",
+            )
+        )
+        if gf_suffix:
+            research.append(
+                _dest(
+                    "googlefinance",
+                    "Google Finance",
+                    EXTERNAL,
+                    "EXTERNAL",
+                    "Google Finance reference quote page (navigation only, "
+                    "not a backend data feed)",
+                    "https://www.google.com/finance/quote/"
+                    + urllib.parse.quote(f"{bare}:{gf_suffix}"),
+                )
+            )
     else:
         official.append(
             _dest(

@@ -263,6 +263,8 @@ class Handler(BaseHTTPRequestHandler):
             )
         if path == "/api/technical":
             return self._handle_technical(qs)
+        if path == "/api/analytics":
+            return self._handle_analytics(qs)
         if path == "/api/screener":
             return self._handle_screener(qs)
         if path == "/api/watchlist":
@@ -500,13 +502,16 @@ class Handler(BaseHTTPRequestHandler):
         symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
         if not symbol:
             return _send_json(self, {"ok": False, "error": "symbol required"}, 400)
-        name = ""
+        name, exchange = "", ""
         try:
             q = registry.market_data.get_quote(symbol)
             name = (q.get("data") or {}).get("name") or ""
+            exchange = (q.get("data") or {}).get("exchange") or ""
         except Exception:
-            name = ""
-        return _send_json(self, {"ok": True, **_rl.destinations(symbol, name)})
+            name, exchange = "", ""
+        return _send_json(
+            self, {"ok": True, **_rl.destinations(symbol, name, exchange)}
+        )
 
     def _handle_cached_domain(self, cache_key: str, ttl: float, fetch):
         """Slow-domain wrapper: serve TTLCache unless refresh is allowed."""
@@ -589,6 +594,168 @@ class Handler(BaseHTTPRequestHandler):
                 f"({hist.get('source')}); not provider-reported."
             ),
             "data": snap,
+            "message": None,
+            "served_from": "calculated",
+        }
+        _domain_cache.set(cache_key, env, refresh.TECHNICAL_TTL)
+        return _send_json(self, env, _envelope_status(env))
+
+    def _handle_analytics(self, qs):
+        """Quantitative analytics bundle, calculated locally from verified
+        backend history. Nothing here calls a provider directly except
+        through registry.history. Never investment advice."""
+        from services import technicals as _t
+
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        if not symbol:
+            return _send_json(
+                self,
+                {"status": "error", "source": "terminal", "message": "symbol required"},
+                400,
+            )
+        bench_param = (qs.get("bench", [""])[0] or "").strip().upper()
+        want_breadth = (qs.get("breadth", [""])[0] or "").strip() == "1"
+        if bench_param:
+            bench = bench_param
+        elif symbol.endswith((".NS", ".BO")):
+            bench = "^NSEI"
+        elif symbol.startswith("^") or "." in symbol:
+            bench = ""
+        else:
+            bench = "^GSPC"
+        cache_key = f"analytics:{symbol}:{bench}:{1 if want_breadth else 0}"
+        hit = _domain_cache.get(cache_key)
+        if hit is not None:
+            env = dict(hit)
+            env["served_from"] = "cache"
+            return _send_json(self, env, _envelope_status(env))
+        hist = registry.history.get_historical_prices(symbol, "5Y", "1d")
+        if not hist.get("data") or not (hist["data"].get("bars") or []):
+            env = {
+                "status": "unavailable",
+                "source": hist.get("source", "history"),
+                "as_of": None,
+                "data": None,
+                "message": f"Analytics need history: {hist.get('message')}",
+                "served_from": "none",
+            }
+            return _send_json(self, env, _envelope_status(env))
+        bars = hist["data"]["bars"]
+        closes = [b.get("c") for b in bars]
+        highs = [b.get("h") for b in bars]
+        lows = [b.get("l") for b in bars]
+        volumes = [b.get("v") for b in bars]
+        hist_source = f"history:{hist.get('source')}"
+        bench_closes = None
+        bench_source = None
+        if bench:
+            bh = registry.history.get_historical_prices(bench, "5Y", "1d")
+            if bh.get("data") and bh["data"].get("bars"):
+                bbars = {b["t"]: b.get("c") for b in bh["data"]["bars"]}
+                bench_closes = [bbars.get(b["t"]) for b in bars]
+                bench_source = bh.get("source")
+        snap = _t.compute_all(closes, highs, lows, bench_closes, source=hist_source)
+        bo = _t.breakout(closes, highs, volumes)
+        atr_series = _t.atr(highs, lows, closes)
+        atr_last = atr_series[-1] if atr_series else None
+        last_close = closes[-1] if closes else None
+        rr = _t.risk_reward(last_close, atr_last, bo.get("reference_level"))
+        data = {
+            "symbol": symbol,
+            "snapshot": snap,
+            "phase": _t.phase(closes),
+            "relative_strength": _t.relative_strength(
+                closes, bench_closes, bench or "", 63
+            ),
+            "benchmark": bench or None,
+            "benchmark_source": bench_source,
+            "vcp": _t.vcp(closes, highs, lows, volumes),
+            "breakout": bo,
+            "trend_template": _t.trend_template(closes, bench_closes, bench or ""),
+            "risk_reward": rr,
+            "history_range": hist["data"].get("range"),
+            "history_source": hist.get("source"),
+        }
+        if want_breadth:
+            uni = {}
+            for s in [x for x in DEFAULT_SYMBOLS if not x.startswith("^")][:30]:
+                try:
+                    hh = registry.history.get_historical_prices(s, "1Y", "1d")
+                    if hh.get("data") and hh["data"].get("bars"):
+                        uni[s] = [b.get("c") for b in hh["data"]["bars"]]
+                except Exception:
+                    continue
+            data["breadth"] = _t.breadth(uni)
+            data["breadth"]["universe"] = "tracked-symbols"
+        else:
+            data["breadth"] = {
+                "status": "SKIPPED",
+                "reason": "pass breadth=1 to compute",
+            }
+        data["regime"] = _t.market_regime(
+            bench_closes or [],
+            data["breadth"]
+            if isinstance(data.get("breadth"), dict)
+            and data["breadth"].get("status") != "SKIPPED"
+            else None,
+        )
+        data["regime"]["benchmark"] = bench or None
+        data["score"] = _t.score_snapshot(
+            {
+                "components": {
+                    "trend": {
+                        "value": (data["trend_template"].get("passed") or 0)
+                        / max(data["trend_template"].get("total") or 1, 1)
+                        * 10,
+                        "max": 10,
+                    },
+                    "momentum": {
+                        "value": 5 + (data["relative_strength"].get("rs_pp") or 0) / 4,
+                        "max": 10,
+                    },
+                    "volume_confirmation": {
+                        "value": 8
+                        if bo.get("volume_confirmed")
+                        else (
+                            4 if bo.get("status") in ("AT_LEVEL", "ABOVE_LEVEL") else 2
+                        ),
+                        "max": 10,
+                    },
+                    "pattern_quality": {
+                        "value": 8
+                        if (
+                            data["vcp"].get("detected")
+                            and data["vcp"].get("quality") == "constructive"
+                        )
+                        else (5 if data["vcp"].get("detected") else 2),
+                        "max": 10,
+                    },
+                    "risk_reward": {
+                        "value": min(
+                            10,
+                            max(
+                                0,
+                                (rr.get("risk_reward_ratio") or 0) * 10 / 3,
+                            ),
+                        )
+                        if rr.get("status") == "OK"
+                        else None,
+                        "max": 10,
+                    },
+                }
+            }
+        )
+        env = {
+            "status": "live",
+            "source": "terminal-calc",
+            "as_of": snap["calculated_at"],
+            "timeliness": "CALCULATED",
+            "timeliness_note": (
+                "Quantitative analytics calculated locally from verified "
+                f"backend history ({hist.get('source')}). Descriptive only; "
+                "not investment advice; never provider-reported."
+            ),
+            "data": data,
             "message": None,
             "served_from": "calculated",
         }

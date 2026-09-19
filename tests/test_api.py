@@ -375,6 +375,55 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertTrue(body["data"]["results"])
 
+    def test_analytics_endpoint_shape(self):
+        # NETWORK_GATED: needs Yahoo history; asserts shape, never values.
+        if not _network_ok():
+            self.skipTest("no network to upstream provider")
+        status, body = _get(self.base, "/api/analytics?symbol=RELIANCE.NS")
+        self.assertEqual(status, 200)
+        if body.get("status") != "live":
+            self.assertEqual(body["status"], "unavailable")
+            return
+        self.assertEqual(body.get("timeliness"), "CALCULATED")
+        d = body.get("data") or {}
+        for key in (
+            "phase",
+            "relative_strength",
+            "vcp",
+            "breakout",
+            "trend_template",
+            "risk_reward",
+            "score",
+            "regime",
+        ):
+            self.assertIn(key, d, key)
+        self.assertEqual(d["relative_strength"].get("benchmark"), "^NSEI")
+
+    def test_analytics_missing_symbol_400(self):
+        status, _body = _get(self.base, "/api/analytics")
+        self.assertEqual(status, 400)
+
+    def test_tradingview_adapter_gated(self):
+        from providers.tradingview import TradingViewProvider, authorization_scope
+
+        p = TradingViewProvider()
+        self.assertTrue(p.capabilities.get("chart"))
+        self.assertFalse(p.capabilities.get("quote"))
+        env = p.get_quote("AAPL")
+        self.assertEqual(env["status"], "unavailable")
+        self.assertIn("TRADINGVIEW_ENABLED", env["message"])
+        env = p.search("x")
+        self.assertEqual(env["status"], "unavailable")
+        self.assertIn("visualization", authorization_scope())
+
+    def test_failure_isolation_quote_survives_dead_legs(self):
+        # Bogus symbol: every leg misses honestly, server stays 200,
+        # envelope explains — never a crash, never fake data.
+        status, body = _get(self.base, "/api/quote?symbol=ZZZ_NOPE_123")
+        self.assertEqual(status, 200)
+        self.assertEqual(body["status"], "unavailable")
+        self.assertTrue(body.get("message"))
+
 
 if __name__ == "__main__":
     unittest.main()
