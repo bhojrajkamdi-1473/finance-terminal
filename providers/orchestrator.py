@@ -277,6 +277,14 @@ class ProviderManager:
                 "primary": primary_name,
                 "skipped": skipped,
             }
+            failed = {
+                name: str(e.get("message") or e.get("status"))[:200]
+                for name, e in results.items()
+                if isinstance(e, dict)
+                and e.get("status") not in ("live", "delayed")
+            }
+            if failed:
+                env["leg_errors"] = failed
             return env
 
         return self._cached_or(key, QUOTE_TTL, compute)

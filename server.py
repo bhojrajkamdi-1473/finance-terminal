@@ -489,6 +489,7 @@ class Handler(BaseHTTPRequestHandler):
                 "quote_timeliness": q.get("timeliness"),
                 "reconciliation": rec,
                 "providers_queried": q.get("providers_queried"),
+                "leg_errors": q.get("leg_errors"),
                 "as_of": q.get("as_of"),
             }
         return _send_json(
