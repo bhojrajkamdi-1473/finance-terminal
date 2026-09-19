@@ -143,6 +143,25 @@ def _is_forbidden(exc: Exception) -> bool:
     return isinstance(exc, urllib.error.HTTPError) and exc.code == 403
 
 
+def _err_text(exc: Exception) -> str:
+    """Exception text plus any upstream response body (truncated).
+
+    Twelve Data explains 4xx failures in the body (invalid key vs
+    disabled key vs plan block). Bodies are safe to surface: server
+    responses pass deep secret redaction before reaching clients.
+    """
+    base = str(exc)
+    read = getattr(exc, "read", None)
+    if callable(read):
+        try:
+            body = read().decode("utf-8", "replace")[:300].strip()
+            if body:
+                base += f" | upstream: {body}"
+        except Exception:
+            pass
+    return base
+
+
 def _rate_limited(detail: str) -> dict:
     return {
         "status": "rate_limited",
@@ -205,7 +224,7 @@ class TwelveDataProvider(MarketDataProvider):
         except Exception as exc:
             if _is_rate_limit(exc):
                 return _rate_limited(f"Search throttled: {exc}")
-            return error_envelope("twelvedata", f"Search failed: {exc}")
+            return error_envelope("twelvedata", f"Search failed: {_err_text(exc)}")
         data = payload.get("data") or []
         results = [
             {
@@ -246,7 +265,9 @@ class TwelveDataProvider(MarketDataProvider):
         except Exception as exc:
             if _is_rate_limit(exc):
                 return _rate_limited(f"Quote throttled for {symbol}: {exc}")
-            return error_envelope("twelvedata", f"Quote failed for {symbol}: {exc}")
+            return error_envelope(
+                "twelvedata", f"Quote failed for {symbol}: {_err_text(exc)}"
+            )
         if payload.get("status") == "error" or "code" in payload:
             return unavailable(
                 "twelvedata",
@@ -339,7 +360,9 @@ class TwelveDataProvider(MarketDataProvider):
         except Exception as exc:
             if _is_rate_limit(exc):
                 return _rate_limited(f"History throttled for {symbol}: {exc}")
-            return error_envelope("twelvedata", f"History failed for {symbol}: {exc}")
+            return error_envelope(
+                "twelvedata", f"History failed for {symbol}: {_err_text(exc)}"
+            )
         if payload.get("status") == "error" or "code" in payload:
             return unavailable(
                 "twelvedata",
@@ -407,9 +430,9 @@ class TwelveDataProvider(MarketDataProvider):
                 return unavailable(
                     "twelvedata",
                     f"{endpoint} is not covered by the current Twelve Data "
-                    f"plan ({exc}). No further calls will be spent on it.",
+                    f"plan ({_err_text(exc)}). No further calls will be spent on it.",
                 )
-            return error_envelope("twelvedata", f"{endpoint} failed: {exc}")
+            return error_envelope("twelvedata", f"{endpoint} failed: {_err_text(exc)}")
         if isinstance(payload, dict) and (
             payload.get("status") == "error" or "code" in payload
         ):

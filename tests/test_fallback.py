@@ -262,6 +262,24 @@ class TestTwelveDataMapping(unittest.TestCase):
                 td._day_used,
             ) = saved
 
+    def test_err_text_includes_upstream_body(self):
+        import io
+        import urllib.error
+
+        err = urllib.error.HTTPError(
+            "http://x",
+            401,
+            "Unauthorized",
+            {},
+            io.BytesIO(b'{"code":401,"message":"Invalid API key"}'),
+        )
+        text = td._err_text(err)
+        self.assertIn("401", text)
+        self.assertIn("Invalid API key", text)
+
+    def test_err_text_plain_exception(self):
+        self.assertEqual(td._err_text(ValueError("nope")), "nope")
+
 
 class TestRefresh(unittest.TestCase):
     def test_ist_clock(self):
