@@ -90,6 +90,30 @@ def budget_snapshot() -> dict:
         }
 
 
+def budget_probe(cost: int = 1) -> str | None:
+    """Check whether `cost` credits are available WITHOUT spending.
+
+    Unlike budget_snapshot(), this rolls expired minute/day windows
+    forward first — otherwise a stale snapshot can permanently report
+    an exhausted budget and wrongly gate the provider off.
+    Returns None if allowed, else a human-readable reason.
+    """
+    global _minute_window_start, _minute_used, _day_key, _day_used
+    now = time.time()
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _bucket_lock:
+        if today != _day_key:
+            _day_key, _day_used = today, 0
+            _minute_window_start, _minute_used = now, 0
+        if now - _minute_window_start >= 60:
+            _minute_window_start, _minute_used = now, 0
+        if _minute_used + cost > CREDITS_PER_MINUTE:
+            return "per-minute budget exhausted (8 credits/min on free tier)"
+        if _day_used + cost > CREDITS_PER_DAY:
+            return "daily budget exhausted (800 credits/day on free tier)"
+        return None
+
+
 def to_td_symbol(symbol: str) -> str | None:
     """Map a Yahoo-style symbol to Twelve Data's symbol/exchange format."""
     s = (symbol or "").strip().upper()

@@ -192,6 +192,27 @@ class TestTwelveDataMapping(unittest.TestCase):
                 td._day_used,
             ) = saved
 
+    def test_budget_probe_resets_stale_window(self):
+        # Regression: a stale exhausted snapshot must not gate the
+        # provider off forever — probe rolls the window forward.
+        import time as _time
+
+        saved = (td._minute_window_start, td._minute_used, td._day_key, td._day_used)
+        try:
+            td._minute_window_start = _time.time() - 3600
+            td._minute_used = td.CREDITS_PER_MINUTE
+            td._day_key = ""
+            td._day_used = 0
+            self.assertIsNone(td.budget_probe(1))
+            self.assertEqual(td.budget_snapshot()["per_minute_used"], 0)
+        finally:
+            (
+                td._minute_window_start,
+                td._minute_used,
+                td._day_key,
+                td._day_used,
+            ) = saved
+
 
 class TestRefresh(unittest.TestCase):
     def test_ist_clock(self):

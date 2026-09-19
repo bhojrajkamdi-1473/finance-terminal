@@ -81,16 +81,14 @@ class ProviderManager:
         if self.twelvedata is None:
             return False, "Twelve Data leg not wired."
         try:
-            from providers.twelvedata import _api_key, budget_snapshot
+            from providers.twelvedata import _api_key, budget_probe
         except Exception:
             return False, "Twelve Data unavailable."
         if not _api_key():
             return False, "TWELVE_DATA_API_KEY not configured."
-        snap = budget_snapshot()
-        if snap["per_minute_limit"] - snap["per_minute_used"] < cost:
-            return False, "Twelve Data per-minute budget exhausted."
-        if snap["daily_limit"] - snap["daily_used"] < cost:
-            return False, "Twelve Data daily budget exhausted."
+        blocked = budget_probe(cost)
+        if blocked:
+            return False, f"Twelve Data {blocked[0].lower() + blocked[1:]}."
         return True, ""
 
     def _av_ready(self) -> tuple[bool, str]:
