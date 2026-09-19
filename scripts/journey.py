@@ -23,7 +23,7 @@ CHROME = r"C:\Program Files\Google\Chrome\Application\chrome.exe"
 ROUTES = [
     ("dashboard", "dashboard", ["Dashboard", "Movers — tracked universe"]),
     ("markets", "markets", ["Markets", "RELIANCE.NS"]),
-    ("screener", "screener", ["Screener", "Run screen"]),
+    ("screener", "screener", ["Screener", "Apply filters"]),
     ("companies", "companies", ["Companies", "Search"]),
     (
         "company-overview",

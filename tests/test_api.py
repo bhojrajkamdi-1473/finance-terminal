@@ -323,6 +323,45 @@ class ApiTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn("volume", body.get("backed_by", []))
 
+    def test_screener_rule_ops_and_sort(self):
+        base = "/api/screener?symbols=AAPL,MSFT,NVDA,TCS.NS,INFY.NS"
+        _, plain = _get(self.base, base)
+        n_plain = len(plain.get("results", []))
+        self.assertGreater(n_plain, 0)
+        # a restrictive rule set must shrink (never grow) the result set
+        _, filt = _get(self.base, base + "&f=price:gt:100000")
+        self.assertLessEqual(len(filt.get("results", [])), n_plain)
+        # invalid operator rejected, not silently ignored
+        status, _body = _get(self.base, base + "&f=price:approx:10")
+        self.assertEqual(status, 400)
+        # sort changes order deterministically
+        _, asc = _get(self.base, base + "&sort_by=price&sort_dir=asc")
+        _, desc = _get(self.base, base + "&sort_by=price&sort_dir=desc")
+        if len(asc.get("results", [])) >= 2:
+            a = [r["symbol"] for r in asc["results"]]
+            d = [r["symbol"] for r in desc["results"]]
+            self.assertEqual(a, list(reversed(d)))
+        # coverage is stated honestly
+        self.assertIn("coverage", plain)
+        self.assertIn("universe", plain)
+
+    def test_compare_matrix_real_values(self):
+        for s in ("TCS.NS", "INFY.NS", "HDFCBANK.NS", "RELIANCE.NS"):
+            status, body = _get(self.base, "/api/quote?symbol=" + s)
+            self.assertEqual(status, 200)
+            if body.get("status") in ("live", "delayed"):
+                self.assertIsInstance(
+                    (body.get("data") or {}).get("price"), (int, float)
+                )
+        status, body = _get(self.base, "/api/ratios?symbol=TCS.NS")
+        self.assertEqual(status, 200)
+        # keyless: honestly unavailable, never fabricated
+        if not (
+            os.environ.get("ALPHA_VANTAGE_API_KEY")
+            or os.environ.get("FUNDAMENTALS_API_KEY")
+        ):
+            self.assertEqual(body["status"], "unavailable")
+
     def test_macro_rejects_unknown_indicator(self):
         status, body = _get(self.base, "/api/macro?indicator=NOPE")
         # without key: unavailable (key gate first); with key: 502 error

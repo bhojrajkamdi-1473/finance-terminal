@@ -118,6 +118,26 @@ def _reported_num(value) -> float | None:
         return None
 
 
+def _apply_op(val: float, op: str, v1: float, v2) -> bool:
+    """Filter operators: gt/gte/lt/lte/eq/between. Exact equality uses a
+    small relative tolerance so float noise never excludes a match."""
+    if op == "gt":
+        return val > v1
+    if op == "gte":
+        return val >= v1
+    if op == "lt":
+        return val < v1
+    if op == "lte":
+        return val <= v1
+    if op == "eq":
+        denom = abs(v1) if v1 != 0 else 1.0
+        return abs(val - v1) / denom < 1e-9
+    if op == "between":
+        lo, hi = (v1, v2) if v1 <= v2 else (v2, v1)
+        return lo <= val <= hi
+    return False
+
+
 # Slow-domain caches (Alpha Vantage free = 25 req/day TOTAL).
 _domain_cache = refresh.TTLCache()
 
@@ -575,50 +595,156 @@ class Handler(BaseHTTPRequestHandler):
         _domain_cache.set(cache_key, env, refresh.TECHNICAL_TTL)
         return _send_json(self, env, _envelope_status(env))
 
-    def _handle_screener(self, qs):
-        """Real screener over verified data only.
+    # Screener metric registry: getter kind + value extractor.
+    # Quote metrics are REPORTED (delayed); technical CALCULATED;
+    # fundamental REPORTED (Alpha Vantage overview, quota-noted).
+    SCREENER_METRICS = {
+        "price": ("quote", lambda q, t, f: q.get("price")),
+        "change_pct": ("quote", lambda q, t, f: q.get("change_pct")),
+        "volume": ("quote", lambda q, t, f: q.get("volume")),
+        "high_52w": ("quote", lambda q, t, f: q.get("fifty_two_week_high")),
+        "low_52w": ("quote", lambda q, t, f: q.get("fifty_two_week_low")),
+        "rsi14": ("technical", lambda q, t, f: (t or {}).get("rsi14")),
+        "sma20": ("technical", lambda q, t, f: (t or {}).get("sma20")),
+        "sma50": ("technical", lambda q, t, f: (t or {}).get("sma50")),
+        "sma200": ("technical", lambda q, t, f: (t or {}).get("sma200")),
+        "pe": ("fundamental", lambda q, t, f: _reported_num((f or {}).get("PERatio"))),
+        "pb": (
+            "fundamental",
+            lambda q, t, f: _reported_num((f or {}).get("PriceToBookRatio")),
+        ),
+        "roe": (
+            "fundamental",
+            lambda q, t, f: _reported_num(
+                (f or {}).get("ROE") or (f or {}).get("ReturnOnEquityTTM")
+            ),
+        ),
+        "eps": ("fundamental", lambda q, t, f: _reported_num((f or {}).get("EPS"))),
+        "div_yield": (
+            "fundamental",
+            lambda q, t, f: _reported_num((f or {}).get("DividendYield")),
+        ),
+        "market_cap": (
+            "fundamental",
+            lambda q, t, f: _reported_num((f or {}).get("MarketCapitalization")),
+        ),
+    }
+    SCREENER_OPS = ("gt", "gte", "lt", "lte", "eq", "between")
 
-        Quote-backed: min/max change_pct, min/max price, min_volume.
-        Technical (CALCULATED from backend history): rsi_min/max,
-          above_sma (20/50/200). Fundamental (REPORTED, Alpha Vantage
-          overview cached 24 h, consumes the 25/day free quota):
-          max_pe, min_roe.
+    def _handle_screener(self, qs):
+        """Rule-engine screener over verified data only.
+
+        Rules arrive as repeated `f=metric:op:value[:value2]` params, e.g.
+        f=pe:lt:25&f=roe:gt:15&f=market_cap:gt:50000. Legacy min_/max_
+        scalar params are mapped to equivalent rules. Sort via
+        sort_by=<metric>&sort_dir=asc|desc. Universes: all|nse|us.
         Missing values exclude the symbol with a reason — never invented.
         """
         raw = qs.get("symbols", [""])[0]
-        symbols = [
-            s.strip().upper() for s in raw.split(",") if s.strip()
-        ] or DEFAULT_SYMBOLS
+        explicit = [s.strip().upper() for s in raw.split(",") if s.strip()]
+        universe = (qs.get("universe", ["all"])[0] or "all").lower()
+        if explicit:
+            symbols = explicit
+            universe_label = f"Custom ({len(symbols)} securities)"
+        elif universe == "nse":
+            symbols = [s for s in DEFAULT_SYMBOLS if s.endswith((".NS", ".BO"))]
+            universe_label = f"Tracked NSE ({len(symbols)} securities)"
+        elif universe == "us":
+            symbols = [
+                s
+                for s in DEFAULT_SYMBOLS
+                if not s.endswith((".NS", ".BO")) and not s.startswith("^")
+            ]
+            universe_label = f"Tracked US ({len(symbols)} securities)"
+        else:
+            symbols = [s for s in DEFAULT_SYMBOLS if not s.startswith("^")]
+            universe_label = f"Tracked Universe ({len(symbols)} securities)"
 
-        def _f(name):
+        def _legacy_rules():
+            out = []
+
+            def _f(name):
+                try:
+                    return float(qs.get(name, [""])[0])
+                except (ValueError, IndexError):
+                    return None
+
+            pairs = [
+                ("min_change_pct", ("change_pct", "gte")),
+                ("max_change_pct", ("change_pct", "lte")),
+                ("min_price", ("price", "gte")),
+                ("max_price", ("price", "lte")),
+                ("min_volume", ("volume", "gte")),
+                ("rsi_min", ("rsi14", "gte")),
+                ("rsi_max", ("rsi14", "lte")),
+                ("max_pe", ("pe", "lte")),
+                ("min_roe", ("roe", "gte")),
+            ]
+            for param, (metric, op) in pairs:
+                v = _f(param)
+                if v is not None:
+                    out.append((metric, op, v, None))
+            sma = (qs.get("above_sma", [""])[0] or "").strip()
+            if sma in ("20", "50", "200"):
+                out.append((f"sma{sma}", "lt", "__PRICE__", None))
+            elif sma:
+                return None  # invalid marker handled below
+            return out
+
+        rules: list[tuple] = []
+        bad_rule = None
+        for item in qs.get("f", []):
+            parts = item.split(":")
+            if len(parts) not in (3, 4):
+                bad_rule = item
+                break
+            metric, op = parts[0].strip(), parts[1].strip()
+            if metric not in self.SCREENER_METRICS or op not in self.SCREENER_OPS:
+                bad_rule = item
+                break
             try:
-                return float(qs.get(name, [""])[0])
-            except (ValueError, IndexError):
-                return None
-
-        def _s(name):
-            v = (qs.get(name, [""])[0] or "").strip()
-            return v or None
-
-        min_ch, max_ch = _f("min_change_pct"), _f("max_change_pct")
-        min_px, max_px = _f("min_price"), _f("max_price")
-        min_vol = _f("min_volume")
-        rsi_min, rsi_max = _f("rsi_min"), _f("rsi_max")
-        above_sma = _s("above_sma")  # "20" | "50" | "200"
-        max_pe, min_roe = _f("max_pe"), _f("min_roe")
-        want_tech = rsi_min is not None or rsi_max is not None or above_sma is not None
-        want_fund = max_pe is not None or min_roe is not None
-        if above_sma not in (None, "20", "50", "200"):
+                v1 = float(parts[2])
+                v2 = float(parts[3]) if len(parts) == 4 else None
+            except ValueError:
+                bad_rule = item
+                break
+            if op == "between" and v2 is None:
+                bad_rule = item
+                break
+            rules.append((metric, op, v1, v2))
+        if bad_rule is not None:
+            return _send_json(
+                self, {"ok": False, "error": f"Bad filter rule: {bad_rule}"}, 400
+            )
+        legacy = _legacy_rules()
+        if legacy is None:
             return _send_json(
                 self,
                 {"ok": False, "error": "above_sma must be 20, 50 or 200"},
                 400,
             )
-        backed = ["price", "change_pct", "volume", "52w_high", "52w_low"]
-        if want_tech:
+        rules.extend(legacy)
+        sort_by = (qs.get("sort_by", [""])[0] or "").strip() or None
+        sort_dir = (qs.get("sort_dir", ["asc"])[0] or "asc").lower()
+        if sort_by is not None and sort_by not in self.SCREENER_METRICS:
+            return _send_json(
+                self, {"ok": False, "error": f"Cannot sort by '{sort_by}'"}, 400
+            )
+        if sort_dir not in ("asc", "desc"):
+            return _send_json(
+                self, {"ok": False, "error": "sort_dir must be asc or desc"}, 400
+            )
+        need_tech = any(
+            self.SCREENER_METRICS[m][0] == "technical" for m, _, _, _ in rules
+        ) or sort_by in ("rsi14", "sma20", "sma50", "sma200")
+        need_fund = any(
+            self.SCREENER_METRICS[m][0] == "fundamental" for m, _, _, _ in rules
+        ) or sort_by in ("pe", "pb", "roe", "eps", "div_yield", "market_cap")
+        backed = ["price", "change_pct", "volume", "high_52w", "low_52w"]
+        if need_tech:
             backed += ["rsi14", "sma20", "sma50", "sma200"]
-        if want_fund:
-            backed += ["pe_reported", "roe_reported"]
+        if need_fund:
+            backed += ["pe", "pb", "roe", "eps", "div_yield", "market_cap"]
         rows = []
         for sym in symbols[:30]:
             env = registry.market_data.get_quote(sym)
@@ -629,14 +755,11 @@ class Handler(BaseHTTPRequestHandler):
                         "symbol": sym,
                         "status": env.get("status"),
                         "message": env.get("message"),
-                        # Unavailable symbols are excluded from
-                        # filtering, with the reason attached.
                         "excluded_reason": env.get("message") or "No quote data.",
                         "pass": False,
                     }
                 )
                 continue
-            ch, px, vol = q.get("change_pct"), q.get("price"), q.get("volume")
             row: dict = {
                 "symbol": sym,
                 "status": env.get("status"),
@@ -646,38 +769,17 @@ class Handler(BaseHTTPRequestHandler):
                 "quote": q,
                 "pass": True,
             }
-            checks = [
-                (min_ch, ch, lambda v, lim: v is not None and v >= lim),
-                (max_ch, ch, lambda v, lim: v is not None and v <= lim),
-                (min_px, px, lambda v, lim: v is not None and v >= lim),
-                (max_px, px, lambda v, lim: v is not None and v <= lim),
-                (min_vol, vol, lambda v, lim: v is not None and v >= lim),
-            ]
-            for lim, val, test in checks:
-                if lim is not None and not test(val, lim):
-                    row["pass"] = False
-            if want_tech and row["pass"]:
+            tech = fund = None
+            if need_tech:
                 tech = self._screener_technical(sym)
                 if tech is None:
                     row["pass"] = False
                     row["excluded_reason"] = "No verified history for technicals."
-                else:
-                    row["technical"] = tech["values"]
-                    row["technical_kind"] = "CALCULATED"
-                    v = tech["values"]
-                    if rsi_min is not None and (
-                        v.get("rsi14") is None or v["rsi14"] < rsi_min
-                    ):
-                        row["pass"] = False
-                    if rsi_max is not None and (
-                        v.get("rsi14") is None or v["rsi14"] > rsi_max
-                    ):
-                        row["pass"] = False
-                    if above_sma is not None:
-                        sma_v = v.get(f"sma{above_sma}")
-                        if sma_v is None or px is None or px <= sma_v:
-                            row["pass"] = False
-            if want_fund and row["pass"]:
+                    rows.append(row)
+                    continue
+                row["technical"] = tech["values"]
+                row["technical_kind"] = "CALCULATED"
+            if need_fund:
                 fund = self._screener_fundamental(sym)
                 if fund is None:
                     row["pass"] = False
@@ -685,38 +787,51 @@ class Handler(BaseHTTPRequestHandler):
                         "Fundamentals need ALPHA_VANTAGE_API_KEY "
                         "(25 req/day free quota)."
                     )
-                else:
-                    row["fundamental"] = fund
-                    row["fundamental_kind"] = "REPORTED"
-                    pe_v = _reported_num(fund.get("PERatio"))
-                    roe_v = _reported_num(
-                        fund.get("ROE") or fund.get("ReturnOnEquityTTM")
+                    rows.append(row)
+                    continue
+                row["fundamental"] = fund
+                row["fundamental_kind"] = "REPORTED"
+            for metric, op, v1, v2 in rules:
+                _, get = self.SCREENER_METRICS[metric]
+                if metric.startswith("sma") and v1 == "__PRICE__":
+                    pv, sv = (
+                        q.get("price"),
+                        get(q, tech["values"] if tech else None, fund),
                     )
-                    if max_pe is not None and (pe_v is None or pe_v > max_pe):
-                        row["pass"] = False
-                    if min_roe is not None and (roe_v is None or roe_v < min_roe):
-                        row["pass"] = False
+                    ok = pv is not None and sv is not None and pv > sv
+                else:
+                    val = get(q, tech["values"] if tech else None, fund)
+                    ok = val is not None and _apply_op(val, op, v1, v2)
+                if not ok:
+                    row["pass"] = False
+                    break
+            if sort_by:
+                _, get = self.SCREENER_METRICS[sort_by]
+                row["_sort"] = get(q, tech["values"] if tech else None, fund)
             rows.append(row)
+        results = [r for r in rows if r.get("pass")]
+        if sort_by:
+            results.sort(
+                key=lambda r: (
+                    r.get("_sort") is None,
+                    r.get("_sort") if r.get("_sort") is not None else 0,
+                ),
+                reverse=(sort_dir == "desc"),
+            )
         return _send_json(
             self,
             {
                 "ok": True,
-                "results": [r for r in rows if r.get("pass")],
+                "universe": universe_label,
+                "coverage": len(symbols[:30]),
+                "results": results,
                 "skipped": [r for r in rows if not r.get("pass")],
                 "backed_by": backed,
-                "unsupported": [
-                    "market_cap",
-                    "pb",
-                    "roce",
-                    "debt_equity",
-                    "margins",
-                    "growth",
-                    "dividend_yield",
-                    "ev_ebitda",
-                ],
-                "unsupported_note": "Only the backed_by metrics can filter. "
-                "Fundamental screens consume Alpha Vantage free quota "
-                "(25/day, cached 24 h).",
+                "unsupported": ["sector", "industry", "margins", "growth"],
+                "unsupported_note": "Sector/industry screens need a "
+                "fundamentals feed with classification data; only the "
+                "backed_by metrics can filter. Fundamental screens consume "
+                "Alpha Vantage free quota (25/day, cached 24 h).",
             },
         )
 

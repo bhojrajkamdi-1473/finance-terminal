@@ -119,7 +119,7 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
             return env
 
         path: list[str] = []
-        last_env: dict | None = None
+        first_env: dict | None = None
         for name, fetcher in fetchers:
             with self._lock:
                 cooling = self._cooling(name)
@@ -151,7 +151,11 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
                 env["cache_age_s"] = 0.0
                 return env
             path.append(f"{name}:{status}")
-            last_env = env
+            if first_env is None:
+                # Report the FIRST leg's miss, not the last: the primary
+                # source's reason (e.g. Yahoo cooling) is the honest one,
+                # not a downstream key-gated leg's "not configured".
+                first_env = env
             with self._lock:
                 if status == "unavailable":
                     # Definitive answer (bad symbol, no key, out of
@@ -177,8 +181,8 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
                 f"showing cached value from {env['cache_age_s']}s ago."
             )
             return env
-        if last_env is not None:
-            env = dict(last_env)
+        if first_env is not None:
+            env = dict(first_env)
             env["served_from"] = "none"
             env["fallback_path"] = path
             env["stale"] = False

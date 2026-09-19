@@ -15,7 +15,7 @@
   }
 
   function brief(symbol, quote, history, ratios, recon) {
-    var f = fmt(), facts = [], calcs = [], interp = [], questions = [], risks = [];
+    var f = fmt(), facts = [], changed = [], calcs = [], interp = [], questions = [], risks = [];
     var src = [];
     if (quote) {
       src.push("quote:yahoo");
@@ -31,9 +31,9 @@
       src.push("history:yahoo:" + bars.length + "-bars");
       var first = bars[0].c, last = bars[bars.length - 1].c;
       var chg = pct(last, first);
-      facts.push("Over the loaded window (" + f.fmtDate(bars[0].t) + " → " +
-        f.fmtDate(bars[bars.length - 1].t) + ", n=" + bars.length + ") close moved " +
-        f.fmtNum(first) + " → " + f.fmtNum(last) + " (" + f.fmtPct(chg) + ").");
+      changed.push("Close moved " + f.fmtNum(first) + " → " + f.fmtNum(last) +
+        " (" + f.fmtPct(chg) + ") over " + f.fmtDate(bars[0].t) + " → " +
+        f.fmtDate(bars[bars.length - 1].t) + " (n=" + bars.length + ").");
       var hi = -Infinity, lo = Infinity, vsum = 0, vn = 0;
       bars.forEach(function (b) {
         if (b.c !== null) { hi = Math.max(hi, b.c); lo = Math.min(lo, b.c); }
@@ -83,8 +83,9 @@
     }
     return {
       symbol: symbol, sources: src,
-      facts: facts, calculations: calcs, interpretation: interp,
-      questions: questions, uncertainty: risks,
+      facts: facts, facts2: changed, calculations: calcs,
+      interpretation: interp, questions: questions, uncertainty: risks,
+      evidence: src.slice(),
     };
   }
 
@@ -96,15 +97,19 @@
         items.map(function (t) { return '<li class="' + (cls || "") + '" style="margin:4px 0">' + f.esc(t) + "</li>"; }).join("") +
         "</ul></div>";
     }
+    var ev = (b.evidence && b.evidence.length ? b.evidence : b.sources) || [];
     el.innerHTML =
       '<div class="card"><h3>Research brief · ' + f.esc(b.symbol) + ' ' + f.statusPill("ai") + "</h3>" +
       '<div class="src">OBSERVE → QUESTION → HYPOTHESISE → CONNECT → VERIFY → JUDGE · sources: ' +
-      f.esc(b.sources.join(", ") || "none") + "</div></div>" +
-      sec("What the data says", f.statusPill("live"), b.facts) +
-      sec("What changed (calculated)", f.statusPill("calculated"), b.calculations) +
+      f.esc((b.sources || []).join(", ") || "none") + "</div></div>" +
+      sec("Key facts (source data)", f.statusPill("live"), b.facts) +
+      sec("What changed", f.statusPill("live"), b.facts2 || []) +
+      sec("Calculations", f.statusPill("calculated"), b.calculations) +
       sec("Why it matters (interpretation — not fact)", f.statusPill("ai"), b.interpretation) +
       sec("What to investigate", f.statusPill("ai"), b.questions) +
-      sec("Risks / uncertainty", f.statusPill("unavailable"), b.uncertainty, "warn");
+      sec("Risks / uncertainty", f.statusPill("unavailable"), b.uncertainty, "warn") +
+      '<div class="card" style="margin-top:10px"><h3>Source evidence</h3><div class="src">' +
+      (ev.length ? f.esc(ev.join(" · ")) : "INSUFFICIENT EVIDENCE — no verified inputs for this section.") + "</div></div>";
   }
   window.FT_ANALYSIS = { brief, renderBrief };
 })();

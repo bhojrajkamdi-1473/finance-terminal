@@ -119,6 +119,17 @@ class TestFallbackOrder(unittest.TestCase):
         self.assertEqual(health["consecutive_errors"], 0)
         self.assertNotEqual(health["state"], "cooling")
 
+    def test_total_miss_reports_primary_leg_reason(self):
+        # When every leg misses, the envelope must carry the FIRST
+        # (primary) leg's reason — not a downstream key-gated message.
+        a = StubLeg([unavailable("yahoo", "Yahoo cooling down")])
+        b = StubLeg([unavailable("twelvedata", "API KEY NOT CONFIGURED")])
+        chain = FallbackMarketData([("yahoo", a), ("twelvedata", b)])
+        env = chain.get_quote("X")
+        self.assertEqual(env["status"], "unavailable")
+        self.assertIn("Yahoo cooling down", env["message"])
+        self.assertNotIn("NOT CONFIGURED", env["message"])
+
     def test_scarce_leg_gets_long_ttl(self):
         a = StubLeg([error_envelope("yahoo", "down")])
         b = StubLeg([_live("alphavantage", 12)])

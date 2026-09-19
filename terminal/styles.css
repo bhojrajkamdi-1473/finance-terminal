@@ -63,7 +63,8 @@ html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:v
 #sidenav{flex:0 0 var(--nav-w);background:var(--sidenav);border-right:1px solid var(--line-2);padding:10px 8px;overflow:auto}
 #sidenav a{display:flex;gap:10px;align-items:center;padding:6px 10px;color:var(--slate);text-decoration:none;font-size:12.5px;font-weight:550;border-radius:var(--r-sm);border-left:none;cursor:pointer}
 #sidenav a:hover{color:var(--ink);background:var(--surface-2)}
-#sidenav a.on{color:var(--acc-ink);background:var(--acc-soft);font-weight:650}
+#sidenav a.on{color:var(--acc-ink);background:var(--acc-soft);font-weight:650;box-shadow:inset 2px 0 0 var(--acc)}
+.topbar-right .btn{text-decoration:none}
 #sidenav .nav-ic{width:16px;text-align:center;color:var(--faint);font-size:11px}
 #sidenav a.on .nav-ic{color:var(--acc)}
 #view{flex:1;overflow:auto;padding:14px 18px 70px;min-width:0}
@@ -96,11 +97,18 @@ h2,.h-sec{font-size:12.5px;margin:16px 0 8px;font-weight:700;letter-spacing:.01e
 .sec .s-nm{font-weight:650;font-size:12.5px}
 .sec .s-tk{font-family:var(--mono);font-size:10.5px;color:var(--slate);margin-top:1px}
 .sec .s-tk b{color:var(--ink-2)}
+.logo{border-radius:6px;flex:0 0 auto;object-fit:contain;background:#fff;border:1px solid var(--line)}
+.logo-mono{display:inline-flex;align-items:center;justify-content:center;font-weight:750;letter-spacing:.02em}
+.sec-row{display:flex;gap:10px;align-items:center;min-width:0}
+.chip{display:inline-flex;align-items:center;gap:6px;background:var(--acc-soft);border:1px solid #c3d4f5;color:var(--acc-ink);border-radius:20px;padding:2px 6px 2px 10px;font-size:11px;font-family:var(--mono)}
+.chip button{border:none;background:none;color:var(--acc-ink);cursor:pointer;font-size:12px;padding:0 4px;border-radius:10px}
+.strip{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:11px;color:var(--slate);font-family:var(--mono)}
 /* ---------- tables ---------- */
 .twrap{overflow-x:auto}
 .hub td{white-space:normal !important;vertical-align:top}
 table.t{width:100%;border-collapse:collapse;font-size:12px}
 table.t th{position:sticky;top:0;background:var(--surface);text-align:left;color:var(--slate);font-weight:650;font-size:10px;text-transform:uppercase;letter-spacing:.07em;padding:6px var(--cell-x);border-bottom:1px solid var(--line-2);white-space:nowrap;z-index:1}
+table.t td.freeze,table.t th.freeze{position:sticky;left:0;background:var(--surface);z-index:1;box-shadow:1px 0 0 var(--line)}
 table.t td{padding:var(--cell-y) var(--cell-x);border-bottom:1px solid var(--line);font-family:var(--mono);font-size:11.5px;white-space:nowrap;min-height:var(--row-h)}
 table.t td.txt{font-family:var(--sans)}
 table.t tbody tr:hover td{background:#f4f7fb}

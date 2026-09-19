@@ -125,8 +125,49 @@
     return '<div class="prov">Source <b>' + esc(srcName(source)) + "</b> · " +
       esc(status || "?") + " · as of " + esc(asOf || "unavailable") + "</div>";
   }
+  /* Company identity registry: canonical display metadata.
+     Official logo assets ONLY with verified source (domain + asset URL
+     confirmed against the company's own media). No verified asset =>
+     monogram fallback. Never hotlink random logo APIs or image search. */
+  var LOGOS = {
+    /* No verified official assets bundled yet; monograms used throughout.
+       To add: { domain: "tatasteel.com", asset: "https://.../logo.svg",
+       source: "company media kit", type: "svg" } after verification. */
+  };
+  function initials(name, symbol) {
+    var s = (name || symbol || "?").replace(/limited|ltd\.?|corporation|corp\.?|inc\.?|company|bank/gi, "");
+    var words = s.trim().split(/[\s&]+/).filter(Boolean);
+    var init = words.length > 1
+      ? (words[0][0] + words[1][0])
+      : String(s.trim().slice(0, 2));
+    return (init || "?").toUpperCase();
+  }
+  function logoHue(symbol) {
+    var h = 0, s = String(symbol || "?");
+    for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+    return h;
+  }
+  function logo(symbol, name, size) {
+    var sz = size || 34, sym = String(symbol || "");
+    var reg = LOGOS[sym];
+    if (reg && reg.asset) {
+      return '<img class="logo" width="' + sz + '" height="' + sz + '" src="' + esc(reg.asset) +
+        '" alt="' + esc(name || sym) + ' logo" loading="lazy" referrerpolicy="no-referrer" ' +
+        'onerror="this.outerHTML=window.FT_FMT.logoFallback(' + esc(JSON.stringify(sym)) + ',' +
+        esc(JSON.stringify(name || "")) + "," + sz + ');">';
+    }
+    return logoFallback(sym, name || "", sz);
+  }
+  function logoFallback(symbol, name, size) {
+    var sz = size || 34;
+    return '<span class="logo logo-mono" style="width:' + sz + "px;height:" + sz + "px;" +
+      "background:hsl(" + logoHue(symbol) + ",38%,92%);color:hsl(" + logoHue(symbol) +
+      ",45%,32%);font-size:" + Math.round(sz * 0.36) + 'px" aria-hidden="true">' +
+      esc(initials(name, symbol)) + "</span>";
+  }
   window.FT_FMT = {
     fmtNum, fmtInt, fmtPct, fmtMoney, fmtIN, fmtDate, fmtDateTime, esc,
     dirClass, statusPill, srcName, fmtIST, secId, typeBadge, prov,
+    logo, logoFallback, LOGOS,
   };
 })();

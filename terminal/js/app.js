@@ -44,8 +44,49 @@
   }
   function bindSearch() {
     var inp = document.getElementById("global-search"), box = document.getElementById("search-results");
-    var t = null, items = [], active = -1;
+    var t = null, items = [], active = -1, wlCache = null, wlAt = 0;
     function hide() { box.classList.add("hidden"); box.innerHTML = ""; active = -1; items = []; }
+    function recents() {
+      try { return JSON.parse(localStorage.getItem("ft-recent") || "[]"); }
+      catch (e) { return []; }
+    }
+    function remember(sym, name) {
+      try {
+        var r = recents().filter(function (x) { return x.s !== sym; });
+        r.unshift({ s: sym, n: name || "" });
+        localStorage.setItem("ft-recent", JSON.stringify(r.slice(0, 6)));
+      } catch (e) { /* private mode: ignore */ }
+    }
+    function go(sym, name) {
+      hide(); inp.value = ""; remember(sym, name);
+      location.hash = "#/company/" + encodeURIComponent(sym);
+    }
+    function row(x, i) {
+      var F = window.FT_FMT;
+      return '<div class="sr" role="option" data-i="' + i + '"><span style="display:flex;gap:10px;align-items:center">' +
+        F.logo(x.symbol, x.name, 30) + '<span><span class="nm">' + F.esc(x.name || x.symbol) + "</span> " +
+        "<span class='tk'>" + F.esc(x.symbol) + "</span> " + F.typeBadge(x.type) +
+        "<br><span class='tk'>" + F.esc([x.exchange, x.sector || x.type].filter(Boolean).join(" · ") || "—") +
+        "</span></span></span><span class='px' data-qpx='" + F.esc(x.symbol) + "'>…</span></div>";
+    }
+    inp.addEventListener("focus", function () {
+      if (inp.value.trim() || box.children.length) return;
+      var r = recents();
+      if (!r.length) return;
+      var F = window.FT_FMT;
+      items = r.map(function (x) { return { symbol: x.s, name: x.n }; });
+      box.innerHTML = "<div class='src' style='padding:6px 12px'>RECENT</div>" + items.map(row).join("");
+      box.classList.remove("hidden");
+      bindRows();
+    });
+    function bindRows() {
+      box.querySelectorAll(".sr").forEach(function (d) {
+        d.onclick = function () {
+          var it = items[Number(d.getAttribute("data-i"))];
+          go(it.symbol, it.name);
+        };
+      });
+    }
     inp.addEventListener("input", function () {
       clearTimeout(t);
       var q = inp.value.trim();
@@ -57,29 +98,66 @@
             box.innerHTML = '<div class="sr"><span>No matches — ' + F.esc((b && b.message) || "") + "</span></div>";
             box.classList.remove("hidden"); items = []; return;
           }
-          items = (b.data.results || []).slice(0, 8);
-          box.innerHTML = items.map(function (x, i) {
-            return '<div class="sr" role="option" data-i="' + i + '"><span><span class="nm">' +
-              F.esc(x.name || x.symbol) + "</span> <span class='tk'>" + F.esc(x.symbol) + "</span> " +
-              F.typeBadge(x.type) + "<br><span class='tk'>" + F.esc([x.exchange, x.type].filter(Boolean).join(" · ") || "—") +
-              "</span></span><span class='px' data-qpx='" + F.esc(x.symbol) + "'>…</span></div>";
-          }).join("");
-          box.classList.remove("hidden");
-          items.forEach(function (x) {
-            window.FT_API.get("quote", { symbol: x.symbol }).then(function (r) {
-              var q = r.body && r.body.data, cell = box.querySelector("[data-qpx='" + x.symbol.replace(/'/g, "") + "']");
-              if (!q || !cell) return;
-              var c = F.dirClass(q.change_pct);
-              cell.innerHTML = F.fmtNum(q.price) + " <span class='" + c + "'>" + F.fmtPct(q.change_pct) + "</span>";
+          var ql = q.toUpperCase();
+          var res = (b.data.results || []).slice(0, 10);
+          // exact ticker matches first, then name prefix, then rest
+          res.sort(function (a, c) {
+            function score(x) {
+              var s = String(x.symbol || "").toUpperCase(), n = String(x.name || "").toUpperCase();
+              if (s === ql) return 0;
+              if (s === ql + ".NS" || s === ql + ".BO") return 1;
+              if (n.indexOf(ql) === 0) return 2;
+              if (s.indexOf(ql) === 0) return 3;
+              return 4;
+            }
+            return score(a) - score(c);
+          });
+          items = res.slice(0, 8);
+          var wlMatches = [];
+          function render() {
+            var html = "";
+            if (wlMatches.length) {
+              html += "<div class='src' style='padding:6px 12px'>IN WATCHLIST</div>" +
+                wlMatches.map(function (x, i) { return row(x, "w" + i); }).join("");
+            }
+            html += items.map(function (x, i) { return row(x, i); }).join("");
+            box.innerHTML = html || '<div class="sr"><span>No matches</span></div>';
+            box.classList.remove("hidden");
+            // merge watchlist rows into clickable items
+            var all = wlMatches.concat(items);
+            box.querySelectorAll(".sr").forEach(function (d) {
+              d.onclick = function () {
+                var k = d.getAttribute("data-i"), it;
+                if (String(k).charAt(0) === "w") it = all[Number(String(k).slice(1))];
+                else it = all[wlMatches.length + Number(k)];
+                go(it.symbol, it.name);
+              };
             });
-          });
-          box.querySelectorAll(".sr").forEach(function (d) {
-            d.onclick = function () {
-              var it = items[Number(d.getAttribute("data-i"))];
-              hide(); inp.value = "";
-              location.hash = "#/company/" + encodeURIComponent(it.symbol);
-            };
-          });
+            var allItems = wlMatches.concat(items);
+            allItems.forEach(function (x) {
+              window.FT_API.get("quote", { symbol: x.symbol }).then(function (r) {
+                var qq = r.body && r.body.data, cell = box.querySelector("[data-qpx='" + x.symbol.replace(/'/g, "") + "']");
+                if (!qq || !cell) return;
+                var c = F.dirClass(qq.change_pct);
+                cell.innerHTML = F.fmtNum(qq.price) + " <span class='" + c + "'>" + F.fmtPct(qq.change_pct) + "</span>";
+              });
+            });
+            items = allItems;
+          }
+          if (Date.now() - wlAt > 60000 || !wlCache) {
+            window.FT_API.get("watchlist").then(function (wr) {
+              wlCache = (wr.body && wr.body.items) || []; wlAt = Date.now();
+              wlMatches = wlCache.filter(function (w) {
+                return (w.symbol + " " + (w.name || "")).toUpperCase().indexOf(ql) >= 0;
+              }).slice(0, 3);
+              render();
+            });
+          } else {
+            wlMatches = (wlCache || []).filter(function (w) {
+              return (w.symbol + " " + (w.name || "")).toUpperCase().indexOf(ql) >= 0;
+            }).slice(0, 3);
+            render();
+          }
         });
       }, 220);
     });
@@ -93,8 +171,8 @@
         rows.forEach(function (r, i) { r.classList.toggle("active", i === active); });
       }
       if (e.key === "Enter" && active >= 0 && items[active]) {
-        hide(); var it = items[active]; inp.value = "";
-        location.hash = "#/company/" + encodeURIComponent(it.symbol);
+        var it = items[active];
+        go(it.symbol, it.name);
       }
     });
     document.addEventListener("click", function (e) {
@@ -136,6 +214,7 @@
   document.addEventListener("DOMContentLoaded", function () {
     window.FT_PAGES.init();
     buildNav(); bindSearch(); clock(); providerPill();
+    document.getElementById("top-refresh").onclick = function () { route(); };
     // Corp-actions nav prompts for a symbol
     document.querySelector('[data-r="actions"]').addEventListener("click", function (e) {
       e.preventDefault();
