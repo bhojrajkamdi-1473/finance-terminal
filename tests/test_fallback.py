@@ -173,6 +173,55 @@ class TestTwelveDataMapping(unittest.TestCase):
             if old is not None:
                 os.environ["TWELVE_DATA_API_KEY"] = old
 
+    def test_403_plan_block_short_circuits(self):
+        import os
+        import urllib.error
+
+        old = os.environ.get("TWELVE_DATA_API_KEY")
+        os.environ["TWELVE_DATA_API_KEY"] = "test-key-never-sent"
+        saved_blocked = set(td._plan_blocked)
+        saved_budget = (
+            td._minute_window_start,
+            td._minute_used,
+            td._day_key,
+            td._day_used,
+        )
+        calls = {"n": 0}
+        orig_get = td._get
+
+        def fake_get(path, params, timeout=15.0):
+            calls["n"] += 1
+            raise urllib.error.HTTPError("http://x", 403, "Forbidden", {}, None)
+
+        td._get = fake_get
+        try:
+            td._plan_blocked.clear()
+            td._minute_window_start = time.time()
+            td._minute_used = 0
+            p = td.TwelveDataProvider()
+            first = p.get_statistics("AAPL")
+            self.assertEqual(first["status"], "unavailable")
+            self.assertIn("not covered", first["message"])
+            before = calls["n"]
+            second = p.get_statistics("AAPL")
+            self.assertEqual(second["status"], "unavailable")
+            # short-circuited: no second upstream call, no credit spent
+            self.assertEqual(calls["n"], before)
+        finally:
+            td._get = orig_get
+            td._plan_blocked.clear()
+            td._plan_blocked.update(saved_blocked)
+            (
+                td._minute_window_start,
+                td._minute_used,
+                td._day_key,
+                td._day_used,
+            ) = saved_budget
+            if old is not None:
+                os.environ["TWELVE_DATA_API_KEY"] = old
+            else:
+                os.environ.pop("TWELVE_DATA_API_KEY", None)
+
     def test_budget_guard(self):
         # drain the minute bucket, then restore globals
         saved = (td._minute_window_start, td._minute_used, td._day_key, td._day_used)

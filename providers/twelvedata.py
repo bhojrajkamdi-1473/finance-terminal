@@ -45,6 +45,11 @@ _minute_used = 0
 _day_key = ""
 _day_used = 0
 
+# Endpoints proven plan-blocked (HTTP 403) stay short-circuited for the
+# life of the process: no credit spend, no hammering, honest
+# PLAN_LIMITATION message instead.
+_plan_blocked: set[str] = set()
+
 # Exchanges Twelve Data advertises as real-time on the free plan.
 _REALTIME_US_EXCHANGES = {
     "NASDAQ",
@@ -132,6 +137,10 @@ def to_td_symbol(symbol: str) -> str | None:
 
 def _is_rate_limit(exc: Exception) -> bool:
     return isinstance(exc, urllib.error.HTTPError) and exc.code == 429
+
+
+def _is_forbidden(exc: Exception) -> bool:
+    return isinstance(exc, urllib.error.HTTPError) and exc.code == 403
 
 
 def _rate_limited(detail: str) -> dict:
@@ -379,6 +388,12 @@ class TwelveDataProvider(MarketDataProvider):
     # -- fundamentals / earnings / actions (free-tier, budget-guarded) --
     def _domain(self, endpoint: str, td_symbol: str, cost: int = 2) -> dict:
         """Fetch a TD domain endpoint. Returns (payload | error-envelope)."""
+        if endpoint in _plan_blocked:
+            return unavailable(
+                "twelvedata",
+                f"{endpoint} is not covered by the current Twelve Data plan "
+                "(HTTP 403 on file).",
+            )
         blocked = _budget_take(cost)
         if blocked:
             return unavailable("twelvedata", f"Rate budget exhausted: {blocked}.")
@@ -387,6 +402,13 @@ class TwelveDataProvider(MarketDataProvider):
         except Exception as exc:
             if _is_rate_limit(exc):
                 return _rate_limited(f"{endpoint} throttled: {exc}")
+            if _is_forbidden(exc):
+                _plan_blocked.add(endpoint)
+                return unavailable(
+                    "twelvedata",
+                    f"{endpoint} is not covered by the current Twelve Data "
+                    f"plan ({exc}). No further calls will be spent on it.",
+                )
             return error_envelope("twelvedata", f"{endpoint} failed: {exc}")
         if isinstance(payload, dict) and (
             payload.get("status") == "error" or "code" in payload
