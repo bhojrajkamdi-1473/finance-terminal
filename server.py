@@ -488,6 +488,8 @@ class Handler(BaseHTTPRequestHandler):
                 "quote_status": q.get("status"),
                 "quote_timeliness": q.get("timeliness"),
                 "reconciliation": rec,
+                "providers_queried": q.get("providers_queried"),
+                "as_of": q.get("as_of"),
             }
         return _send_json(
             self,
