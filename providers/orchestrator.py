@@ -622,7 +622,8 @@ class ProviderManager:
                     "as_of": None,
                     "data": None,
                     "message": "Valuation could not be answered by any provider "
-                    "right now: " + "; ".join(_queried(results)) + ". Set "
+                    "right now: " + "; ".join(_queried(results)) + ". "
+                    + "; ".join(_leg_detail(results)) + " Set "
                     "ALPHA_VANTAGE_API_KEY and/or TWELVE_DATA_API_KEY and/or "
                     "INDIAN_STOCK_MARKET_API_KEY to enable. (Common causes: "
                     "Alpha Vantage free quota spent (25/day), Twelve Data "
@@ -1193,6 +1194,23 @@ def _queried(results: dict[str, dict]) -> list[str]:
         if not isinstance(env, dict):
             continue
         out.append(f"{name}:{env.get('status', '?')}")
+    return out
+
+
+def _leg_detail(results: dict[str, dict]) -> list[str]:
+    """One-line per-leg failure reasons for miss envelopes.
+
+    Safe to expose: server responses pass deep secret redaction, and
+    these are upstream status texts, never credentials.
+    """
+    out = []
+    for name, env in results.items():
+        if not isinstance(env, dict):
+            continue
+        if env.get("status") in ("live", "delayed"):
+            continue
+        msg = str(env.get("message") or "no detail")[:160]
+        out.append(f"{name}: {msg}")
     return out
 
 
