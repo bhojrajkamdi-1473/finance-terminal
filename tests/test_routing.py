@@ -83,7 +83,13 @@ class TestCapabilitiesRegistry(_EnvGuard):
         self.assertTrue(CAPABILITIES["alphavantage"]["statements"])
         self.assertTrue(CAPABILITIES["twelvedata"]["valuation"])
         self.assertFalse(CAPABILITIES["twelvedata"]["estimates"])
-        self.assertTrue(CAPABILITIES["indian-api"]["holdings"])
+        self.assertFalse(CAPABILITIES["indian-api"]["holdings"])
+        self.assertFalse(CAPABILITIES["indian-api"]["statements"])
+        self.assertFalse(CAPABILITIES["indian-api"]["estimates"])
+        self.assertFalse(CAPABILITIES["indian-api"]["earnings"])
+        self.assertTrue(CAPABILITIES["indian-api"]["quote"])
+        self.assertTrue(CAPABILITIES["indian-api"]["valuation"])
+        self.assertTrue(CAPABILITIES["indian-api"]["profile"])
         self.assertFalse(CAPABILITIES["indian-api"]["history"])
         self.assertFalse(CAPABILITIES["stooq"]["quote"])
         self.assertTrue(CAPABILITIES["stooq"]["history"])
@@ -93,8 +99,9 @@ class TestYahooOnlyTCS(_EnvGuard):
     """Yahoo only: market data works, fundamentals-family is honest."""
 
     def test_statements_honest_miss_names_all_providers(self):
-        # Legs wired (as in production) but no keys: every provider is
-        # named with its key reason; stubs are never dispatched.
+        # Legs wired (as in production) but no keys: AV/TD name their key
+        # reasons; the no-auth Indian leg is skipped as not-supplied
+        # (capability routing) and never dispatched.
         av, td, indian = Stub(), Stub(), Stub()
         m = _manager(av=av, td=td, indian=indian)
         env = m.get_statements("TCS.NS", "income", "annual")
@@ -103,15 +110,17 @@ class TestYahooOnlyTCS(_EnvGuard):
         self.assertEqual(av.calls, [])
         self.assertEqual(td.calls, [])
         self.assertEqual(indian.calls, [])
-        providers = {p["provider"] for p in env.get("provider_status", [])}
-        self.assertEqual(providers, {"alphavantage", "twelvedata", "indian-api"})
-        for p in env["provider_status"]:
-            self.assertEqual(p["state"], "KEY_REQUIRED")
+        by_provider = {p["provider"]: p for p in env.get("provider_status", [])}
+        self.assertEqual(
+            set(by_provider), {"alphavantage", "twelvedata", "indian-api"}
+        )
+        self.assertEqual(by_provider["alphavantage"]["state"], "KEY_REQUIRED")
+        self.assertEqual(by_provider["twelvedata"]["state"], "KEY_REQUIRED")
+        self.assertEqual(by_provider["indian-api"]["state"], "NOT_CONFIGURED")
         # never a single-provider key message as the domain answer
-        self.assertNotIn("Set INDIAN_STOCK_MARKET_API_KEY", env["message"])
         self.assertIn("ALPHA_VANTAGE_API_KEY", env["message"])
         self.assertIn("TWELVE_DATA_API_KEY", env["message"])
-        self.assertIn("INDIAN_STOCK_MARKET_API_KEY", env["message"])
+        self.assertNotIn("INDIAN_STOCK_MARKET_API_KEY", env["message"])
 
     def test_valuation_earnings_estimates_honest_miss(self):
         m = _manager()
@@ -120,14 +129,36 @@ class TestYahooOnlyTCS(_EnvGuard):
             self.assertEqual(env["status"], "unavailable", fn)
             self.assertIsNone(env["data"], fn)
             self.assertTrue(env.get("provider_status"), fn)
-            self.assertNotIn("Set INDIAN_STOCK_MARKET_API_KEY", env.get("message") or "")
 
-    def test_key_gated_indian_leg_never_dispatched(self):
+    def test_indian_leg_skipped_for_statements_never_dispatched(self):
         indian = Stub(get_financial_statements=lambda *a: _stmt("indian-api"))
         m = _manager(indian=indian)
         env = m.get_statements("TCS.NS", "income", "annual")
         self.assertEqual(indian.calls, [])
         self.assertEqual(env["status"], "unavailable")
+        skipped = {s["provider"]: s["reason"] for s in env["reconciliation"]["skipped"]}
+        self.assertIn("not supplied", skipped["indian-api"])
+
+    def test_indian_ratios_cover_valuation_without_any_key(self):
+        # No keys at all: the no-auth Indian leg still answers valuation.
+        indian = Stub(
+            get_ratios=lambda s: live_envelope(
+                "indian-api",
+                {
+                    "Symbol": s,
+                    "MarketCapitalization": 1140000000000,
+                    "PERatio": 28.45,
+                    "EPS": 110.40,
+                    "DividendYield": 2.18,
+                    "BookValue": 210.75,
+                },
+            )
+        )
+        m = _manager(indian=indian)
+        env = m.get_valuation("TCS.NS")
+        self.assertEqual(env["status"], "live")
+        self.assertEqual(env["reconciliation"]["primary"], "indian-api")
+        self.assertEqual(indian.calls, ["get_ratios"])
 
     def test_news_and_actions_still_live_from_yahoo(self):
         rss = Stub(
@@ -192,24 +223,31 @@ class TestWithKeys(_EnvGuard):
         self.assertEqual(env["status"], "live")
         self.assertEqual(env["source"], "twelvedata")
 
-    def test_indian_statement_covers_tcs_with_key(self):
-        self._keys("INDIAN_STOCK_MARKET_API_KEY")
-        indian = Stub(get_financial_statements=lambda *a: _stmt("indian-api"))
+    def test_indian_ratios_cover_tcs_valuation_no_key_needed(self):
+        indian = Stub(
+            get_ratios=lambda s: live_envelope(
+                "indian-api",
+                {
+                    "Symbol": s,
+                    "MarketCapitalization": 1140000000000,
+                    "PERatio": 28.45,
+                    "EPS": 110.40,
+                    "DividendYield": 2.18,
+                    "BookValue": 210.75,
+                },
+            )
+        )
         m = _manager(indian=indian)
-        env = m.get_statements("TCS.NS", "income", "annual")
+        env = m.get_valuation("TCS.NS")
         self.assertEqual(env["status"], "live")
-        self.assertEqual(env["source"], "indian-api")
-        self.assertEqual(indian.calls, ["get_financial_statements"])
+        self.assertEqual(env["reconciliation"]["primary"], "indian-api")
+        self.assertEqual(indian.calls, ["get_ratios"])
 
     def test_msft_never_touches_indian_leg(self):
-        self._keys(
-            "ALPHA_VANTAGE_API_KEY",
-            "TWELVE_DATA_API_KEY",
-            "INDIAN_STOCK_MARKET_API_KEY",
-        )
-        indian = Stub(get_financial_statements=lambda *a: _stmt("indian-api"))
+        self._keys("ALPHA_VANTAGE_API_KEY", "TWELVE_DATA_API_KEY")
+        indian = Stub(get_ratios=lambda s: live_envelope("indian-api", {}))
         m = _manager(indian=indian)
-        env = m.get_statements("MSFT", "income", "annual")
+        env = m.get_valuation("MSFT")
         self.assertEqual(indian.calls, [])
         skipped = {s["provider"]: s["reason"] for s in env["reconciliation"]["skipped"]}
         self.assertIn("indian-api", skipped)

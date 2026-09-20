@@ -9,12 +9,9 @@ Run:  python scripts/audit_providers.py [TATASTEEL.NS MSFT ...]
 
 from __future__ import annotations
 
-import json
 import os
 import sys
 import time
-import urllib.parse
-import urllib.request
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
@@ -176,71 +173,38 @@ def probe_stooq(provider, symbol: str) -> dict:
 
 
 def probe_indianapi(symbol: str) -> dict:
-    """indianapi.in hosted 'Indian Stock Market' API (X-API-Key header)."""
-    key = (os.environ.get("INDIAN_STOCK_MARKET_API_KEY") or "").strip()
-    out = {"provider": "indianapi.in", "symbol": symbol, "key_configured": bool(key)}
-    if not key:
-        out.update({"status": "no_key", "message": "INDIAN_STOCK_MARKET_API_KEY unset"})
+    """Free no-auth Indian leg (quoteSummary-backed). No key ever needed."""
+    from providers.indianapi import IndianApiProvider
+
+    leg = IndianApiProvider()
+    out: dict = {"provider": "indianapi", "symbol": symbol, "key_required": False}
+    env, err, ms = _timeit(lambda: leg.get_quote(symbol))
+    if err is not None:
+        out.update(
+            {"status": "error", "message": f"{type(err).__name__}: {err}"}
+        )
         return out
-    attempts = [
-        ("https://dev.indianapi.in/stock", {"name": symbol.replace(".NS", "")}),
-        ("https://stock.indianapi.in/stock", {"name": symbol.replace(".NS", "")}),
-        ("https://dev.indianapi.in/search", {"query": symbol.replace(".NS", "")}),
-    ]
-    for url, params in attempts:
-
-        def call():
-            u = url + "?" + urllib.parse.urlencode(params)
-            req = urllib.request.Request(u, headers={**UA, "X-API-Key": key})
-            with urllib.request.urlopen(req, timeout=10) as r:
-                return r.status, r.read().decode("utf-8", "replace")
-
-        env, err, ms = _timeit(call)
-        if err is not None:
-            out.setdefault("attempts", []).append(
-                {
-                    "url": url.split("/")[2],
-                    "latency_ms": ms,
-                    "status": "unreachable",
-                    "message": f"{type(err).__name__}: {err}",
-                }
-            )
-            continue
-        code, text = env
-        out["attempts"] = out.get("attempts") or [
-            {
-                "url": url.split("/")[2],
-                "latency_ms": ms,
-                "status": code,
-                "status_line": text[:120].replace("\n", " "),
-            }
-        ]
-        if code == 200:
-            try:
-                body = json.loads(text)
-            except Exception:
-                body = text
-            out.update(
-                {
-                    "status": "live",
-                    "http": code,
-                    "latency_ms": ms,
-                    "body_keys": list(body.keys())
-                    if isinstance(body, dict)
-                    else type(body).__name__,
-                    "price": (body or {}).get("price")
-                    if isinstance(body, dict)
-                    else None,
-                }
-            )
-            return out
+    d = env.get("data") or {}
+    out.update(
+        {
+            "status": env.get("status"),
+            "latency_ms": ms,
+            "price": d.get("price"),
+            "market_cap": d.get("market_cap"),
+            "pe": d.get("pe"),
+            "eps": d.get("eps"),
+            "book_value": d.get("book_value"),
+            "dividend_yield": d.get("dividend_yield"),
+            "sector": d.get("sector"),
+            "message": env.get("message"),
+        }
+    )
     return out
 
 
 def main(argv: list[str]) -> int:
     symbols = argv or SYMBOLS
     from providers.fundamentals import AlphaVantageFundamentalsProvider
-    from providers.indian import IndianMarketApiProvider
     from providers.stooq import StooqProvider
     from providers.twelvedata import TwelveDataProvider
     from providers.yahoo import YahooMarketDataProvider
@@ -248,16 +212,13 @@ def main(argv: list[str]) -> int:
     print("== Credentials (booleans only, values never printed) ==")
     print(f"  ALPHA_VANTAGE_API_KEY configured:     {_has('ALPHA_VANTAGE_API_KEY')}")
     print(f"  TWELVE_DATA_API_KEY configured:         {_has('TWELVE_DATA_API_KEY')}")
-    print(
-        f"  INDIAN_STOCK_MARKET_API_KEY configured: {_has('INDIAN_STOCK_MARKET_API_KEY')}"
-    )
+    print("  Indian Stock Market API:                  no-auth (no key required)")
     print()
 
     yah = YahooMarketDataProvider()
     td = TwelveDataProvider()
     av = AlphaVantageFundamentalsProvider()
     stooq = StooqProvider()
-    ind_leg = IndianMarketApiProvider()
 
     results = []
     for sym in symbols:
@@ -294,23 +255,16 @@ def main(argv: list[str]) -> int:
                 f"  stooq:         {r['status']:12s} {r.get('latency_ms')}ms "
                 f"bars={r.get('bars')} msg={r.get('message')}"
             )
-        if sym.endswith(".NS"):
+        if sym.endswith((".NS", ".BO")):
             r = probe_indianapi(sym)
             results.append(r)
-            for a in r.get("attempts", []):
-                print(
-                    f"                 {a.get('url')}: {a.get('status')} "
-                    f"{a.get('latency_ms')}ms {a.get('status_line') or a.get('message')}"
-                )
             print(
-                f"  indianapi.in:  {r.get('status')} price={r.get('price')} "
-                f"body_keys={r.get('body_keys')}"
+                f"  indian-leg:    {r.get('status')} price={r.get('price')} "
+                f"mcap={r.get('market_cap')} pe={r.get('pe')} "
+                f"eps={r.get('eps')} bv={r.get('book_value')} "
+                f"divy={r.get('dividend_yield')} sector={r.get('sector')} "
+                f"msg={r.get('message')}"
             )
-        echo = ind_leg.get_quote(sym)
-        print(
-            f"  indian-leg:    {echo.get('status')} (existing provider; "
-            f"host via {ind_leg.base_url() if hasattr(ind_leg, 'base_url') else 'n/a'})"
-        )
         print()
 
     print("== Summary ==")

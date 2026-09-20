@@ -8,14 +8,14 @@ QUOTE (global): yahoo first (indian leg passes non-Indian symbols through)
 HISTORY:
     yahoo -> stooq -> twelvedata -> alphavantage -> UNAVAILABLE
 FUNDAMENTALS / STATEMENTS:
-    indian-api (NSE/BSE) else alphavantage -> twelvedata
-EARNINGS:  alphavantage (indian-api annual EPS for NSE/BSE)
-ESTIMATES: alphavantage (non-Indian) | indian-api analyst ratings
-           (NSE/BSE). Never synthesised EPS forecasts.
-NEWS:    yahoo-rss -> alphavantage (indian-api news for NSE/BSE)
+    alphavantage -> twelvedata (indian-api: quote + market
+    fundamentals only, no statements)
+EARNINGS:  alphavantage + twelvedata
+ESTIMATES: alphavantage only. Never synthesised EPS forecasts.
+NEWS:    yahoo-rss -> alphavantage
 IPO:     alphavantage         MACRO: alphavantage indicators
-ACTIONS: yahoo-events (indian-api dividends/splits for NSE/BSE)
-HOLDINGS: indian-api ownership split (NSE/BSE only)
+ACTIONS: yahoo-events (+alphavantage/twelvedata legs)
+HOLDINGS: no configured provider (honest unavailable)
 TECHNICAL: local calc from history   CHART: TradingView widget
 
 Swap implementations here (or via env vars) without touching the UI.
@@ -144,20 +144,19 @@ def providers_status() -> dict:
             },
             {
                 "id": "indian-api",
-                "label": "Indian Stock Market API (stock.indianapi.in)",
+                "label": "Indian Stock Market API",
                 "state": "connected"
                 if health.get("indian-api", {}).get("state") == "ok"
                 and health.get("indian-api", {}).get("last_ok")
                 else "unreachable",
-                "detail": "Keyed NSE/BSE feed (X-API-Key). One delayed "
-                "snapshot powers quote, fundamentals, statements, "
-                "earnings, analyst ratings, ownership, corporate actions "
-                "and news for NSE/BSE symbols. Rate budget self-imposed "
-                "(30/min, 2000/day); responses cached.",
-                "key_required": True,
-                "key_configured": bool(
-                    (os.environ.get("INDIAN_STOCK_MARKET_API_KEY") or "").strip()
-                ),
+                "detail": "Free no-auth NSE/BSE feed (MIT upstream, "
+                "quoteSummary-backed). Delayed quote plus market "
+                "fundamentals (market cap, P/E, EPS, book value, "
+                "dividend yield, sector, industry, 52W range). No "
+                "statements, estimates, earnings series, ownership "
+                "or news — those stay on their legitimate providers.",
+                "key_required": False,
+                "key_configured": True,
                 "capabilities": _base.describe(_indianapi),
                 "health": health.get("indian-api", {}),
                 "budget": _indianapi.budget_snapshot(),

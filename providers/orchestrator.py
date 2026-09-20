@@ -83,17 +83,17 @@ CAPABILITIES: dict[str, dict[str, bool]] = {
         "holdings": False,
     },
     "indian-api": {
-        "quote": True,  # NSE/BSE only
+        "quote": True,  # NSE/BSE only, no-auth quoteSummary leg
         "history": False,
         "search": False,
-        "profile": True,  # NSE/BSE only
-        "statements": True,  # annual only, NSE/BSE only
-        "valuation": True,  # keyMetrics, NSE/BSE only
-        "estimates": True,  # rating distribution only, NSE/BSE only
-        "earnings": True,  # fiscal-year EPS, NSE/BSE only
-        "actions": True,  # dividends/splits/bonus/rights + extras
-        "news": True,  # recentNews, NSE/BSE only
-        "holdings": True,  # sole ownership source, NSE/BSE only
+        "profile": True,  # NSE/BSE only (sector/industry included)
+        "statements": False,  # upstream offers quote + market fundamentals only
+        "valuation": True,  # market_cap/pe/eps/dividend_yield/book_value
+        "estimates": False,
+        "earnings": False,
+        "actions": False,  # covered by yahoo-events
+        "news": False,  # covered by yahoo-rss
+        "holdings": False,
     },
     "stooq": {
         "quote": False,
@@ -189,23 +189,16 @@ class ProviderManager:
         return True, ""
 
     def _indian_ready(self, symbol: str) -> tuple[bool, str]:
-        """Indian leg guard: wired + Indian symbol + API key configured.
+        """Indian leg guard: wired + Indian symbol. No API key required.
 
-        Mirrors _av_ready/_td_room so the orchestrator never wastes a
-        request against the key-gated Indian leg and never surfaces a
-        single-provider key message as the domain answer.
+        The free no-auth Indian Stock Market API (MIT, quoteSummary-
+        backed) is READY for any NSE/BSE symbol — never KEY_REQUIRED.
         """
         leg = self._indian_leg()
         if leg is None:
             return False, "Indian Stock Market API leg not wired."
         if not is_indian(symbol):
             return False, "Non-Indian symbol."
-        try:
-            from providers.indianapi import _api_key as _indian_key
-        except Exception:
-            return False, "Indian Stock Market API unavailable."
-        if not _indian_key():
-            return False, "INDIAN_STOCK_MARKET_API_KEY not configured."
         return True, ""
 
     # -- parallel fan-out with coalescing ---------------------------------
@@ -590,38 +583,25 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
-            leg = self._indian_leg()
-            in_ok, in_reason = self._indian_ready(symbol)
-            if in_ok and leg is not None and is_indian(symbol):
-                calls.append(
-                    (
-                        "indian-api",
-                        lambda: leg.get_financial_statements(symbol, statement, period),
-                    )
-                )
-            else:
-                skipped.append(
-                    {
-                        "provider": "indian-api",
-                        "reason": in_reason or "Leg not wired.",
-                    }
-                )
+            # Capability routing: the no-auth Indian leg offers quote +
+            # market fundamentals only — statements stay on AV/TD.
+            skipped.append(
+                {
+                    "provider": "indian-api",
+                    "reason": "Financial statements not supplied by this provider.",
+                }
+            )
             results = self._fanout(key + ":fan", STATEMENTS_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
-            inapi = results.get("indian-api", {})
             av_live = _ok(av) and av.get("data")
             td_live = _ok(td) and td.get("data")
-            in_live = _ok(inapi) and inapi.get("data")
-            if not av_live and not td_live and not in_live:
+            if not av_live and not td_live:
                 return _honest_unavailable("financial statement", results, skipped)
             if av_live:
                 primary = av
-            elif in_live:
-                primary = inapi
             else:
                 primary = td
-            in_data = (inapi.get("data") or {}) if in_live else None
             data = dict(primary.get("data") or {})
             comparisons = _reconcile_statements(
                 statement,
@@ -645,16 +625,6 @@ class ProviderManager:
             }
             if td_live and av_live:
                 env["td_reports"] = (td.get("data") or {}).get("reports")
-            elif in_live and not av_live:
-                data.update(
-                    {
-                        "symbol": symbol,
-                        "statement": statement,
-                        "period": period,
-                        "currency": (in_data or {}).get("currency") or "INR",
-                        "reports": (in_data or {}).get("reports"),
-                    }
-                )
             elif td_live:
                 data.update(
                     {
@@ -725,11 +695,11 @@ class ProviderManager:
                     + ". "
                     + "; ".join(_leg_detail(results))
                     + " Set "
-                    "ALPHA_VANTAGE_API_KEY and/or TWELVE_DATA_API_KEY and/or "
-                    "INDIAN_STOCK_MARKET_API_KEY to enable. (Common causes: "
-                    "Alpha Vantage free quota spent (25/day), Twelve Data "
-                    "budget/coverage limits, or a symbol outside the "
-                    "Indian Stock Market API (NSE/BSE only).)"
+                    "ALPHA_VANTAGE_API_KEY and/or TWELVE_DATA_API_KEY to "
+                    "enable further coverage. The free no-auth Indian leg "
+                    "was checked automatically for NSE/BSE symbols. "
+                    "(Common causes: Alpha Vantage free quota spent "
+                    "(25/day), Twelve Data budget/coverage limits.)"
                 )
                 return miss
             from providers.schema import field as _f
@@ -851,25 +821,20 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
-            leg = self._indian_leg()
-            in_ok, in_reason = self._indian_ready(symbol)
-            if in_ok and leg is not None and is_indian(symbol):
-                calls.append(("indian-api", lambda: leg.get_earnings(symbol)))
-            else:
-                skipped.append(
-                    {
-                        "provider": "indian-api",
-                        "reason": in_reason or "Leg not wired.",
-                    }
-                )
+            # Capability routing: earnings series are not supplied by the
+            # no-auth Indian leg — AV + TD only.
+            skipped.append(
+                {
+                    "provider": "indian-api",
+                    "reason": "Earnings series not supplied by this provider.",
+                }
+            )
             results = self._fanout(key + ":fan", EARNINGS_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
-            inapi = results.get("indian-api", {})
             av_d = av.get("data") if _ok(av) else {}
             td_rows = ((td.get("data") or {}).get("rows") if _ok(td) else []) or []
-            in_d = inapi.get("data") if _ok(inapi) else {}
-            if not av_d and not td_rows and not in_d:
+            if not av_d and not td_rows:
                 return _honest_unavailable("earnings data", results, skipped)
             from providers.schema import field as _f
 
@@ -905,15 +870,6 @@ class ProviderManager:
             if av_d:
                 data = dict(av_d)
                 prim_src = "alphavantage"
-            elif in_d:
-                data = {
-                    "symbol": symbol,
-                    "annual": in_d.get("annual") or [],
-                    "quarterly": in_d.get("quarterly") or [],
-                    "note": in_d.get("note")
-                    or "Reported fiscal-year EPS (Indian Stock Market API).",
-                }
-                prim_src = "indian-api"
             else:
                 data = {
                     "symbol": symbol,
@@ -927,7 +883,7 @@ class ProviderManager:
             return {
                 "status": "live",
                 "source": prim_src,
-                "as_of": av.get("as_of") or inapi.get("as_of") or td.get("as_of"),
+                "as_of": av.get("as_of") or td.get("as_of"),
                 "timeliness": "END-OF-DAY",
                 "data": data,
                 "providers_queried": _queried(results),
@@ -978,19 +934,14 @@ class ProviderManager:
                         "reason": av_reason or "Leg not wired.",
                     }
                 )
-            leg = self._indian_leg()
-            in_ok, in_reason = self._indian_ready(symbol or "")
-            if in_ok and leg is not None and symbol is not None and is_indian(symbol):
-                calls.append(("indian-api", lambda: leg.get_news(symbol, topic, limit)))
-            else:
-                skipped.append(
-                    {
-                        "provider": "indian-api",
-                        "reason": "Missing symbol."
-                        if not (symbol or "").strip()
-                        else (in_reason or "Leg not wired."),
-                    }
-                )
+            # Capability routing: news is not supplied by the no-auth
+            # Indian leg — yahoo-rss + AV only.
+            skipped.append(
+                {
+                    "provider": "indian-api",
+                    "reason": "News not supplied by this provider.",
+                }
+            )
             results = self._fanout(key + ":fan", NEWS_TTL, calls)
             seen: set[str] = set()
             items: list[dict] = []
@@ -1075,17 +1026,14 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
-            leg = self._indian_leg()
-            in_ok, in_reason = self._indian_ready(symbol)
-            if in_ok and leg is not None and is_indian(symbol):
-                calls.append(("indian-api", lambda: leg.get_actions(symbol)))
-            else:
-                skipped.append(
-                    {
-                        "provider": "indian-api",
-                        "reason": in_reason or "Leg not wired.",
-                    }
-                )
+            # Capability routing: corporate actions are not supplied by the
+            # no-auth Indian leg — yahoo-events + AV + TD only.
+            skipped.append(
+                {
+                    "provider": "indian-api",
+                    "reason": "Corporate actions not supplied by this provider.",
+                }
+            )
             results = self._fanout(key + ":fan", ACTIONS_TTL, calls)
             dividends: list[dict] = []
             splits: list[dict] = []
@@ -1155,9 +1103,9 @@ class ProviderManager:
         return self._cached_or(key, ACTIONS_TTL, compute)
 
     def get_estimates(self, symbol: str) -> dict:
-        """Analyst estimates: Alpha Vantage EPS/revenue forecasts
-        (non-Indian) plus the Indian API's reported analyst-rating
-        distribution (NSE/BSE). Estimates are never synthesised."""
+        """Analyst estimates: Alpha Vantage EPS/revenue forecasts.
+        Estimates are never synthesised; the no-auth Indian leg offers
+        none, so AV is the only source."""
         symbol = (symbol or "").strip().upper()
         key = f"oest:{symbol}"
 
@@ -1176,34 +1124,22 @@ class ProviderManager:
                         "reason": av_reason or "Leg not wired.",
                     }
                 )
-            leg = self._indian_leg()
-            in_ok, in_reason = self._indian_ready(symbol)
-            if in_ok and leg is not None and is_indian(symbol):
-                calls.append(("indian-api", lambda: leg.get_estimates(symbol)))
-            else:
-                skipped.append(
-                    {
-                        "provider": "indian-api",
-                        "reason": in_reason or "Leg not wired.",
-                    }
-                )
+            # Capability routing: analyst estimates are not supplied by the
+            # no-auth Indian leg — AV only. Estimates are never synthesised.
+            skipped.append(
+                {
+                    "provider": "indian-api",
+                    "reason": "Analyst estimates not supplied by this provider.",
+                }
+            )
             results = self._fanout(key + ":fan", ESTIMATES_TTL, calls)
             av = results.get("alphavantage", {})
-            inapi = results.get("indian-api", {})
             av_d = av.get("data") if _ok(av) else {}
-            in_d = inapi.get("data") if _ok(inapi) else {}
-            if not av_d and not in_d:
+            if not av_d:
                 return _honest_unavailable("analyst estimates", results, skipped)
-            if av_d:
-                data = dict(av_d)
-                as_of = av.get("as_of")
-                prim_src = av.get("source", "alphavantage")
-            else:
-                data = dict(in_d or {})
-                as_of = inapi.get("as_of")
-                prim_src = inapi.get("source", "indian-api")
-            if (in_d or {}).get("analyst_ratings"):
-                data["analyst_ratings"] = (in_d or {}).get("analyst_ratings")
+            data = dict(av_d)
+            as_of = av.get("as_of")
+            prim_src = av.get("source", "alphavantage")
             return {
                 "status": "live",
                 "source": prim_src,
@@ -1218,33 +1154,41 @@ class ProviderManager:
         return self._cached_or(key, ESTIMATES_TTL, compute)
 
     def get_shareholding(self, symbol: str) -> dict:
-        """Ownership split for NSE/BSE symbols (Indian API). Provider-
-        reported filing figures only — never calculated or guessed."""
+        """Ownership split: no configured provider supplies it.
+
+        The no-auth Indian leg documents quote + market fundamentals
+        only, so holdings stay honestly unavailable — never guessed."""
         symbol = (symbol or "").strip().upper()
         key = f"ohold:{symbol}"
 
         def compute() -> dict:
-            leg = self._indian_leg()
-            if leg is None:
-                return {
-                    "status": "unavailable",
-                    "source": "orchestrator",
-                    "as_of": None,
-                    "data": None,
-                    "message": "Indian leg not wired.",
-                    "providers_queried": [],
-                }
-            if not is_indian(symbol):
-                return {
-                    "status": "unavailable",
-                    "source": "orchestrator",
-                    "as_of": None,
-                    "data": None,
-                    "message": f"Ownership splits are only offered for NSE/BSE "
-                    f"symbols; '{symbol}' was skipped (never guessed).",
-                    "providers_queried": ["indian-api:skipped"],
-                }
-            return leg.get_shareholding(symbol)
+            return {
+                "status": "unavailable",
+                "source": "orchestrator",
+                "as_of": None,
+                "data": None,
+                "message": "No configured provider currently supplies "
+                "ownership splits. Providers checked: indian-api — "
+                "Ownership splits not supplied by this provider.",
+                "providers_queried": ["indian-api:skipped"],
+                "reconciliation": {
+                    "skipped": [
+                        {
+                            "provider": "indian-api",
+                            "reason": "Ownership splits not supplied by "
+                            "this provider.",
+                        }
+                    ]
+                },
+                "provider_status": [
+                    {
+                        "provider": "indian-api",
+                        "state": "NOT_CONFIGURED",
+                        "reason": "Ownership splits not supplied by "
+                        "this provider.",
+                    }
+                ],
+            }
 
         return self._cached_or(key, ACTIONS_TTL, compute)
 
@@ -1290,7 +1234,12 @@ def _provider_state(reason: str) -> str:
     low = (reason or "").lower()
     if "not configured" in low or "api key" in low or "not wired" in low:
         return "KEY_REQUIRED"
-    if "non-indian" in low or "not covered" in low or "unsupported" in low:
+    if (
+        "non-indian" in low
+        or "not covered" in low
+        or "unsupported" in low
+        or "not supplied" in low
+    ):
         return "NOT_CONFIGURED"
     return "UPSTREAM_LIMITATION"
 

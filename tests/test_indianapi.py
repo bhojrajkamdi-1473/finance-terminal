@@ -1,230 +1,67 @@
-"""Unit tests: IndianApiProvider (stock.indianapi.in) normalization.
+"""Unit tests: IndianApiProvider (free no-auth NSE/BSE leg).
 
-No network: every test monkeypatches the provider's `_fetch` seam with a
-local fixture copied from the shape of a live, saved TATASTEEL payload.
-`INDIAN_STOCK_MARKET_API_KEY` is set to a fake value only so the config
-flag flips; nothing touches the upstream.
+No network: every test monkeypatches the provider's `_quote_summary`
+seam with a local fixture shaped like Yahoo's quoteSummary result
+(price/summaryDetail/defaultKeyStatistics/assetProfile with {raw}
+fields). No API key is ever needed — tests assert the provider works
+with an empty environment.
 
 Run: python -m unittest discover -s tests -v
 """
 
 import os
 import unittest
-from datetime import datetime, timedelta, timezone
 
-from providers.indianapi import IndianApiProvider
+from providers.indianapi import IndianApiProvider, _qsymbol
 
 
-def _fixture() -> dict:
-    """Realistic payload (subset of a live TATASTEEL response)."""
+def _F(v):
+    return {"raw": v}
 
-    def row(key, value, display="") -> dict:
-        return {"key": key, "displayName": display or (key + " "), "value": value}
 
+def _fixture(symbol="TCS.NS") -> dict:
+    """quoteSummary result[0] subset for an NSE equity."""
     return {
-        "companyName": "Tata Steel Ltd",
-        "industry": "Metals & Mining",
-        "companyProfile": {
-            "companyDescription": "Tata Steel is an integrated steel producer.",
-            "mgIndustry": "Steel",
+        "price": {
+            "longName": "Tata Consultancy Services Limited",
+            "currency": "INR",
+            "regularMarketPrice": _F(3140.50),
+            "regularMarketChange": _F(-12.30),
+            "regularMarketChangePercent": _F(-0.3902),
+            "regularMarketPreviousClose": _F(3152.80),
+            "regularMarketOpen": _F(3145.00),
+            "regularMarketDayHigh": _F(3160.00),
+            "regularMarketDayLow": _F(3120.10),
+            "regularMarketVolume": _F(2500000),
+            "marketCap": _F(1140000000000),
+            "regularMarketTime": _F(1784087100),
         },
-        "percentChange": "-0.30",
-        "yearHigh": "224.40",
-        "yearLow": "160.00",
-        "currentPrice": {"BSE": "182.85", "NSE": "183.00"},
-        "stockDetailsReusableData": {
-            "price": "183.00",
-            "close": "183.00",
-            "date": "16 Sep 2026",
-            "time": "10:28:24",
-            "percentChange": "-0.30",
-            "high": "184.00",
-            "low": "181.00",
-            "yhigh": "224.40",
-            "ylow": "160.06",
-            "marketCap": "228447.00",
-            "pPerEBasicExcludingExtraordinaryItemsTTM": "21.24",
-            "currentDividendYieldCommonStockPrimaryIssueLTM": "2.18",
+        "summaryDetail": {
+            "fiftyTwoWeekHigh": _F(3400.00),
+            "fiftyTwoWeekLow": _F(2800.00),
+            "trailingPE": _F(28.45),
+            "dividendYield": _F(0.0218),
+            "marketCap": _F(1140000000000),
+            "open": _F(3145.00),
         },
-        "financials": [
-            {
-                "FiscalYear": 2026,
-                "EndDate": "2026-03-31",
-                "stockFinancialMap": {
-                    "INC": [
-                        row("NetIncome", "10793.87", "Net Income "),
-                        row(
-                            "DilutedWeightedAverageShares",
-                            "1247.18",
-                            "Diluted Weighted Average Shares ",
-                        ),
-                        row(
-                            "DilutedEPSExcludingExtraOrdItems",
-                            "8.65",
-                            "Diluted EPS Excluding Extra Ord Items ",
-                        ),
-                        row("TotalRevenue", "236395.00", "Total Revenue "),
-                    ],
-                    "BAL": [
-                        row(
-                            "TotalCommonSharesOutstanding",
-                            "1247.18",
-                            "Total Common Shares Outstanding ",
-                        ),
-                    ],
-                    "CAS": [
-                        row(
-                            "NetIncomeStartingLine",
-                            "10793.87",
-                            "Net Income/Starting Line ",
-                        ),
-                    ],
-                },
-            },
-            {
-                "FiscalYear": 2025,
-                "EndDate": "2025-03-31",
-                "stockFinancialMap": {
-                    "INC": [
-                        row(
-                            "DilutedEPSExcludingExtraOrdItems",
-                            "6.10",
-                            "Diluted EPS Excluding Extra Ord Items ",
-                        ),
-                    ],
-                    "BAL": [],
-                    "CAS": [],
-                },
-            },
-        ],
-        "keyMetrics": {
-            "valuation": [
-                row("pPerEBasicExcludingExtraordinaryItemsTTM", "21.24"),
-                row("priceToBookMostRecentFiscalYear", "2.24"),
-                row("pegRatio", "3.21"),
-                row("priceToSalesTrailing12Month", "0.96"),
-                row("currentDividendYieldCommonStockPrimaryIssueLTM", "2.18"),
-            ],
-            "persharedata": [
-                row("ePSBasicExcludingExtraordinaryItemsMostRecentFiscalYear", "8.65"),
-                row("bookValuePerShareMostRecentFiscalYear", "65.13"),
-                row("dividendPerShareMostRecentFiscalYear", "4.00"),
-            ],
-            "mgmtEffectiveness": [
-                row("returnOnAverageEquityMostRecentFiscalYear", "11.17"),
-                row("returnOnAverageAssetsMostRecenFiscalYear", "3.75"),
-            ],
-            "margins": [
-                row("netProfitMarginPercentTrailing12Month", "4.70"),
-                row("operatingMarginTrailing12Month", "8.83"),
-                row("grossMarginTrailing12Month", "59.96"),
-            ],
-            "financialstrength": [
-                row("totalDebtPerTotalEquityMostRecentFiscalYear", "0.90"),
-            ],
-            "priceandVolume": [
-                row("marketCap", "228447.00"),
-                row("beta", "1.18"),
-                row("52WeekHigh", "224.40"),
-                row("52WeekLow", "160.06"),
-            ],
+        "defaultKeyStatistics": {
+            "bookValue": _F(210.75),
+            "trailingEps": _F(110.40),
         },
-        "analystView": [
-            {
-                "ratingName": "Strong Buy",
-                "ratingValue": 1,
-                "numberOfAnalystsLatest": "10",
-            },
-            {"ratingName": "Buy", "ratingValue": 2, "numberOfAnalystsLatest": "8"},
-            {"ratingName": "Hold", "ratingValue": 3, "numberOfAnalystsLatest": "9"},
-            {"ratingName": "Sell", "ratingValue": 4, "numberOfAnalystsLatest": "4"},
-            {
-                "ratingName": "Strong Sell",
-                "ratingValue": 5,
-                "numberOfAnalystsLatest": "3",
-            },
-        ],
-        "recosBar": {
-            "stockAnalyst": [
-                {
-                    "ratingName": "Strong Buy",
-                    "ratingValue": 1,
-                    "numberOfAnalysts": 10,
-                    "minValue": 1,
-                    "maxValue": 1.8,
-                },
-                {
-                    "ratingName": "Buy",
-                    "ratingValue": 2,
-                    "numberOfAnalysts": 8,
-                    "minValue": 1.8,
-                    "maxValue": 2.6,
-                },
-            ],
-            "tickerRatingValue": "2.47",
-            "noOfRecommendations": "34",
-            "meanValue": "2.47",
-            "tickerPercentage": "83.82",
+        "assetProfile": {
+            "sector": "Technology",
+            "industry": "Information Technology Services",
         },
-        "shareholding": [
-            {
-                "displayName": "Promoter",
-                "categoryName": "Shareholding of Promoter and Promoter Group",
-                "categories": [
-                    {"holdingDate": "2025-09-30", "percentage": "33.19"},
-                    {"holdingDate": "2026-06-30", "percentage": "32.94"},
-                ],
-            },
-            {
-                "displayName": "FII",
-                "categoryName": "FII",
-                "categories": [
-                    {"holdingDate": "2025-09-30", "percentage": "17.29"},
-                    {"holdingDate": "2026-06-30", "percentage": "18.90"},
-                ],
-            },
-        ],
-        "stockCorporateActionData": {
-            "dividend": [
-                {
-                    "remarks": "Rs.4 per share(400%)Final Dividend",
-                    "recordDate": "2026-06-12",
-                    "xdDate": "2026-06-12",
-                    "interimOrFinal": "Final",
-                    "value": 4,
-                    "percentage": 400,
-                    "dateOfAnnouncement": "2026-05-15",
-                }
-            ],
-            "splits": [
-                {
-                    "remarks": "Stock split from Rs. 10/- to Re. 1/-.",
-                    "recordDate": "2022-07-29",
-                    "xsDate": "2022-07-28",
-                    "oldFaceValue": 10,
-                    "newFaceValue": 1,
-                }
-            ],
-            "bonus": [],
-            "rights": [],
-            "annualGeneralMeeting": [{"agmDate": "2026-08-10", "purpose": "AGM"}],
-            "boardMeetings": [{"boardMeetDate": "2026-09-01", "purpose": "Board mtg"}],
-        },
-        "recentNews": [
-            {
-                "headline": "Tata Group stocks surge; RBI rejects Tata Sons move",
-                "date": "2026-09-15T04:29:02+0000",
-                "url": "/market/stock-market-news/tata-12345678901234.html",
-                "summary": "Most Tata Group stocks surged on Tuesday.",
-            }
-        ],
     }
 
 
-class IndianApiTest(unittest.TestCase):
+class NoAuthTestCase(unittest.TestCase):
+    KEYS = ("INDIAN_STOCK_MARKET_API_KEY", "INDIAN_API_BASE_URL")
+
     def setUp(self):
-        self._old = {k: os.environ.get(k) for k in ("INDIAN_STOCK_MARKET_API_KEY",)}
-        os.environ["INDIAN_STOCK_MARKET_API_KEY"] = "test-key"
+        self._old = {k: os.environ.get(k) for k in self.KEYS}
+        for k in self.KEYS:
+            os.environ.pop(k, None)
 
     def tearDown(self):
         for k, v in self._old.items():
@@ -233,53 +70,83 @@ class IndianApiTest(unittest.TestCase):
             else:
                 os.environ[k] = v
 
-    def _prov(self, payload=_fixture()):
+    def _prov(self, result=None, fail=None):
         p = IndianApiProvider()
         calls = {"n": 0}
 
-        def fetch(name):
+        def qs(ticker):
             calls["n"] += 1
-            return payload
+            if fail is not None:
+                raise fail
+            return result if result is not None else _fixture()
 
-        p._fetch = fetch  # transport seam override (no network)
+        p._quote_summary = qs  # transport seam override (no network)
         return p, calls
 
 
-class TestQuote(IndianApiTest):
-    def test_nse_quote_normalized(self):
+class TestNoAuth(NoAuthTestCase):
+    def test_quote_works_without_any_key(self):
         p, calls = self._prov()
-        env = p.get_quote("TATASTEEL.NS")
+        env = p.get_quote("TCS.NS")
         self.assertEqual(env["status"], "delayed")
         self.assertEqual(env["source"], "indian-api")
-        self.assertEqual(env["timeliness"], "DELAYED")
-        q = env["data"]
-        self.assertEqual(q["price"], 183.0)
-        self.assertEqual(q["currency"], "INR")
-        self.assertEqual(q["exchange"], "NSE")
-        self.assertEqual(q["name"], "Tata Steel Ltd")
-        self.assertEqual(q["fifty_two_week_high"], 224.4)
-        self.assertAlmostEqual(q["previous_close"], 183.55, places=2)
-        self.assertAlmostEqual(q["change"], -0.55, places=2)
-        self.assertAlmostEqual(q["change_pct"], -0.30, places=2)
-        self.assertEqual(q["market_cap"], 228447.0)
-        self.assertEqual(q["pe"], 21.24)
-        self.assertEqual(q["dividend_yield"], 2.18)
         self.assertEqual(calls["n"], 1)
 
-    def test_bse_quote_preferred_when_requested(self):
+    def test_no_key_env_var_is_ignored(self):
+        os.environ["INDIAN_STOCK_MARKET_API_KEY"] = "stale-value"
         p, _ = self._prov()
-        env = p.get_quote("TATASTEEL.BO")
-        self.assertEqual(env["data"]["price"], 182.85)
+        env = p.get_quote("TCS.NS")
+        self.assertEqual(env["status"], "delayed")
+        self.assertNotIn("stale-value", str(env))
+
+
+class TestQuote(NoAuthTestCase):
+    def test_tcs_quote_normalized(self):
+        p, _ = self._prov()
+        env = p.get_quote("TCS.NS")
+        q = env["data"]
+        self.assertEqual(q["symbol"], "TCS.NS")
+        self.assertEqual(q["price"], 3140.50)
+        self.assertEqual(q["currency"], "INR")
+        self.assertEqual(q["exchange"], "NSE")
+        self.assertEqual(q["name"], "Tata Consultancy Services Limited")
+        self.assertEqual(q["open"], 3145.00)
+        self.assertEqual(q["day_high"], 3160.00)
+        self.assertEqual(q["day_low"], 3120.10)
+        self.assertEqual(q["volume"], 2500000)
+        self.assertEqual(q["fifty_two_week_high"], 3400.00)
+        self.assertEqual(q["fifty_two_week_low"], 2800.00)
+        self.assertEqual(q["market_cap"], 1140000000000)
+        self.assertEqual(q["pe"], 28.45)
+        self.assertEqual(q["eps"], 110.40)
+        self.assertEqual(q["book_value"], 210.75)
+        self.assertAlmostEqual(q["dividend_yield"], 2.18, places=2)
+        self.assertAlmostEqual(q["change_pct"], -39.02, places=2)
+        self.assertEqual(q["sector"], "Technology")
+        self.assertEqual(q["industry"], "Information Technology Services")
+        self.assertEqual(env["timeliness"], "DELAYED")
+
+    def test_bse_symbol_uses_bse_exchange(self):
+        p, _ = self._prov()
+        env = p.get_quote("TCS.BO")
         self.assertEqual(env["data"]["exchange"], "BSE")
 
-    def test_market_time_epoch(self):
-        p, _ = self._prov()
-        ts = p.get_quote("TATASTEEL.NS")["data"]["market_time"]
-        self.assertIsInstance(ts, int)
-        # 16 Sep 2026 10:28:24 IST
-        ist = timezone(timedelta(hours=5, minutes=30))
-        expected = datetime(2026, 9, 16, 10, 28, 24, tzinfo=ist).timestamp()
-        self.assertEqual(ts, int(expected))
+    def test_bare_symbol_defaults_to_nse(self):
+        self.assertEqual(_qsymbol("tcs"), "TCS.NS")
+        self.assertEqual(_qsymbol("TCS.BO"), "TCS.BO")
+        self.assertEqual(_qsymbol("TCS.NS"), "TCS.NS")
+
+    def test_null_fields_stay_null(self):
+        result = _fixture()
+        result["summaryDetail"]["trailingPE"] = {"raw": None}
+        result["assetProfile"] = {}
+        p, _ = self._prov(result=result)
+        q = p.get_quote("TCS.NS")["data"]
+        self.assertIsNone(q["pe"])
+        self.assertIsNone(q["sector"])
+        self.assertIsNone(q["industry"])
+        # everything else still populated — no wholesale failure
+        self.assertEqual(q["price"], 3140.50)
 
     def test_non_indian_passes_through_without_fetch(self):
         p, calls = self._prov()
@@ -288,139 +155,85 @@ class TestQuote(IndianApiTest):
         self.assertIn("not an NSE/BSE symbol", env["message"])
         self.assertEqual(calls["n"], 0)
 
-    def test_no_key_is_honest_unavailable(self):
-        os.environ.pop("INDIAN_STOCK_MARKET_API_KEY", None)
-        p, calls = self._prov()
-        env = p.get_quote("TATASTEEL.NS")
+    def test_no_price_is_honest_unavailable(self):
+        result = _fixture()
+        result["price"]["regularMarketPrice"] = {"raw": None}
+        p, _ = self._prov(result=result)
+        env = p.get_quote("TCS.NS")
         self.assertEqual(env["status"], "unavailable")
-        self.assertIn("INDIAN_STOCK_MARKET_API_KEY", env["message"])
-        self.assertEqual(calls["n"], 0)
+        self.assertIsNone(env["data"])
 
     def test_upstream_err_message_surfaces(self):
         from providers.indianapi import _UpstreamError
 
-        p = IndianApiProvider()
-
-        def fetch(name):
-            raise _UpstreamError({"status": "error", "message": "boom"})
-
-        p._fetch = fetch
-        env = p.get_quote("TATASTEEL.NS")
+        p, _ = self._prov(fail=_UpstreamError({"status": "error", "message": "boom"}))
+        env = p.get_quote("TCS.NS")
         self.assertEqual(env["status"], "error")
         self.assertIn("boom", env["message"])
 
-    def test_feed_err_key_returns_unavailable(self):
-        from providers.base import unavailable as _unavailable
-        from providers.indianapi import SOURCE, _UpstreamError
+    def test_timeout_is_error_not_crash(self):
+        p, _ = self._prov(fail=TimeoutError("timed out"))
+        env = p.get_quote("TCS.NS")
+        self.assertEqual(env["status"], "error")
+        self.assertIsNone(env["data"])
 
-        p = IndianApiProvider()
-
-        def fetch(name):
-            raise _UpstreamError(
-                _unavailable(SOURCE, "Stock not found (for 'NODATA.NS').")
-            )
-
-        p._fetch = fetch
-        env = p.get_quote("NODATA.NS")
-        self.assertEqual(env["status"], "unavailable")
-        self.assertIn("Stock not found", env["message"])
+    def test_profile_carries_sector_industry(self):
+        p, _ = self._prov()
+        env = p.get_company_profile("INFY.NS")
+        self.assertIn(env["status"], ("live", "delayed"))
+        self.assertEqual(env["data"]["sector"], "Technology")
+        self.assertEqual(env["data"]["industry"], "Information Technology Services")
+        self.assertIsNone(env["data"]["description"])
 
 
-class TestDomainData(IndianApiTest):
+class TestRatios(NoAuthTestCase):
     def test_ratios_flat_av_shape(self):
         p, _ = self._prov()
-        env = p.get_ratios("TATASTEEL.NS")
+        env = p.get_ratios("RELIANCE.NS")
         self.assertEqual(env["status"], "delayed")
         d = env["data"]
-        self.assertEqual(d["Symbol"], "TATASTEEL.NS")
-        self.assertEqual(d["PERatio"], 21.24)
-        self.assertEqual(d["EPS"], 8.65)
-        self.assertEqual(d["MarketCapitalization"], 228447.0)
-        self.assertEqual(d["MarketCapUnit"], "₹ Crore")
-        self.assertEqual(d["SharesUnit"], "Crore shares")
-        self.assertEqual(d["_metric_source"], "indian-api keyMetrics")
-        self.assertIsNone(d["ForwardPE"])
+        self.assertEqual(d["Symbol"], "RELIANCE.NS")
+        self.assertEqual(d["MarketCapitalization"], 1140000000000)
+        self.assertEqual(d["PERatio"], 28.45)
+        self.assertEqual(d["EPS"], 110.40)
+        self.assertEqual(d["BookValue"], 210.75)
+        self.assertAlmostEqual(d["DividendYield"], 2.18, places=2)
+        self.assertEqual(d["FiftyTwoWeekHigh"], 3400.00)
+        self.assertEqual(d["FiftyTwoWeekLow"], 2800.00)
+        self.assertEqual(d["_metric_source"], "indian-api quoteSummary")
 
-    def test_statements_income_annual(self):
+    def test_roe_never_present(self):
         p, _ = self._prov()
-        env = p.get_financial_statements("TATASTEEL.NS", "income", "annual")
-        self.assertEqual(env["status"], "delayed")
-        d = env["data"]
-        self.assertEqual(d["unit"], "₹ Crore")
-        self.assertEqual(len(d["reports"]), 2)
-        self.assertEqual(d["reports"][0]["Net Income"], "10793.87")
-        self.assertIn("Diluted EPS Excluding Extra Ord Items", d["reports"][0])
+        d = p.get_ratios("TCS.NS")["data"]
+        self.assertNotIn("ROE", d)
+        self.assertNotIn("ReturnOnEquity", d)
 
-    def test_statements_quarterly_never_synthesised(self):
-        p, calls = self._prov()
-        env = p.get_financial_statements("TATASTEEL.NS", "income", "quarterly")
-        self.assertEqual(env["status"], "unavailable")
-        self.assertIn("fiscal-year", env["message"])
-        self.assertEqual(calls["n"], 0)
 
-    def test_earnings_reported_eps(self):
+class TestUnsupportedDomains(NoAuthTestCase):
+    def test_statements_estimates_earnings_holdings_news_actions(self):
         p, _ = self._prov()
-        env = p.get_earnings("TATASTEEL.NS")
-        self.assertEqual(env["status"], "delayed")
-        annual = env["data"]["annual"]
-        self.assertEqual(len(annual), 2)
-        self.assertEqual(annual[0]["reportedEPS"], 8.65)
-        self.assertEqual(annual[0]["fiscalDateEnding"], "2026-03-31")
-        self.assertEqual(env["data"]["quarterly"], [])
-
-    def test_estimates_are_ratings_not_fabricated_eps(self):
-        p, _ = self._prov()
-        env = p.get_estimates("TATASTEEL.NS")
-        self.assertEqual(env["status"], "delayed")
-        d = env["data"]
-        self.assertEqual(d["annual"], [])
-        self.assertEqual(d["quarterly"], [])
-        ar = d["analyst_ratings"]
-        self.assertEqual(ar["no_of_recommendations"], 34)
-        self.assertEqual(len(ar["distribution"]), 5)
-        self.assertEqual(ar["distribution"][0]["rating"], "Strong Buy")
-        self.assertEqual(ar["distribution"][0]["analysts"], 10)
-        self.assertIsNotNone(ar["mean_rating"])
-        self.assertIn("never synthesised", d["note"])
-
-    def test_actions_dividends_and_splits(self):
-        p, _ = self._prov()
-        env = p.get_actions("TATASTEEL.NS")
-        self.assertEqual(env["status"], "delayed")
-        d = env["data"]
-        self.assertEqual(d["dividends"][0]["amount"], 4)
-        self.assertEqual(d["dividends"][0]["interim_or_final"], "Final")
-        self.assertEqual(d["splits"][0]["numerator"], 10)
-        self.assertEqual(d["extras"]["agm"][0]["date"], "2026-08-10")
-
-    def test_holdings_latest_filing_picked(self):
-        p, _ = self._prov()
-        env = p.get_shareholding("TATASTEEL.NS")
-        self.assertEqual(env["status"], "delayed")
-        d = env["data"]
-        self.assertEqual(d["symbol"], "TATASTEEL.NS")
-        by_name = {o["category"]: o for o in d["ownership"]}
-        # latest filing (2026-06-30) wins over 2025-09-30
-        self.assertEqual(by_name["Promoter"]["percentage"], 32.94)
-        self.assertEqual(by_name["Promoter"]["holding_date"], "2026-06-30")
-        self.assertEqual(by_name["FII"]["percentage"], 18.90)
-
-    def test_news_absolutized_url(self):
-        p, _ = self._prov()
-        env = p.get_news("TATASTEEL.NS")
-        self.assertEqual(env["status"], "live")
-        item = env["data"]["items"][0]
-        self.assertTrue(item["url"].startswith("https://www.livemint.com/"))
+        for fn in (
+            lambda: p.get_financial_statements("TCS.NS", "income", "annual"),
+            lambda: p.get_earnings("TCS.NS"),
+            lambda: p.get_estimates("TCS.NS"),
+            lambda: p.get_shareholding("TCS.NS"),
+            lambda: p.get_news("TCS.NS"),
+            lambda: p.get_actions("TCS.NS"),
+        ):
+            env = fn()
+            self.assertEqual(env["status"], "unavailable")
+            self.assertIsNone(env["data"])
+            self.assertIn("not supplied", env["message"])
 
     def test_history_and_search_pass_through(self):
         p, _ = self._prov()
         self.assertEqual(
-            p.get_historical_prices("TATASTEEL.NS")["status"], "unavailable"
+            p.get_historical_prices("TCS.NS")["status"], "unavailable"
         )
-        self.assertEqual(p.search("tata")["status"], "unavailable")
+        self.assertEqual(p.search("tcs")["status"], "unavailable")
 
 
-class TestRegistryWiring(IndianApiTest):
+class TestRegistryWiring(NoAuthTestCase):
     def test_registry_binds_manager_for_estimates_and_holdings(self):
         from providers import registry
 
@@ -428,25 +241,19 @@ class TestRegistryWiring(IndianApiTest):
         self.assertIs(registry.holdings, registry.manager)
         sourceless = registry.manager.get_shareholding("AAPL")
         self.assertEqual(sourceless["status"], "unavailable")
-        self.assertIn("NSE/BSE", sourceless["message"])
 
-    def test_registry_provider_status_capabilities(self):
+    def test_registry_provider_status_no_auth(self):
         from providers import registry
 
         status = registry.providers_status()
         ind_api = next(p for p in status["providers"] if p["id"] == "indian-api")
-        self.assertTrue(ind_api["key_required"])
-        self.assertTrue(ind_api["key_configured"])  # fake key set in setUp
-        self.assertTrue(ind_api["capabilities"]["holdings"])
-        self.assertTrue(ind_api["capabilities"]["estimates"])
-        # key value must never leak through the status endpoint
-        self.assertNotIn("test-key", str(status))
-        self.assertNotIn(os.environ["INDIAN_STOCK_MARKET_API_KEY"], str(status))
-
-    def test_holdings_capability_registered_in_base(self):
-        from providers.base import CAPABILITIES
-
-        self.assertIn("holdings", CAPABILITIES)
+        self.assertFalse(ind_api["key_required"])
+        self.assertTrue(ind_api["key_configured"])
+        self.assertTrue(ind_api["capabilities"]["quote"])
+        self.assertTrue(ind_api["capabilities"]["fundamentals"])
+        self.assertFalse(ind_api["capabilities"]["statements"])
+        self.assertFalse(ind_api["capabilities"]["estimates"])
+        self.assertFalse(ind_api["capabilities"]["holdings"])
 
 
 if __name__ == "__main__":

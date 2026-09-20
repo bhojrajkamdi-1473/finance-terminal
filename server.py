@@ -12,8 +12,10 @@ Env:
   TERMINAL_DB            sqlite path (default ./terminal-data/terminal.db)
   ALPHA_VANTAGE_API_KEY  optional fundamentals feed (never sent to client)
   FUNDAMENTALS_API_KEY   alias for the above
+  TWELVE_DATA_API_KEY    optional quote/history feed (never sent to client)
   TERMINAL_HOST          bind host (default 0.0.0.0; localhost still reaches it)
   PORT                   port (default 8000)
+  (Indian Stock Market API leg is free no-auth and needs no key.)
 """
 
 from __future__ import annotations
@@ -147,6 +149,8 @@ def _secret_values() -> list[str]:
     after process start (tests, Render env changes), and rotation must
     take effect immediately."""
     out = []
+    # INDIAN_STOCK_MARKET_API_KEY is legacy (Indian leg is no-auth now)
+    # but stays redacted in case a stale value lingers in the environment.
     for _secret_name in (
         "ALPHA_VANTAGE_API_KEY",
         "FUNDAMENTALS_API_KEY",

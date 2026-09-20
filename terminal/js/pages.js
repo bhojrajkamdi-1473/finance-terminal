@@ -827,7 +827,7 @@
             return F.statusPill(st === "CROSS_CHECK_OK" ? "CALCULATED" :
               (st === "PROVIDER_DISCREPANCY" ? "UNAVAILABLE" : "STALE"));
           }
-          return "<div class='card' style='margin-top:10px'><h3>Cross-check (Alpha Vantage × Twelve Data)</h3>" +
+          return "<div class='card' style='margin-top:10px'><h3>Cross-check (primary × other source)</h3>" +
             '<div class="twrap"><table class="t"><thead><tr><th scope="col">Field</th><th scope="col">Primary</th><th scope="col">Other source</th><th scope="col">Status</th></tr></thead><tbody>' +
             rec.comparisons.map(function (c) {
               var other = (c.cross_check || []).map(function (o) {
@@ -988,7 +988,7 @@
         return "<tr><td class='txt'>" + l + "</td><td class='num'>" + (v === undefined || v === null || v === "None" || v === "-" ? "—" : F.esc(String(v))) +
           "</td><td><span class='sect-tag'>" + src + "</span></td></tr>";
       }
-      var primLab = (r && r._metric_source === "indian-api keyMetrics") ? "Indian Stock Market API" : "Alpha Vantage";
+      var primLab = (r && /^indian-api/.test(r._metric_source || "")) ? "Indian Stock Market API" : "Alpha Vantage";
       var h = "<div class='card sect'><h3>Capital structure</h3>";
       if (r) {
         h += '<div class="twrap"><table class="t"><thead><tr><th scope="col">Metric</th><th scope="col" class="num">Value</th><th scope="col">Kind</th></tr></thead><tbody>' +
@@ -1512,7 +1512,7 @@
         h += qrow("Debt/Equity", function () { return "—"; });
         el("k-out").innerHTML = h + "</tbody></table></div><div class='prov' style='padding:0 14px 12px'>Quotes: delayed chain · " +
           "financials: reported statements where configured · ratios: " +
-          (cols[0].ratios ? "reported provider data" : "unavailable — set ALPHA_VANTAGE_API_KEY") +
+          (cols[0].ratios ? "reported provider data" : "unavailable — no configured provider supplies ratios for this symbol") +
           " · Debt/Equity: unavailable — no leverage feed configured</div></div>";
       });
     }
@@ -1625,7 +1625,7 @@
       "Twelve Data free budget: 8 credits/min, 800/day. Free APIs are never hammered.</div></div>" +
       "<div class='card'><h3>Environment</h3><div class='src'>ALPHA_VANTAGE_API_KEY / FUNDAMENTALS_API_KEY — optional, server-side only, enables statements + ratios + last-resort quotes.<br><br>" +
       "TWELVE_DATA_API_KEY — optional, server-side only, enables the middle fallback leg.<br><br>" +
-      "INDIAN_STOCK_MARKET_API_KEY — optional, server-side only, enables the NSE/BSE leg.<br><br>" +
+      "Indian Stock Market API — free, no key required (NSE/BSE quote + market fundamentals).<br><br>" +
       "TERMINAL_DB — sqlite path (default ./terminal-data/terminal.db).<br><br>No key is ever shipped to the browser. Validate input; external content is escaped before render.</div>" +
       "<h3 style='margin-top:12px'>Legend</h3><div class='row'>" + F.statusPill("REAL-TIME") + F.statusPill("DELAYED") + F.statusPill("END-OF-DAY") + F.statusPill("CALCULATED") + F.statusPill("UNAVAILABLE") + F.statusPill("STALE") + "</div></div></div>";
     API.get("providers").then(function (r) {

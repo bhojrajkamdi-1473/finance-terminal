@@ -60,10 +60,11 @@
       questions.push("Load a longer range (1Y/5Y) and re-run this brief.");
     }
     if (ratios && Object.keys(ratios).length) {
-      src.push("ratios:alphavantage");
+      var rsrc = ratios._metric_source || "Alpha Vantage overview";
+      src.push("ratios:" + rsrc);
       ["PERatio", "PriceToBookRatio", "EVToEBITDA", "DividendYield", "ProfitMargin"].forEach(function (k) {
         if (ratios[k] !== undefined && ratios[k] !== null && ratios[k] !== "None" && ratios[k] !== "-")
-          facts.push(k + " = " + ratios[k] + " (source: Alpha Vantage overview).");
+          facts.push(k + " = " + ratios[k] + " (source: " + rsrc + ").");
       });
     } else {
       risks.push("No fundamentals feed — P/E, margins, ROE/ROCE, debt and cash cannot be verified in-terminal.");
