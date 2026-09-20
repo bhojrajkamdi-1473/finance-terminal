@@ -464,7 +464,7 @@
           return kpi(l, v === null ? unaCell() : F.esc(v), s || "");
         }
         el("co-kpis").innerHTML =
-          (d ? cell("Market cap", val(d.MarketCapitalization, "in"), "reported") +
+          (d ? cell("Market cap", val(d.MarketCapitalization, "in"), (d.MarketCapKind === "CALCULATED" ? "calculated" : "reported")) +
           cell("P/E", val(d.PERatio, "x"), "TTM · reported") +
           cell("EPS", val(d.EPS, "num") && F.fmtNum(Number(d.EPS)), "TTM · reported") +
           cell("ROE", val(d.ROE, "pct"), "reported") +
@@ -789,6 +789,10 @@
       API.get("quote", { symbol: sym }).then(function (rq) {
         if (!el("v-out")) return;
         var r = (rr.body && rr.body.data) || null, q = (rq.body && rq.body.data) || null;
+        var vm = (rr.body && rr.body.valuation) || {};
+        function mkind(name, fallback) {
+          return ((vm[name] || {}).kind) || fallback;
+        }
         if (!r) {
           el("v-out").innerHTML = "<div class='card'><h3>Valuation " + F.statusPill(rr.body.status) + "</h3>" +
             emptyState("Valuation unavailable", (rr.body && rr.body.message) || "No configured provider currently supplies valuation.", rr.body) + srcLine(rr.body) + "</div>";
@@ -813,7 +817,7 @@
           "<div class='card'><h3>Valuation detail — provider vs calculated " + F.statusPill(rr.body.status) + "</h3>" +
           '<div class="twrap"><table class="t"><thead><tr><th scope="col">Metric</th><th scope="col" class="num">Value</th><th scope="col">Kind</th></tr></thead><tbody>' +
           "<tr><td class='txt'>Price</td><td class='num'>" + (q && q.price !== undefined ? F.fmtNum(q.price) + " " + F.esc(q.currency || "") : "—") + "</td><td>" + F.statusPill("delayed") + "</td></tr>" +
-          "<tr><td class='txt'>Market cap</td><td class='num'>" + (r.MarketCapitalization ? F.fmtIN(Number(r.MarketCapitalization), q && q.currency) : "—") + "</td><td>REPORTED</td></tr>" +
+          "<tr><td class='txt'>Market cap</td><td class='num'>" + (r.MarketCapitalization ? F.fmtIN(Number(r.MarketCapitalization), q && q.currency) : "—") + "</td><td>" + mkind("market_cap", "REPORTED") + "</td></tr>" +
           "<tr><td class='txt'>Forward P/E</td><td class='num'>" + (r.ForwardPE && r.ForwardPE !== "None" ? F.esc(String(r.ForwardPE)) : "—") + "</td><td>REPORTED</td></tr>" +
           "<tr><td class='txt'>PEG</td><td class='num'>" + (r.PEGRatio && r.PEGRatio !== "None" ? F.esc(String(r.PEGRatio)) : "—") + "</td><td>REPORTED</td></tr>" +
           (calcPe !== null ? "<tr><td class='txt'>P/E (price ÷ reported EPS " + F.esc(String(r.EPS)) + ")</td><td class='num'>" + calcPe + "</td><td>CALCULATED</td></tr>" : "") +

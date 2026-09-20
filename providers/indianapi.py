@@ -321,8 +321,17 @@ class IndianApiProvider(MarketDataProvider):
             )
         pct = _num(_raw(price.get("regularMarketChangePercent")))
         mcap = _num(_raw(price.get("marketCap")))
+        mcap_kind = "REPORTED" if mcap is not None else None
         if mcap is None:
             mcap = _num(_raw(summary.get("marketCap")))
+            mcap_kind = "REPORTED" if mcap is not None else None
+        shares = _num(_raw(stats.get("sharesOutstanding")))
+        last_px = _num(_raw(price.get("regularMarketPrice")))
+        if mcap is None and last_px is not None and shares:
+            # Upstream omits marketCap intermittently; price × reported
+            # shares outstanding is definitional — labeled CALCULATED.
+            mcap = round(last_px * shares, 2)
+            mcap_kind = "CALCULATED"
         div = _num(_raw(summary.get("dividendYield")))
         detail = {
             "company_name": price.get("longName")
@@ -342,6 +351,7 @@ class IndianApiProvider(MarketDataProvider):
             "year_low": _num(_raw(summary.get("fiftyTwoWeekLow"))),
             "volume": _num(_raw(price.get("regularMarketVolume"))),
             "market_cap": mcap,
+            "market_cap_kind": mcap_kind,
             "pe_ratio": _num(_raw(summary.get("trailingPE"))),
             "dividend_yield": (div * 100.0) if div is not None else None,
             "book_value": _num(_raw(stats.get("bookValue"))),
@@ -473,6 +483,7 @@ class IndianApiProvider(MarketDataProvider):
             "Sector": detail["sector"],
             "Industry": detail["industry"],
             "MarketCapitalization": detail["market_cap"],
+            "MarketCapKind": detail.get("market_cap_kind") or "REPORTED",
             "PERatio": detail["pe_ratio"],
             "EPS": detail["eps"],
             "DividendYield": detail["dividend_yield"],

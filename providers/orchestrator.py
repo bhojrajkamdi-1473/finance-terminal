@@ -735,9 +735,12 @@ class ProviderManager:
                 )
                 c = _rec.compare(fname, a, others)
                 comparisons.append(c)
+                kind = "REPORTED"
+                if fname == "market_cap":
+                    kind = (pri_d or {}).get("MarketCapKind") or "REPORTED"
                 metrics[fname] = {
                     "value": a.get("value"),
-                    "kind": "REPORTED",
+                    "kind": kind,
                     "primary_source": prim_src,
                     "cross_check": c["cross_check"],
                     "status": c["status"],

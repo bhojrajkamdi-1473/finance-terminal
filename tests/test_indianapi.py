@@ -202,6 +202,29 @@ class TestRatios(NoAuthTestCase):
         self.assertEqual(d["FiftyTwoWeekLow"], 2800.00)
         self.assertEqual(d["_metric_source"], "indian-api quoteSummary")
 
+    def test_market_cap_fallback_from_shares_labeled_calculated(self):
+        result = _fixture()
+        result["price"]["marketCap"] = {"raw": None}
+        result["summaryDetail"]["marketCap"] = {"raw": None}
+        result["defaultKeyStatistics"]["sharesOutstanding"] = {"raw": 3618087518}
+        p, _ = self._prov(result=result)
+        env = p.get_ratios("TCS.NS")
+        d = env["data"]
+        # 3140.50 × 3618087518 ≈ 11.36T — definitional, labeled CALCULATED
+        self.assertAlmostEqual(
+            d["MarketCapitalization"], 3140.50 * 3618087518, places=0
+        )
+        self.assertEqual(d["MarketCapKind"], "CALCULATED")
+
+    def test_market_cap_absent_without_shares(self):
+        result = _fixture()
+        result["price"]["marketCap"] = {"raw": None}
+        result["summaryDetail"]["marketCap"] = {"raw": None}
+        result["defaultKeyStatistics"]["sharesOutstanding"] = {"raw": None}
+        p, _ = self._prov(result=result)
+        d = p.get_ratios("TCS.NS")["data"]
+        self.assertIsNone(d["MarketCapitalization"])
+
     def test_roe_never_present(self):
         p, _ = self._prov()
         d = p.get_ratios("TCS.NS")["data"]
