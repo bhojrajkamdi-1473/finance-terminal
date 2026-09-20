@@ -325,6 +325,10 @@ class IndianApiProvider(MarketDataProvider):
         if mcap is None:
             mcap = _num(_raw(summary.get("marketCap")))
             mcap_kind = "REPORTED" if mcap is not None else None
+        if mcap is None:
+            # Alternate reported field some Yahoo hosts populate.
+            mcap = _num(_raw(summary.get("nonDilutedMarketCap")))
+            mcap_kind = "REPORTED" if mcap is not None else None
         shares = _num(_raw(stats.get("sharesOutstanding")))
         last_px = _num(_raw(price.get("regularMarketPrice")))
         if mcap is None and last_px is not None and shares:
