@@ -132,11 +132,14 @@ class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
         return live_envelope("yahoo", {"results": results}, delayed=False)
 
     # -- quote ------------------------------------------------------
-    def _chart(self, symbol: str, range_: str, interval: str) -> Any:
+    def _chart(
+        self, symbol: str, range_: str, interval: str, events: bool = False
+    ) -> Any:
         url = (
             "https://query1.finance.yahoo.com/v8/finance/chart/"
             + urllib.parse.quote(symbol)
             + f"?interval={interval}&range={range_}"
+            + ("&events=div%7Csplit" if events else "")
         )
         return _http_get_json(url)
 

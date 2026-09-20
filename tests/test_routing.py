@@ -215,5 +215,65 @@ class TestWithKeys(_EnvGuard):
         self.assertIn("indian-api", skipped)
 
 
+class TestYahooActionsEvents(_EnvGuard):
+    """Yahoo only returns the events block when explicitly requested."""
+
+    def test_events_param_requested_and_dividends_parsed(self):
+        from providers.news import YahooCorporateActionsProvider
+        from providers.yahoo import YahooMarketDataProvider
+
+        seen = {}
+        real = YahooMarketDataProvider._chart
+
+        def fake(self, symbol, range_, interval, events=False):
+            seen["events"] = events
+            return {
+                "chart": {
+                    "result": [
+                        {
+                            "meta": {"currency": "USD"},
+                            "events": {
+                                "dividends": {"1700000000": {"amount": 0.5}},
+                                "splits": {},
+                            },
+                        }
+                    ]
+                }
+            }
+
+        YahooMarketDataProvider._chart = fake
+        try:
+            env = YahooCorporateActionsProvider().get_corporate_actions("MSFT")
+        finally:
+            YahooMarketDataProvider._chart = real
+        self.assertTrue(seen.get("events"))
+        self.assertEqual(env["status"], "delayed")
+        self.assertEqual(len(env["data"]["dividends"]), 1)
+        self.assertEqual(env["data"]["dividends"][0]["amount"], 0.5)
+
+    def test_empty_events_is_live_empty_not_unavailable(self):
+        from providers.news import YahooCorporateActionsProvider
+        from providers.yahoo import YahooMarketDataProvider
+
+        real = YahooMarketDataProvider._chart
+
+        def fake(self, symbol, range_, interval, events=False):
+            return {
+                "chart": {
+                    "result": [{"meta": {"currency": "USD"}, "events": {}}]
+                }
+            }
+
+        YahooMarketDataProvider._chart = fake
+        try:
+            env = YahooCorporateActionsProvider().get_corporate_actions("MSFT")
+        finally:
+            YahooMarketDataProvider._chart = real
+        # legitimately empty (e.g. never split): delayed envelope, empty
+        # rows — the orchestrator reports "no actions", never fake rows.
+        self.assertEqual(env["status"], "delayed")
+        self.assertEqual(env["data"]["dividends"], [])
+
+
 if __name__ == "__main__":
     unittest.main()

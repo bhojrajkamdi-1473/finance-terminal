@@ -110,7 +110,9 @@ class YahooCorporateActionsProvider(CorporateActionsProvider):
             return unavailable("yahoo-events", "Empty symbol.")
         provider = YahooMarketDataProvider()
         try:
-            payload = provider._chart(symbol, "2y", "1d")
+            # Yahoo only includes the events block when explicitly
+            # requested; without it dividend payers read as "no actions".
+            payload = provider._chart(symbol, "2y", "1d", events=True)
         except Exception as exc:
             return error_envelope("yahoo-events", f"Request failed: {exc}")
         try:
