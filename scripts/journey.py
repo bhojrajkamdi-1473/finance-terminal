@@ -167,7 +167,7 @@ def main(argv):
         check(
             "api: quote carries currency+source",
             bool((body.get("data") or {}).get("currency"))
-            and body.get("source") == "yahoo",
+            and body.get("source") in ("yahoo", "indian-api"),
         )
         code, body = api(base, "/api/history?symbol=RELIANCE.NS&range=1M&interval=1d")
         bars = (body.get("data") or {}).get("bars", [])
@@ -179,10 +179,18 @@ def main(argv):
             f"n={len(bars)}",
         )
         code, body = api(base, "/api/ratios?symbol=RELIANCE.NS")
-        if (
-            "ALPHA_VANTAGE_API_KEY" not in os.environ
-            and "FUNDAMENTALS_API_KEY" not in os.environ
-        ):
+        # No-auth Indian leg covers NSE ratios without keys: live with
+        # real reported fields, else honest unavailable — never fabricated.
+        if body.get("status") in ("live", "delayed"):
+            _rdata = body.get("data") or {}
+            check(
+                "api: ratios report real NSE fundamentals without key",
+                code == 200
+                and isinstance(_rdata.get("MarketCapitalization"), (int, float))
+                and isinstance(_rdata.get("PERatio"), (int, float)),
+                str(body)[:150],
+            )
+        else:
             check(
                 "api: ratios honestly unavailable without key",
                 code == 200 and body.get("status") == "unavailable",

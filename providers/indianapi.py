@@ -48,6 +48,17 @@ from .base import (
 from .indian import is_indian
 
 UA = {"User-Agent": "Mozilla/5.0 (finance-terminal research tool)"}
+# Yahoo only issues session cookies (A1/A3/A1S) to browser-like
+# requests; a bare UA gets none and the crumb handshake then fails.
+BROWSER_UA = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/126.0 Safari/537.36"
+)
+BROWSER_HEADERS = {
+    "User-Agent": BROWSER_UA,
+    "Accept": "text/html,application/xhtml+xml,*/*",
+    "Accept-Language": "en-US,en;q=0.9",
+}
 SOURCE = "indian-api"
 SOURCE_LABEL = "Indian Stock Market API (free, no-auth)"
 
@@ -60,18 +71,34 @@ _crumb_lock = threading.Lock()
 _crumb_cache: dict[str, Any] = {"crumb": None, "cookie": None, "expires_at": 0.0}
 
 
-def _http_text(url: str, cookie: str = "", timeout: float = 15.0) -> tuple[str, str]:
+def _http_text(
+    url: str, headers: dict | None = None, cookie: str = "", timeout: float = 15.0
+) -> tuple[str, str]:
     """GET url -> (body, set-cookie). Raises on HTTP/network failure."""
-    headers = dict(UA)
+    head = dict(BROWSER_HEADERS if headers is None else headers)
     if cookie:
-        headers["Cookie"] = cookie
-    req = urllib.request.Request(url, headers=headers)
+        head["Cookie"] = cookie
+    req = urllib.request.Request(url, headers=head)
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         raw_cookie = resp.headers.get("Set-Cookie") or ""
         return resp.read().decode("utf-8", "replace"), raw_cookie
 
 
-def _crumb(force: bool = False) -> tuple[str, str]:
+def _cookies_from(headers_list: list[tuple[str, str]]) -> str:
+    """Combine every Set-Cookie pair (A1/A3/A1S) into one Cookie header."""
+    pairs = []
+    for _, value in headers_list:
+        first = (value or "").split(";")[0].strip()
+        if first and "=" in first:
+            pairs.append(first)
+    # de-duplicate by name, keep last
+    seen: dict[str, str] = {}
+    for pair in pairs:
+        seen[pair.split("=", 1)[0]] = pair
+    return "; ".join(seen.values())
+
+
+def _crumb(ticker: str = "TCS.NS", force: bool = False) -> tuple[str, str]:
     """Cookie/crumb pair for Yahoo's authed endpoints (cached ~50 min)."""
     with _crumb_lock:
         hit = _crumb_cache
@@ -82,10 +109,32 @@ def _crumb(force: bool = False) -> tuple[str, str]:
         ):
             return str(hit["crumb"]), str(hit.get("cookie") or "")
     try:
-        _, set_cookie = _http_text("https://fc.yahoo.com")
-        cookie = (set_cookie or "").split(";")[0].strip()
+        # Prime session cookies from a Yahoo page (quote page first,
+        # chart endpoint as fallback) — both set A1/A3/A1S when the
+        # request looks like a browser.
+        cookie = ""
+        for prime in (
+            "https://finance.yahoo.com/quote/" + urllib.parse.quote(ticker),
+            "https://query1.finance.yahoo.com/v8/finance/chart/"
+            + urllib.parse.quote(ticker)
+            + "?interval=1d&range=5d",
+        ):
+            try:
+                req = urllib.request.Request(prime, headers=dict(BROWSER_HEADERS))
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    pairs = resp.headers.get_all("Set-Cookie") or (
+                        [resp.headers.get("Set-Cookie")]
+                        if resp.headers.get("Set-Cookie")
+                        else []
+                    )
+                    cookie = _cookies_from([("Set-Cookie", v) for v in pairs])
+                    resp.read(4096)
+                if cookie:
+                    break
+            except Exception:
+                continue
         crumb, _ = _http_text(
-            "https://query1.finance.yahoo.com/v1/test/getcrumb", cookie
+            "https://query1.finance.yahoo.com/v1/test/getcrumb", None, cookie
         )
         crumb = crumb.strip()
     except Exception as exc:
@@ -179,7 +228,7 @@ class IndianApiProvider(MarketDataProvider):
     # -- transport ------------------------------------------------------
     def _quote_summary(self, ticker: str) -> dict:
         """Fetch quoteSummary result[0] for a ticker (crumb handshake)."""
-        crumb, cookie = _crumb()
+        crumb, cookie = _crumb(ticker)
         url = (
             "https://query1.finance.yahoo.com/v10/finance/quoteSummary/"
             + urllib.parse.quote(ticker)
@@ -189,7 +238,7 @@ class IndianApiProvider(MarketDataProvider):
             + urllib.parse.quote(crumb)
         )
         try:
-            headers = dict(UA, Cookie=cookie)
+            headers = dict(BROWSER_HEADERS, Cookie=cookie)
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=20) as resp:
                 payload = json.loads(resp.read().decode("utf-8", "replace"))
@@ -197,12 +246,12 @@ class IndianApiProvider(MarketDataProvider):
             if exc.code == 401:
                 # Session expired mid-flight: refresh once and retry.
                 try:
-                    crumb, cookie = _crumb(force=True)
+                    crumb, cookie = _crumb(ticker, force=True)
                     retry = url.split("&crumb=")[0] + "&crumb=" + urllib.parse.quote(
                         crumb
                     )
                     req = urllib.request.Request(
-                        retry, headers=dict(UA, Cookie=cookie)
+                        retry, headers=dict(BROWSER_HEADERS, Cookie=cookie)
                     )
                     with urllib.request.urlopen(req, timeout=20) as resp:
                         payload = json.loads(resp.read().decode("utf-8", "replace"))

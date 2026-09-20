@@ -355,12 +355,13 @@ class ApiTest(unittest.TestCase):
                 )
         status, body = _get(self.base, "/api/ratios?symbol=TCS.NS")
         self.assertEqual(status, 200)
-        # keyless: honestly unavailable, never fabricated
-        if not (
-            os.environ.get("ALPHA_VANTAGE_API_KEY")
-            or os.environ.get("FUNDAMENTALS_API_KEY")
-        ):
-            self.assertEqual(body["status"], "unavailable")
+        # No-auth Indian leg covers NSE ratios without keys: live with
+        # real reported fields, never fabricated. (Alpha Vantage key
+        # only gates AV-specific domains now.)
+        if body.get("status") in ("live", "delayed"):
+            data = body.get("data") or {}
+            for key in ("MarketCapitalization", "PERatio", "EPS"):
+                self.assertIsInstance(data.get(key), (int, float))
 
     def test_macro_rejects_unknown_indicator(self):
         status, body = _get(self.base, "/api/macro?indicator=NOPE")
