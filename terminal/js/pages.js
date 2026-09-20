@@ -53,6 +53,26 @@
       ((provider || reason) ? "<br><span class='src'>Provider: " + F.esc(provider || "?") +
         (reason ? " · Reason: " + F.esc(reason) : "") + "</span>" : "") + "</div>";
   }
+  /* Field/request-specific provenance: only providers that actually
+     participated (or were checked and skipped) are listed, each with
+     its reason. Never presents standby providers as contributors. */
+  function provStatus(env) {
+    if (!env) return "";
+    var list = env.provider_status ||
+      ((env.reconciliation && env.reconciliation.skipped) || []).map(function (s) {
+        return { provider: s.provider, state: null, reason: s.reason };
+      });
+    if (!list.length) return "";
+    return "<div class='prov'>Providers checked: <b>" + list.map(function (p) {
+      var st = p.state ? " · " + F.esc(p.state) : "";
+      return F.esc(F.srcName(p.provider) || p.provider || "?") + " — " + F.esc(p.reason || "?") + st;
+    }).join(" · ") + "</b></div>";
+  }
+  /* Compact institutional empty state (not a giant blank box). */
+  function emptyState(title, msg, env) {
+    return "<div class='empty'><b>" + F.esc(title) + "</b><br>" + F.esc(msg || "No configured provider currently supplies this dataset.") +
+      "</div>" + provStatus(env);
+  }
   function errBox(msg) {
     return '<div class="err"><b>Unable to retrieve dataset.</b><br>' + F.esc(msg || "") +
       "<br><span class='src'>Other configured sources remain available.</span></div>";
@@ -452,12 +472,12 @@
           cell("52W high", F.fmtNum(q.fifty_two_week_high) === "—" ? null : F.fmtNum(q.fifty_two_week_high), "quote") +
           cell("52W low", F.fmtNum(q.fifty_two_week_low) === "—" ? null : F.fmtNum(q.fifty_two_week_low), "quote") +
           cell("Div yield", val(d.DividendYield, "pct"), "reported")
-          : cell("Market cap", null, "unavailable") + cell("P/E", null, "unavailable") +
-            cell("EPS", null, "unavailable") + cell("ROE", null, "unavailable") +
-            cell("Book value", null, "unavailable") +
+          : cell("Market cap", null, "Not available from configured sources") + cell("P/E", null, "Not available from configured sources") +
+            cell("EPS", null, "Not available from configured sources") + cell("ROE", null, "Not available from configured sources") +
+            cell("Book value", null, "Not available from configured sources") +
             cell("52W high", F.fmtNum(q.fifty_two_week_high) === "—" ? null : F.fmtNum(q.fifty_two_week_high), "quote") +
             cell("52W low", F.fmtNum(q.fifty_two_week_low) === "—" ? null : F.fmtNum(q.fifty_two_week_low), "quote") +
-            cell("Div yield", null, "unavailable"));
+            cell("Div yield", null, "Not available from configured sources"));
       });
     }
     function loadQuality(sym) {
@@ -468,16 +488,17 @@
         function dot(st) {
           return st === "connected" ? "● " : (st === "cooling" ? "◐ " : "○ ");
         }
-        el("co-quality").innerHTML = "<div class='card sect'><h3>Data</h3>" +
+        el("co-quality").innerHTML = "<div class='card sect'><h3>Data provenance</h3>" +
+          "<div class='prov'>Price: <b>" + F.esc(F.srcName(q.quote_source) || q.quote_source || "?") + "</b> · " +
+          F.esc(q.quote_status || "?") + "/" + F.esc(q.quote_timeliness || "?") +
+          " · X-checked fields: " + (sum.fields_compared === undefined ? "—" : sum.fields_compared) +
+          " · Discrepancies: " + (sum.discrepancies === undefined ? "—" : sum.discrepancies) + "</div>" +
+          "<div class='src'>Only the source above contributed to this price. Standby connectivity below — not contributors.</div>" +
           "<div class='strip'>" + rows.map(function (p) {
             var cls = p.state === "connected" ? "up" : (p.state === "cooling" ? "warn" : "mut");
             return "<span class='" + cls + "' title='" + F.esc(p.detail || p.label) + "'>" + dot(p.state) + F.esc(p.label) + "</span>";
           }).join("") + "</div>" +
-          "<div class='prov'>Quote: " + F.esc(q.quote_source || "?") + " · " +
-          F.esc(q.quote_status || "?") + "/" + F.esc(q.quote_timeliness || "?") +
-          " · X-checked: " + (sum.fields_compared === undefined ? "—" : sum.fields_compared) +
-          " · Discrep: " + (sum.discrepancies === undefined ? "—" : sum.discrepancies) + "</div>" +
-          "<details><summary class='src'>Provider details</summary><div style='margin-top:6px'>" +
+          "<details><summary class='src'>Standby connectivity (not contributors)</summary><div style='margin-top:6px'>" +
           rows.map(function (p) {
             var last = p.last_ok ? new Date(p.last_ok * 1000).toISOString().slice(11, 19) + "Z" :
               (p.last_error ? "err: " + F.esc(String(p.last_error).slice(0, 60)) : "—");
@@ -637,7 +658,7 @@
             var v = ratios[pair[1]];
             return "<dt>" + pair[0] + "</dt><dd>" + (v === undefined || v === null || v === "None" || v === "-" ? "—" : F.esc(String(v))) + "</dd>";
           }).join("") + "</dl>" :
-        unavail((r.body && r.body.message) || "Fundamentals unavailable.")) + srcLine(r.body);
+        emptyState("Fundamentals unavailable", (r.body && r.body.message) || "No configured provider currently supplies valuation.", r.body)) + srcLine(r.body) + provStatus(r.body);
       maybeBrief();
     });
     API.get("history", { symbol: sym, range: "3M", interval: "1d" }).then(function (r) {
@@ -662,7 +683,7 @@
       var d = r.body && r.body.data, reps = (d && d.reports) || [];
       if (reps.length < 1) {
         el("ov-fsnap").innerHTML = "<h3>Fundamental snapshot</h3>" +
-          unavail((r.body && r.body.message) || "No statements available.", "Alpha Vantage / Indian API", "Annual income statement missing") + srcLine(r.body);
+          emptyState("Fundamental snapshot unavailable", (r.body && r.body.message) || "No configured provider currently supplies this financial statement.", r.body) + srcLine(r.body);
         return;
       }
       function num(rep, keys) {
@@ -726,9 +747,10 @@
     }
   }
   function stmtTable(title, env) {
-    if (!env || !env.data) return "<h2 class='h-sec'>" + title + "</h2>" + unavail((env && env.message) || "Provider not configured.");
+    if (!env || !env.data) return "<h2 class='h-sec'>" + title + "</h2>" +
+      emptyState("Financial statements unavailable", (env && env.message) || "No configured provider currently supplies this financial statement.", env);
     var d = env.data, reps = d.reports || [];
-    if (!reps.length) return "<h2 class='h-sec'>" + title + "</h2>" + unavail("No reports returned.");
+    if (!reps.length) return "<h2 class='h-sec'>" + title + "</h2>" + emptyState("Financial statements unavailable", "No reports returned.", env);
     var keys = Object.keys(reps[0]).filter(function (k) { return k !== "fiscalDateEnding" && k !== "reportedCurrency"; }).slice(0, 14);
     var h = "<h2 class='h-sec'>" + title + " " + F.statusPill(env.status) + "</h2>" +
       '<div class="prov">currency: <b>' + F.esc(d.currency || "?") + "</b> · period: <b>" + F.esc(d.period || "") + "</b> · src: <b>" + F.esc(env.source || "") + "</b></div>" +
@@ -747,9 +769,11 @@
     return h + "</tbody></table></div>";
   }
   function tFinancials(sym, b) {
-    b.innerHTML = "<div class='card sect'><div class='row'><label class='f'>Statement<select id='f-s' class='in'><option value='income'>Income</option><option value='balance'>Balance sheet</option><option value='cashflow'>Cash flow</option></select></label>" +
+    b.innerHTML = "<div class='card sect'><h3>Financial statements</h3>" +
+      "<div class='row'><label class='f'>Statement<select id='f-s' class='in'><option value='income'>Income</option><option value='balance'>Balance sheet</option><option value='cashflow'>Cash flow</option></select></label>" +
       "<label class='f'>Period<select id='f-p' class='in'><option value='annual'>Annual</option><option value='quarterly'>Quarterly</option></select></label>" +
-      "<button class='btn primary' id='f-go'>Load</button></div></div><div id='f-out' style='margin-top:10px'></div>";
+      "<button class='btn primary' id='f-go'>Load</button></div>" +
+      "<div class='prov'>Reported statements only — Alpha Vantage / Twelve Data / Indian Stock Market API where configured. Never synthesised.</div></div><div id='f-out' style='margin-top:10px'></div>";
     function go() {
       el("f-out").innerHTML = "<div class='card'>" + skel(6) + "</div>";
       API.get("fundamentals", { symbol: sym, statement: el("f-s").value, period: el("f-p").value }).then(function (r) {
@@ -767,7 +791,7 @@
         var r = (rr.body && rr.body.data) || null, q = (rq.body && rq.body.data) || null;
         if (!r) {
           el("v-out").innerHTML = "<div class='card'><h3>Valuation " + F.statusPill(rr.body.status) + "</h3>" +
-            unavail((rr.body && rr.body.message) || "Ratios unavailable.") + srcLine(rr.body) + "</div>";
+            emptyState("Valuation unavailable", (rr.body && rr.body.message) || "No configured provider currently supplies valuation.", rr.body) + srcLine(rr.body) + "</div>";
           return;
         }
         function mx(label, v, sub) {
@@ -828,7 +852,7 @@
       var d = r.body && r.body.data;
       if (!d) {
         el("e-out").innerHTML = "<div class='card'><h3>Analyst estimates " + F.statusPill(r.body.status) + "</h3>" +
-          unavail((r.body && r.body.message) || "Estimates unavailable.") + srcLine(r.body) + "</div>";
+          emptyState("Estimates unavailable", (r.body && r.body.message) || "No configured provider currently supplies analyst estimates.", r.body) + srcLine(r.body) + "</div>";
         return;
       }
       function estRows(list) {
@@ -887,7 +911,7 @@
       var d = r.body && r.body.data;
       if (!d) {
         el("e2-out").innerHTML = "<div class='card'><h3>Earnings " + F.statusPill(r.body.status) + "</h3>" +
-          unavail((r.body && r.body.message) || "Earnings unavailable.") + srcLine(r.body) + "</div>";
+          emptyState("Earnings unavailable", (r.body && r.body.message) || "No configured provider currently supplies earnings.", r.body) + srcLine(r.body) + "</div>";
         return;
       }
       function repRow(x) {
@@ -976,7 +1000,7 @@
         if (implShares) h += row("Implied shares (mktcap ÷ price)", Math.round(implShares).toLocaleString("en-US"), "CALCULATED · quote × overview");
         h += "</tbody></table></div>";
       } else {
-        h += unavail((rr.body && rr.body.message) || "Capital metrics unavailable.");
+        h += emptyState("Capital metrics unavailable", (rr.body && rr.body.message) || "No configured provider currently supplies valuation.", rr.body);
       }
       h += "</div>";
       var hd = (rh.body && rh.body.data) || null;
@@ -999,7 +1023,7 @@
           return "<span><i style='background:" + palette[ix % palette.length] + "'></i>" + F.esc(o.category || "?") + " " + F.esc(o.percentage) + "%</span>";
         }).join("") + "</div>";
       } else {
-        h += unavail((rh.body && rh.body.message) || "No ownership split available. Splits are never guessed.");
+        h += emptyState("Ownership unavailable", (rh.body && rh.body.message) || "No ownership split available. Splits are never guessed.", rh.body);
       }
       h += (hd && hd.note ? "<div class='prov'>" + F.esc(hd.note) + "</div>" : "") + "</div>";
       el("h-out").innerHTML = "<h2 class='h-sec'>Shareholding</h2>" + h + srcLine(rh.body);
@@ -1034,11 +1058,11 @@
       "<div class='src'>Official TradingView embed. Its data is TradingView's own feed — not ours, not scraped, not re-labeled. " +
       "Free widget data is delayed; NSE real-time requires an authorized feed.</div>" +
       "<div id='ch-tvw' style='height:420px;margin-top:8px'></div></div>" +
-      "<div class='card sect' id='ch-own'><div class='chart-box'><canvas class='chart' id='ch-c' role='img' aria-label='Price history chart'></canvas><div class='chart-tip'></div></div>" +
+      "<div class='card sect' id='ch-own'><h3>Chart — delayed backend data</h3><div class='chart-box'><canvas class='chart' id='ch-c' role='img' aria-label='Price history chart'></canvas><div class='chart-tip'></div></div>" +
       "<div class='ch-legend'><span><i style='color:#18794e'>—</i> price</span><span><i style='color:#1a56c4'>—</i> SMA</span>" +
       "<span id='ch-meta'></span></div></div>" +
-      "<div class='prov'>NSE REAL-TIME NOT AVAILABLE WITHOUT AUTHORIZED FEED. " +
-      "Terminal charts use delayed backend data (fallback chain).</div>" +
+      "<div class='prov'>NSE real-time not available without an authorized feed — never claimed. " +
+      "Terminal charts use delayed backend history with volume where returned.</div>" +
       "<div class='card sect' id='ch-tech'>" + skel(3) + "</div>";
     function curSmas() {
       var out = [];

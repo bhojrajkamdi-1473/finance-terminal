@@ -37,6 +37,92 @@ ESTIMATES_TTL = 24 * 3600.0
 NEWS_TTL = 10 * 60.0
 ACTIONS_TTL = 24 * 3600.0
 
+# Machine-readable capability registry: which provider legs actually
+# implement each company domain. Mirrors the real provider classes —
+# never assume capability merely because a provider file exists.
+# Yahoo covers market data; fundamentals-family domains need the
+# key-gated legs (Alpha Vantage / Twelve Data / Indian API).
+CAPABILITIES: dict[str, dict[str, bool]] = {
+    "yahoo": {
+        "quote": True,
+        "history": True,
+        "search": True,
+        "profile": True,  # thin: identity from quote chain
+        "actions": True,  # chart events (dividends/splits)
+        "news": True,  # RSS leg
+        "statements": False,
+        "valuation": False,
+        "estimates": False,
+        "earnings": False,
+        "holdings": False,
+    },
+    "alphavantage": {
+        "quote": True,  # last-resort GLOBAL_QUOTE
+        "history": True,  # daily only, scarce
+        "search": True,
+        "profile": True,  # OVERVIEW identity fields
+        "statements": True,
+        "valuation": True,  # OVERVIEW flat dict
+        "estimates": True,
+        "earnings": True,
+        "actions": True,  # DIVIDENDS + SPLITS
+        "news": True,  # NEWS_SENTIMENT
+        "holdings": False,
+    },
+    "twelvedata": {
+        "quote": True,
+        "history": True,
+        "search": True,
+        "profile": False,
+        "statements": True,  # expensive (cost ~100), budget-guarded
+        "valuation": True,  # statistics
+        "estimates": False,
+        "earnings": True,
+        "actions": True,
+        "news": False,
+        "holdings": False,
+    },
+    "indian-api": {
+        "quote": True,  # NSE/BSE only
+        "history": False,
+        "search": False,
+        "profile": True,  # NSE/BSE only
+        "statements": True,  # annual only, NSE/BSE only
+        "valuation": True,  # keyMetrics, NSE/BSE only
+        "estimates": True,  # rating distribution only, NSE/BSE only
+        "earnings": True,  # fiscal-year EPS, NSE/BSE only
+        "actions": True,  # dividends/splits/bonus/rights + extras
+        "news": True,  # recentNews, NSE/BSE only
+        "holdings": True,  # sole ownership source, NSE/BSE only
+    },
+    "stooq": {
+        "quote": False,
+        "history": True,  # US suffix-less only, 1d only
+        "search": False,
+        "profile": False,
+        "statements": False,
+        "valuation": False,
+        "estimates": False,
+        "earnings": False,
+        "actions": False,
+        "news": False,
+        "holdings": False,
+    },
+    "tradingview": {
+        "quote": False,
+        "history": False,
+        "search": False,
+        "profile": False,
+        "statements": False,
+        "valuation": False,
+        "estimates": False,
+        "earnings": False,
+        "actions": False,
+        "news": False,
+        "holdings": False,
+    },
+}
+
 
 def _now_iso() -> str:
     from datetime import datetime, timezone
@@ -100,6 +186,26 @@ class ProviderManager:
             return False, "Alpha Vantage unavailable."
         if not _api_key():
             return False, "ALPHA_VANTAGE_API_KEY not configured."
+        return True, ""
+
+    def _indian_ready(self, symbol: str) -> tuple[bool, str]:
+        """Indian leg guard: wired + Indian symbol + API key configured.
+
+        Mirrors _av_ready/_td_room so the orchestrator never wastes a
+        request against the key-gated Indian leg and never surfaces a
+        single-provider key message as the domain answer.
+        """
+        leg = self._indian_leg()
+        if leg is None:
+            return False, "Indian Stock Market API leg not wired."
+        if not is_indian(symbol):
+            return False, "Non-Indian symbol."
+        try:
+            from providers.indianapi import _api_key as _indian_key
+        except Exception:
+            return False, "Indian Stock Market API unavailable."
+        if not _indian_key():
+            return False, "INDIAN_STOCK_MARKET_API_KEY not configured."
         return True, ""
 
     # -- parallel fan-out with coalescing ---------------------------------
@@ -485,7 +591,8 @@ class ProviderManager:
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
             leg = self._indian_leg()
-            if leg is not None and is_indian(symbol):
+            in_ok, in_reason = self._indian_ready(symbol)
+            if in_ok and leg is not None and is_indian(symbol):
                 calls.append(
                     (
                         "indian-api",
@@ -496,9 +603,7 @@ class ProviderManager:
                 skipped.append(
                     {
                         "provider": "indian-api",
-                        "reason": "Leg not wired."
-                        if leg is None
-                        else "Non-Indian symbol.",
+                        "reason": in_reason or "Leg not wired.",
                     }
                 )
             results = self._fanout(key + ":fan", STATEMENTS_TTL, calls)
@@ -509,17 +614,7 @@ class ProviderManager:
             td_live = _ok(td) and td.get("data")
             in_live = _ok(inapi) and inapi.get("data")
             if not av_live and not td_live and not in_live:
-                first = next(
-                    (
-                        results.get(n)
-                        for n in ("alphavantage", "twelvedata", "indian-api")
-                        if results.get(n)
-                    ),
-                    None,
-                )
-                env = dict(first or {"status": "unavailable", "source": "orchestrator"})
-                env["providers_queried"] = _queried(results)
-                return env
+                return _honest_unavailable("financial statement", results, skipped)
             if av_live:
                 primary = av
             elif in_live:
@@ -604,15 +699,14 @@ class ProviderManager:
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
             leg = self._indian_leg()
-            if leg is not None and is_indian(symbol):
+            in_ok, in_reason = self._indian_ready(symbol)
+            if in_ok and leg is not None and is_indian(symbol):
                 calls.append(("indian-api", lambda: leg.get_ratios(symbol)))
             else:
                 skipped.append(
                     {
                         "provider": "indian-api",
-                        "reason": "Leg not wired."
-                        if leg is None
-                        else "Non-Indian symbol.",
+                        "reason": in_reason or "Leg not wired.",
                     }
                 )
             results = self._fanout(key + ":fan", VALUATION_TTL, calls)
@@ -623,12 +717,9 @@ class ProviderManager:
             td_d = td.get("data") if _ok(td) else {}
             in_d = inapi.get("data") if _ok(inapi) else {}
             if not av_d and not td_d and not in_d:
-                return {
-                    "status": "unavailable",
-                    "source": "orchestrator",
-                    "as_of": None,
-                    "data": None,
-                    "message": "Valuation could not be answered by any provider "
+                miss = _honest_unavailable("valuation", results, skipped)
+                miss["message"] = (
+                    "Valuation could not be answered by any provider "
                     "right now: "
                     + "; ".join(_queried(results))
                     + ". "
@@ -638,9 +729,9 @@ class ProviderManager:
                     "INDIAN_STOCK_MARKET_API_KEY to enable. (Common causes: "
                     "Alpha Vantage free quota spent (25/day), Twelve Data "
                     "budget/coverage limits, or a symbol outside the "
-                    "Indian Stock Market API (NSE/BSE only).)",
-                    "providers_queried": _queried(results),
-                }
+                    "Indian Stock Market API (NSE/BSE only).)"
+                )
+                return miss
             from providers.schema import field as _f
 
             pri_d = av_d or in_d or {}
@@ -761,15 +852,14 @@ class ProviderManager:
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
             leg = self._indian_leg()
-            if leg is not None and is_indian(symbol):
+            in_ok, in_reason = self._indian_ready(symbol)
+            if in_ok and leg is not None and is_indian(symbol):
                 calls.append(("indian-api", lambda: leg.get_earnings(symbol)))
             else:
                 skipped.append(
                     {
                         "provider": "indian-api",
-                        "reason": "Leg not wired."
-                        if leg is None
-                        else "Non-Indian symbol.",
+                        "reason": in_reason or "Leg not wired.",
                     }
                 )
             results = self._fanout(key + ":fan", EARNINGS_TTL, calls)
@@ -780,17 +870,7 @@ class ProviderManager:
             td_rows = ((td.get("data") or {}).get("rows") if _ok(td) else []) or []
             in_d = inapi.get("data") if _ok(inapi) else {}
             if not av_d and not td_rows and not in_d:
-                first = next(
-                    (
-                        results.get(n)
-                        for n in ("alphavantage", "twelvedata", "indian-api")
-                        if results.get(n)
-                    ),
-                    None,
-                )
-                env = dict(first or {"status": "unavailable", "source": "orchestrator"})
-                env["providers_queried"] = _queried(results)
-                return env
+                return _honest_unavailable("earnings data", results, skipped)
             from providers.schema import field as _f
 
             comparisons = []
@@ -899,19 +979,16 @@ class ProviderManager:
                     }
                 )
             leg = self._indian_leg()
-            if leg is not None and symbol is not None and is_indian(symbol):
+            in_ok, in_reason = self._indian_ready(symbol or "")
+            if in_ok and leg is not None and symbol is not None and is_indian(symbol):
                 calls.append(("indian-api", lambda: leg.get_news(symbol, topic, limit)))
             else:
                 skipped.append(
                     {
                         "provider": "indian-api",
-                        "reason": "Leg not wired."
-                        if leg is None
-                        else (
-                            "Non-Indian symbol."
-                            if (symbol or "").strip().upper()
-                            else "Missing symbol."
-                        ),
+                        "reason": "Missing symbol."
+                        if not (symbol or "").strip()
+                        else (in_reason or "Leg not wired."),
                     }
                 )
             results = self._fanout(key + ":fan", NEWS_TTL, calls)
@@ -939,6 +1016,7 @@ class ProviderManager:
                 env = dict(first or {"status": "unavailable", "source": "orchestrator"})
                 env["providers_queried"] = _queried(results)
                 env["reconciliation"] = {"skipped": skipped}
+                env["provider_status"] = _provider_status_list(skipped)
                 return env
             return {
                 "status": "live",
@@ -998,15 +1076,14 @@ class ProviderManager:
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
             leg = self._indian_leg()
-            if leg is not None and is_indian(symbol):
+            in_ok, in_reason = self._indian_ready(symbol)
+            if in_ok and leg is not None and is_indian(symbol):
                 calls.append(("indian-api", lambda: leg.get_actions(symbol)))
             else:
                 skipped.append(
                     {
                         "provider": "indian-api",
-                        "reason": "Leg not wired."
-                        if leg is None
-                        else "Non-Indian symbol.",
+                        "reason": in_reason or "Leg not wired.",
                     }
                 )
             results = self._fanout(key + ":fan", ACTIONS_TTL, calls)
@@ -1054,6 +1131,7 @@ class ProviderManager:
                     + "; ".join(_queried(results)),
                     "providers_queried": _queried(results),
                     "reconciliation": {"skipped": skipped},
+                    "provider_status": _provider_status_list(skipped),
                 }
             dividends.sort(key=lambda d: str(d.get("date") or ""), reverse=True)
             splits.sort(key=lambda s: str(s.get("date") or ""), reverse=True)
@@ -1099,15 +1177,14 @@ class ProviderManager:
                     }
                 )
             leg = self._indian_leg()
-            if leg is not None and is_indian(symbol):
+            in_ok, in_reason = self._indian_ready(symbol)
+            if in_ok and leg is not None and is_indian(symbol):
                 calls.append(("indian-api", lambda: leg.get_estimates(symbol)))
             else:
                 skipped.append(
                     {
                         "provider": "indian-api",
-                        "reason": "Leg not wired."
-                        if leg is None
-                        else "Non-Indian symbol.",
+                        "reason": in_reason or "Leg not wired.",
                     }
                 )
             results = self._fanout(key + ":fan", ESTIMATES_TTL, calls)
@@ -1116,24 +1193,7 @@ class ProviderManager:
             av_d = av.get("data") if _ok(av) else {}
             in_d = inapi.get("data") if _ok(inapi) else {}
             if not av_d and not in_d:
-                first = next(
-                    (
-                        results.get(n)
-                        for n in ("alphavantage", "indian-api")
-                        if results.get(n)
-                    ),
-                    None,
-                )
-                env = dict(
-                    first
-                    or {
-                        "status": "unavailable",
-                        "source": "orchestrator",
-                        "message": "No estimates provider answered.",
-                    }
-                )
-                env["providers_queried"] = _queried(results)
-                return env
+                return _honest_unavailable("analyst estimates", results, skipped)
             if av_d:
                 data = dict(av_d)
                 as_of = av.get("as_of")
@@ -1222,6 +1282,62 @@ def _leg_detail(results: dict[str, dict]) -> list[str]:
         msg = str(env.get("message") or "no detail")[:160]
         out.append(f"{name}: {msg}")
     return out
+
+
+def _provider_state(reason: str) -> str:
+    """Standardize WHY a leg did not contribute: KEY_REQUIRED |
+    NOT_CONFIGURED | UPSTREAM_LIMITATION. Never expose credentials."""
+    low = (reason or "").lower()
+    if "not configured" in low or "api key" in low or "not wired" in low:
+        return "KEY_REQUIRED"
+    if "non-indian" in low or "not covered" in low or "unsupported" in low:
+        return "NOT_CONFIGURED"
+    return "UPSTREAM_LIMITATION"
+
+
+def _provider_status_list(skipped: list[dict] | None) -> list[dict]:
+    """Per-provider WHY for miss envelopes (no credentials, reasons only)."""
+    return [
+        {
+            "provider": s.get("provider"),
+            "state": _provider_state(str(s.get("reason") or "")),
+            "reason": s.get("reason"),
+        }
+        for s in (skipped or [])
+        if isinstance(s, dict)
+    ]
+
+
+def _honest_unavailable(
+    domain_label: str,
+    results: dict[str, dict],
+    skipped: list[dict],
+) -> dict:
+    """Honest miss envelope: names EVERY provider checked with its reason.
+
+    The terminal must never pretend one provider is the only source, so
+    single-leg key messages are never passed through as the domain
+    answer. Status stays `unavailable` (never fabricated values); the
+    per-provider WHY travels in `provider_status`.
+    """
+    return {
+        "status": "unavailable",
+        "source": "orchestrator",
+        "as_of": None,
+        "data": None,
+        "message": f"No configured provider currently supplies this {domain_label}. "
+        + "Providers checked: "
+        + (
+            "; ".join(
+                f"{s.get('provider')} — {s.get('reason')}" for s in (skipped or [])
+            )
+            or "none wired"
+        )
+        + ".",
+        "providers_queried": _queried(results),
+        "reconciliation": {"skipped": skipped},
+        "provider_status": _provider_status_list(skipped),
+    }
 
 
 def _reconcile_statements(

@@ -76,6 +76,9 @@
       PLAN_LIMITED: ["pill-na", "PLAN LIMITED"],
       AUTH_REQUIRED: ["pill-na", "AUTH REQUIRED"],
       KEY_GATED: ["pill-na", "KEY GATED"],
+      KEY_REQUIRED: ["pill-na", "KEY REQUIRED"],
+      NOT_CONFIGURED: ["pill-na", "NOT CONFIGURED"],
+      UPSTREAM_LIMITATION: ["pill-na", "UPSTREAM LIMITED"],
       AUTHORIZATION_REQUIRED: ["pill-na", "AUTH REQUIRED"],
     }[status] || ["pill-na", String(status || "—").toUpperCase()];
     return '<span class="pill ' + m[0] + '">' + m[1] + "</span>";
