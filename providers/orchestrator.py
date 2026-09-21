@@ -37,6 +37,10 @@ ESTIMATES_TTL = 24 * 3600.0
 NEWS_TTL = 10 * 60.0
 ACTIONS_TTL = 24 * 3600.0
 
+# Bump when merge/fallback semantics change so stale envelopes from an
+# older build are never served for the rest of a long TTL window.
+CACHE_VERSION = "v3"
+
 # Machine-readable capability registry: which provider legs actually
 # implement each company domain. Mirrors the real provider classes —
 # never assume capability merely because a provider file exists.
@@ -280,6 +284,10 @@ class ProviderManager:
         return out
 
     def _cached_or(self, key: str, ttl: float, compute: Callable[[], dict]) -> dict:
+        # Cache hygiene: version the namespace so a deploy that changes
+        # merge/fallback logic never serves envelopes computed by older
+        # code for the rest of a long TTL window.
+        key = f"{CACHE_VERSION}:{key}"
         hit = self._cache.get(key)
         if hit is not None:
             env = dict(hit)
