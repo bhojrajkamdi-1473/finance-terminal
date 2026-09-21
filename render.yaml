@@ -13,3 +13,5 @@ services:
         sync: false
       - key: TWELVE_DATA_API_KEY
         sync: false
+      - key: INDIAN_STOCK_MARKET_API_KEY
+        sync: false

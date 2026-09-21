@@ -13,9 +13,12 @@ Env:
   ALPHA_VANTAGE_API_KEY  optional fundamentals feed (never sent to client)
   FUNDAMENTALS_API_KEY   alias for the above
   TWELVE_DATA_API_KEY    optional quote/history feed (never sent to client)
+  INDIAN_STOCK_MARKET_API_KEY  optional: unlocks keyed NSE/BSE domains
+                               (statements, ownership, forecasts, news,
+                               actions, history); without it the Indian leg
+                               serves free quote + market fundamentals
   TERMINAL_HOST          bind host (default 0.0.0.0; localhost still reaches it)
   PORT                   port (default 8000)
-  (Indian Stock Market API leg is free no-auth and needs no key.)
 """
 
 from __future__ import annotations
@@ -199,6 +202,15 @@ class Handler(BaseHTTPRequestHandler):
                 qs.get("symbol", [""])[0],
                 qs.get("range", ["1M"])[0],
                 qs.get("interval", ["1d"])[0],
+            )
+            return _send_json(self, env, _envelope_status(env))
+        if path == "/api/indian-history":
+            from providers.indianapi import IndianApiProvider
+
+            env = IndianApiProvider().get_indian_history(
+                qs.get("symbol", [""])[0],
+                qs.get("period", ["1yr"])[0],
+                qs.get("filter", ["price"])[0],
             )
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/company":

@@ -88,8 +88,8 @@
       '</span> <span class="' + c + '">' + F.fmtPct(q.change_pct) + "</span>";
   }
   function secCell(symbol, name, meta) { return F.secId(name, symbol, meta); }
-  function kpi(label, value, sub) {
-    return "<div class='kpi'><div class='k-l'>" + F.esc(label) + "</div><div class='k-v'>" +
+  function kpi(label, value, sub, title) {
+    return "<div class='kpi'" + (title ? " title='" + F.esc(title) + "'" : "") + "><div class='k-l'>" + F.esc(label) + "</div><div class='k-v'>" +
       value + "</div><div class='k-s'>" + F.esc(sub || "") + "</div></div>";
   }
   function unaCell() { return '<span class="mut">—</span>'; }
@@ -421,12 +421,12 @@
   }
 
   /* ---------- company detail ---------- */
-  var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings", "News", "Actions", "Holdings", "Charts", "Technicals", "Research"];
+  var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings", "News", "Actions", "Ownership", "Charts", "Technicals", "Research"];
   function pCompany(sym, tab) {
     sym = (sym || "").toUpperCase();
     tab = tab || "Overview";
     view().innerHTML = "<div id='co-head' class='card'>" + skel(3) + "</div>" +
-      "<div class='tabs' role='tablist' id='co-tabs'>" + CTABS.map(function (t) {
+      "<div class='tabs sticky' role='tablist' id='co-tabs'>" + CTABS.map(function (t) {
         return "<button role='tab' aria-selected='" + (t === tab ? "true" : "false") + "' data-t='" + t + "' class='" + (t === tab ? "on" : "") + "'>" + t + "</button>";
       }).join("") + "</div><div class='lay-8-4'><div id='co-body'></div>" +
       "<aside><div id='co-quality'></div></aside></div><div id='co-hub'></div>";
@@ -438,9 +438,9 @@
         if (!el("co-head")) return;
         renderHead(sym, rc.body, rq.body);
         renderTab(sym, tab);
-        loadQuality(sym);
+        loadQuality(sym, rc.body, rq.body);
         loadHub(sym);
-        loadKpis(sym, (rq.body && rq.body.data) || {});
+        loadKpis(sym, (rq.body && rq.body.data) || {}, rq.body);
         every(10000, function () {
           if (!el("co-price")) return;
           API.get("quote", { symbol: sym }).then(function (r) {
@@ -449,10 +449,12 @@
         });
       });
     });
-    function loadKpis(sym, q) {
+    function loadKpis(sym, q, qenv) {
+      var q_src = (qenv && qenv.source) || q.source || "?";
       API.get("ratios", { symbol: sym }).then(function (r) {
         if (!el("co-kpis")) return;
         var d = (r.body && r.body.data) || null, ccy = q.currency || "";
+        var rsrc = F.srcName(r.body && r.body.source);
         function val(x, fmt) {
           if (x === undefined || x === null || x === "None" || x === "-") return null;
           if (fmt === "x") { var n = Number(x); return isNaN(n) ? null : n.toFixed(1) + "x"; }
@@ -460,27 +462,27 @@
           if (fmt === "in") { var m = Number(x); return isNaN(m) ? null : F.fmtIN(m, ccy); }
           return String(x);
         }
-        function cell(l, v, s) {
-          return kpi(l, v === null ? unaCell() : F.esc(v), s || "");
+        function cell(l, v, s, t) {
+          return kpi(l, v === null ? unaCell() : F.esc(v), s || "", t || ("Source: " + rsrc));
         }
         el("co-kpis").innerHTML =
-          (d ? cell("Market cap", val(d.MarketCapitalization, "in"), (d.MarketCapKind === "CALCULATED" ? "calculated" : "reported")) +
+          (d ? cell("Market cap", val(d.MarketCapitalization, "in"), ((d.MarketCapKind === "CALCULATED" ? "calculated" : "reported") + " · " + rsrc)) +
           cell("P/E", val(d.PERatio, "x"), "TTM · reported") +
           cell("EPS", val(d.EPS, "num") && F.fmtNum(Number(d.EPS)), "TTM · reported") +
           cell("ROE", val(d.ROE, "pct"), "reported") +
           cell("Book value", (d.BookValue && d.BookValue !== "None") ? F.fmtNum(Number(d.BookValue)) : null, "reported") +
-          cell("52W high", F.fmtNum(q.fifty_two_week_high) === "—" ? null : F.fmtNum(q.fifty_two_week_high), "quote") +
-          cell("52W low", F.fmtNum(q.fifty_two_week_low) === "—" ? null : F.fmtNum(q.fifty_two_week_low), "quote") +
+          cell("52W high", F.fmtNum(q.fifty_two_week_high) === "—" ? null : F.fmtNum(q.fifty_two_week_high), "quote", "Source: " + F.srcName(q_src)) +
+          cell("52W low", F.fmtNum(q.fifty_two_week_low) === "—" ? null : F.fmtNum(q.fifty_two_week_low), "quote", "Source: " + F.srcName(q_src)) +
           cell("Div yield", val(d.DividendYield, "pct"), "reported")
           : cell("Market cap", null, "Not available from configured sources") + cell("P/E", null, "Not available from configured sources") +
             cell("EPS", null, "Not available from configured sources") + cell("ROE", null, "Not available from configured sources") +
             cell("Book value", null, "Not available from configured sources") +
-            cell("52W high", F.fmtNum(q.fifty_two_week_high) === "—" ? null : F.fmtNum(q.fifty_two_week_high), "quote") +
-            cell("52W low", F.fmtNum(q.fifty_two_week_low) === "—" ? null : F.fmtNum(q.fifty_two_week_low), "quote") +
+            cell("52W high", F.fmtNum(q.fifty_two_week_high) === "—" ? null : F.fmtNum(q.fifty_two_week_high), "quote", "Source: " + F.srcName(q_src)) +
+            cell("52W low", F.fmtNum(q.fifty_two_week_low) === "—" ? null : F.fmtNum(q.fifty_two_week_low), "quote", "Source: " + F.srcName(q_src)) +
             cell("Div yield", null, "Not available from configured sources"));
       });
     }
-    function loadQuality(sym) {
+    function loadQuality(sym, profEnv, quoteEnv) {
       API.get("quality", { symbol: sym }).then(function (r) {
         if (!el("co-quality")) return;
         var b = r.body || {}, rows = b.providers || [], q = b.quote || {};
@@ -488,23 +490,43 @@
         function dot(st) {
           return st === "connected" ? "● " : (st === "cooling" ? "◐ " : "○ ");
         }
-        el("co-quality").innerHTML = "<div class='card sect'><h3>Data provenance</h3>" +
-          "<div class='prov'>Price: <b>" + F.esc(F.srcName(q.quote_source) || q.quote_source || "?") + "</b> · " +
-          F.esc(q.quote_status || "?") + "/" + F.esc(q.quote_timeliness || "?") +
-          " · X-checked fields: " + (sum.fields_compared === undefined ? "—" : sum.fields_compared) +
-          " · Discrepancies: " + (sum.discrepancies === undefined ? "—" : sum.discrepancies) + "</div>" +
-          "<div class='src'>Only the source above contributed to this price. Standby connectivity below — not contributors.</div>" +
-          "<div class='strip'>" + rows.map(function (p) {
-            var cls = p.state === "connected" ? "up" : (p.state === "cooling" ? "warn" : "mut");
-            return "<span class='" + cls + "' title='" + F.esc(p.detail || p.label) + "'>" + dot(p.state) + F.esc(p.label) + "</span>";
-          }).join("") + "</div>" +
-          "<details><summary class='src'>Standby connectivity (not contributors)</summary><div style='margin-top:6px'>" +
-          rows.map(function (p) {
-            var last = p.last_ok ? new Date(p.last_ok * 1000).toISOString().slice(11, 19) + "Z" :
-              (p.last_error ? "err: " + F.esc(String(p.last_error).slice(0, 60)) : "—");
-            return "<div style='padding:3px 0'><b>" + dot(p.state) + F.esc(p.label) + "</b><div class='src'>Last response: " + last +
-              (p.last_latency_ms !== null && p.last_latency_ms !== undefined ? " · " + p.last_latency_ms + " ms" : "") + "</div></div>";
-          }).join("") + "</div></details></div>";
+        function qline() {
+          return "<b>" + F.esc(F.srcName(q.quote_source) || q.quote_source || "?") + "</b> · " +
+            F.esc(q.quote_status || "?") + "/" + F.esc(q.quote_timeliness || "?");
+        }
+        function prow(label, env) {
+          if (!env) return "<div class='dr'><div class='dl'>" + label + "</div><div class='dv'>loading…</div></div>";
+          var d = env.data;
+          if (d) return "<div class='dr'><div class='dl'>" + label + "</div><div class='dv'><b>" +
+            F.esc(F.srcName(env.source)) + "</b> · " + F.esc(env.timeliness || env.status || "?") + "</div></div>";
+          return "<div class='dr'><div class='dl'>" + label + "</div><div class='dv'>" +
+            F.esc((env.message || "Not available").split(".")[0]) + "</div></div>";
+        }
+        function paint(fundEnv) {
+          if (!el("co-quality")) return;
+          el("co-quality").innerHTML = "<div class='card sect'><h3>Data sources</h3>" +
+            "<div class='dsrc'>" +
+            "<div class='dr'><div class='dl'>Price</div><div class='dv'>" + qline() + "</div></div>" +
+            prow("Company profile", profEnv) +
+            prow("Fundamentals", fundEnv) +
+            "<div class='dr'><div class='dl'>Technical</div><div class='dv'>Calculated from historical data</div></div>" +
+            "</div>" +
+            "<div class='prov'>Cross-check: " +
+            (sum.fields_compared === undefined ? "—" : sum.fields_compared) + " fields checked · " +
+            (sum.discrepancies === undefined ? "—" : sum.discrepancies) + " discrepancies</div>" +
+            "<details><summary class='src'>Other available providers</summary><div style='margin-top:6px'>" +
+            rows.map(function (p) {
+              var last = p.last_ok ? new Date(p.last_ok * 1000).toISOString().slice(11, 19) + "Z" :
+                (p.last_error ? "err: " + F.esc(String(p.last_error).slice(0, 60)) : "—");
+              return "<div style='padding:3px 0'><b>" + dot(p.state) + F.esc(p.label) + "</b><div class='src'>" + F.esc(p.detail || "") +
+                "<br>Last response: " + last +
+                (p.last_latency_ms !== null && p.last_latency_ms !== undefined ? " · " + p.last_latency_ms + " ms" : "") + "</div></div>";
+            }).join("") + "</div></details></div>";
+        }
+        paint(null);
+        API.get("ratios", { symbol: sym }).then(function (rr) {
+          paint(rr.body);
+        });
       });
     }
     function loadHub(sym) {
@@ -570,7 +592,8 @@
       var sectorLine = [p.sector || q.sector, p.industry || q.industry].filter(Boolean).join(" · ");
       el("co-head").innerHTML = "<div class='co-head'><div class='co-id'><div class='sec-row'>" +
         F.logo(sym, nm, 42) +
-        "<div><h1>" + F.esc(nm) + "</h1>" +
+        "<div><div class='co-eyebrow'>Equity · " + F.esc(country || exch) + "</div>" +
+        "<h1>" + F.esc(nm) + "</h1>" +
         "<div class='tk'>" + F.esc(ticker) + " · " + F.esc(exch) +
         (country ? " · " + F.esc(country) : "") + (isIdx ? " · Index" : "") + "</div>" +
         "<div class='mt'>" + F.esc(venue + (q.currency || p.currency ? " · " + (q.currency || p.currency) : "")) + "</div>" +
@@ -579,11 +602,11 @@
         "<div class='src' id='co-pills'>" +
         (qenv ? F.statusPill(qenv.timeliness || qenv.status) : "") +
         (qenv && qenv.stale ? " " + F.statusPill("STALE") : "") + "</div>" +
-        "<div class='src' id='co-fresh'>" + freshInner(qenv, "10s") + "</div>" +
+        "<div class='src' id='co-fresh' title='Provenance: " + F.esc(F.srcName(qenv && qenv.source)) + "'>" + freshInner(qenv, "10s") + "</div>" +
         (isIdx ? "<div class='src'>Index security — company tabs (financials, holdings) do not apply; market data below.</div>" : "") + "</div>" +
-        "<div class='co-px'><div class='p' id='co-price'>" + F.fmtNum(q.price) +
+        "<div class='co-px'><div class='p' id='co-price' title='Source: " + F.esc(F.srcName(qenv && qenv.source)) + "'>" + F.fmtNum(q.price) +
         " <small>" + F.esc(q.currency || "") + "</small></div>" +
-        "<div class='c " + c + "' id='co-chg'>" + F.fmtPct(q.change_pct) + " (" + F.fmtNum(q.change) + ")</div>" +
+        "<div class='c " + c + "' id='co-chg' title='Source: " + F.esc(F.srcName(qenv && qenv.source)) + "'>" + F.fmtPct(q.change_pct) + " (" + F.fmtNum(q.change) + ")</div>" +
         "<div class='row' style='justify-content:flex-end;margin-top:6px'><button class='btn sm' id='co-wl'>+ Watchlist</button>" +
         "<button class='btn sm' id='co-pf'>+ Portfolio</button><button class='btn sm' id='co-cmp'>⇄ Compare</button></div></div></div>" +
         "<div class='kpis' id='co-kpis' style='margin-top:10px'>" + skel(6) + "</div>";
@@ -609,7 +632,7 @@
     if (tab === "Earnings") return tEarnings(sym, b);
     if (tab === "News") return tNews(sym, b);
     if (tab === "Actions") return tActions(sym, b);
-    if (tab === "Holdings") return tHoldings(sym, b);
+    if (tab === "Ownership" || tab === "Holdings") return tHoldings(sym, b);
     if (tab === "Charts") return tCharts(sym, b, "1Y", "1d");
     if (tab === "Technicals") return tTechnicals(sym, b);
     if (tab === "Research") return tResearch(sym, b);
@@ -943,8 +966,35 @@
     API.get("news", { symbol: sym, limit: 20 }).then(function (r) {
       if (!el("n-out")) return;
       var d = r.body && r.body.data;
-      el("n-out").innerHTML = "<h3>News · " + F.esc(sym) + " " + F.statusPill(r.body.status) + "</h3>" +
-        (d ? d.items.map(newsItem).join("") : unavail((r.body && r.body.message) || "News unavailable.")) + srcLine(r.body);
+      var items = (d && d.items) || [];
+      var cats = ["All", "Company", "Markets", "Results", "Corporate", "Regulatory"];
+      function catOf(it) {
+        var t = ((it.title || "") + " " + (it.summary || "")).toLowerCase();
+        if (/result|earning|profit|revenue|quarter|guidance/.test(t)) return "Results";
+        if (/dividend|split|bonus|right|merger|acquis|buyback|agm|board meet/.test(t)) return "Corporate";
+        if (/sebi|regulat|approv|filing|compliance|order|penalty/.test(t)) return "Regulatory";
+        if (/market|sensex|nifty|index|sector|economy|rate|inflation/.test(t)) return "Markets";
+        return "Company";
+      }
+      function paint(sel) {
+        if (!el("n-out")) return;
+        var list = sel === "All" ? items : items.filter(function (it) { return catOf(it) === sel; });
+        el("n-out").innerHTML = "<h3>News · " + F.esc(sym) + " " + F.statusPill(r.body.status) + "</h3>" +
+          "<div class='fchips' role='group' aria-label='News filter'>" + cats.map(function (c) {
+            return "<button data-c='" + c + "'" + (c === sel ? " class='on'" : "") + ">" + c + "</button>";
+          }).join("") + "</div>" +
+          (list.length ? list.map(newsItem).join("") : "<div class='src'>No " + F.esc(sel) + " items in this batch.</div>") +
+          srcLine(r.body);
+        Array.prototype.forEach.call(document.querySelectorAll("#n-out .fchips button"), function (btn) {
+          btn.onclick = function () { paint(btn.getAttribute("data-c")); };
+        });
+      }
+      if (!items.length) {
+        el("n-out").innerHTML = "<h3>News · " + F.esc(sym) + " " + F.statusPill(r.body.status) + "</h3>" +
+          unavail((r.body && r.body.message) || "News unavailable.") + srcLine(r.body);
+        return;
+      }
+      paint("All");
     });
   }
   function tActions(sym, b) {
@@ -1030,7 +1080,7 @@
         h += emptyState("Ownership unavailable", (rh.body && rh.body.message) || "No ownership split available. Splits are never guessed.", rh.body);
       }
       h += (hd && hd.note ? "<div class='prov'>" + F.esc(hd.note) + "</div>" : "") + "</div>";
-      el("h-out").innerHTML = "<h2 class='h-sec'>Shareholding</h2>" + h + srcLine(rh.body);
+      el("h-out").innerHTML = "<h2 class='h-sec'>Ownership</h2>" + h + srcLine(rh.body);
       function FLT(v) { var n = Number(v); return isNaN(n) ? null : n; }
     });
   }
@@ -1076,7 +1126,9 @@
       return out.length ? out : [20];
     }
     function draw() {
-      API.get("history", { symbol: sym, range: range, interval: interval }).then(function (r) {
+      var indianPeriod = { "1M": "1m", "3M": "6m", "6M": "6m", "1Y": "1yr", "3Y": "3yr", "5Y": "5yr", "MAX": "max" }[range];
+      var tryIndian = indianPeriod && /\.NS$|\.BO$/.test(sym) && interval === "1d";
+      function renderHistory(r) {
         if (!el("ch-c")) return;
         var d = r.body && r.body.data;
         if (!d || !d.bars || !d.bars.length) {
@@ -1085,10 +1137,18 @@
         }
         smas = curSmas();
         window.FT_CHART.drawPriceChart(el("ch-c"), d.bars, { sma: smas });
-        el("ch-meta").textContent = "n=" + d.bars.length + " · " + d.interval + " · " +
+        el("ch-meta").textContent = "n=" + d.bars.length + " · " + (d.interval || "1d") + " · " +
           (r.body.timeliness || r.body.status) + " · " + F.srcName(r.body.source) + " · " + d.currency +
           " · as of " + F.fmtIST(r.body.as_of);
-      });
+      }
+      if (tryIndian) {
+        API.get("indian-history", { symbol: sym, period: indianPeriod, filter: "price" }).then(function (r) {
+          if ((r.body && r.body.data && r.body.data.bars && r.body.data.bars.length)) renderHistory(r);
+          else API.get("history", { symbol: sym, range: range, interval: interval }).then(renderHistory);
+        });
+      } else {
+        API.get("history", { symbol: sym, range: range, interval: interval }).then(renderHistory);
+      }
     }
     draw();
     Array.prototype.forEach.call(document.querySelectorAll("#ch-smas input"), function (c) {
@@ -1629,7 +1689,7 @@
       "Twelve Data free budget: 8 credits/min, 800/day. Free APIs are never hammered.</div></div>" +
       "<div class='card'><h3>Environment</h3><div class='src'>ALPHA_VANTAGE_API_KEY / FUNDAMENTALS_API_KEY — optional, server-side only, enables statements + ratios + last-resort quotes.<br><br>" +
       "TWELVE_DATA_API_KEY — optional, server-side only, enables the middle fallback leg.<br><br>" +
-      "Indian Stock Market API — free, no key required (NSE/BSE quote + market fundamentals).<br><br>" +
+      "INDIAN_STOCK_MARKET_API_KEY — optional, server-side only. With a key: full NSE/BSE coverage (statements, ownership, forecasts, news, actions, history). Without: free quote + market fundamentals.<br><br>" +
       "TERMINAL_DB — sqlite path (default ./terminal-data/terminal.db).<br><br>No key is ever shipped to the browser. Validate input; external content is escaped before render.</div>" +
       "<h3 style='margin-top:12px'>Legend</h3><div class='row'>" + F.statusPill("REAL-TIME") + F.statusPill("DELAYED") + F.statusPill("END-OF-DAY") + F.statusPill("CALCULATED") + F.statusPill("UNAVAILABLE") + F.statusPill("STALE") + "</div></div></div>";
     API.get("providers").then(function (r) {

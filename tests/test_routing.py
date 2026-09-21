@@ -83,10 +83,10 @@ class TestCapabilitiesRegistry(_EnvGuard):
         self.assertTrue(CAPABILITIES["alphavantage"]["statements"])
         self.assertTrue(CAPABILITIES["twelvedata"]["valuation"])
         self.assertFalse(CAPABILITIES["twelvedata"]["estimates"])
-        self.assertFalse(CAPABILITIES["indian-api"]["holdings"])
-        self.assertFalse(CAPABILITIES["indian-api"]["statements"])
-        self.assertFalse(CAPABILITIES["indian-api"]["estimates"])
-        self.assertFalse(CAPABILITIES["indian-api"]["earnings"])
+        self.assertTrue(CAPABILITIES["indian-api"]["holdings"])
+        self.assertTrue(CAPABILITIES["indian-api"]["statements"])
+        self.assertTrue(CAPABILITIES["indian-api"]["estimates"])
+        self.assertTrue(CAPABILITIES["indian-api"]["earnings"])
         self.assertTrue(CAPABILITIES["indian-api"]["quote"])
         self.assertTrue(CAPABILITIES["indian-api"]["valuation"])
         self.assertTrue(CAPABILITIES["indian-api"]["profile"])
@@ -99,9 +99,8 @@ class TestYahooOnlyTCS(_EnvGuard):
     """Yahoo only: market data works, fundamentals-family is honest."""
 
     def test_statements_honest_miss_names_all_providers(self):
-        # Legs wired (as in production) but no keys: AV/TD name their key
-        # reasons; the no-auth Indian leg is skipped as not-supplied
-        # (capability routing) and never dispatched.
+        # Legs wired (as in production) but no keys: AV/TD/Indian each
+        # name their key reason; stubs are never dispatched.
         av, td, indian = Stub(), Stub(), Stub()
         m = _manager(av=av, td=td, indian=indian)
         env = m.get_statements("TCS.NS", "income", "annual")
@@ -114,13 +113,12 @@ class TestYahooOnlyTCS(_EnvGuard):
         self.assertEqual(
             set(by_provider), {"alphavantage", "twelvedata", "indian-api"}
         )
-        self.assertEqual(by_provider["alphavantage"]["state"], "KEY_REQUIRED")
-        self.assertEqual(by_provider["twelvedata"]["state"], "KEY_REQUIRED")
-        self.assertEqual(by_provider["indian-api"]["state"], "NOT_CONFIGURED")
+        for p in by_provider.values():
+            self.assertEqual(p["state"], "KEY_REQUIRED")
         # never a single-provider key message as the domain answer
         self.assertIn("ALPHA_VANTAGE_API_KEY", env["message"])
         self.assertIn("TWELVE_DATA_API_KEY", env["message"])
-        self.assertNotIn("INDIAN_STOCK_MARKET_API_KEY", env["message"])
+        self.assertIn("INDIAN_STOCK_MARKET_API_KEY", env["message"])
 
     def test_valuation_earnings_estimates_honest_miss(self):
         m = _manager()
@@ -131,13 +129,39 @@ class TestYahooOnlyTCS(_EnvGuard):
             self.assertTrue(env.get("provider_status"), fn)
 
     def test_indian_leg_skipped_for_statements_never_dispatched(self):
+        # Keyless: keyed statements leg stays out with its key reason.
         indian = Stub(get_financial_statements=lambda *a: _stmt("indian-api"))
         m = _manager(indian=indian)
         env = m.get_statements("TCS.NS", "income", "annual")
         self.assertEqual(indian.calls, [])
         self.assertEqual(env["status"], "unavailable")
         skipped = {s["provider"]: s["reason"] for s in env["reconciliation"]["skipped"]}
-        self.assertIn("not supplied", skipped["indian-api"])
+        self.assertIn("INDIAN_STOCK_MARKET_API_KEY", skipped["indian-api"])
+
+    def test_indian_keyed_statements_cover_tcs(self):
+        # Keyed: the Indian leg answers statements (fixture shaped like
+        # the official /stock financials payload).
+        os.environ["INDIAN_STOCK_MARKET_API_KEY"] = "test-key"
+        try:
+            indian = Stub(
+                get_financial_statements=lambda *a: live_envelope(
+                    "indian-api",
+                    {
+                        "symbol": "TCS.NS",
+                        "statement": "income",
+                        "period": "annual",
+                        "currency": "INR",
+                        "reports": [{"fiscalDateEnding": "2025-03-31"}],
+                    },
+                    delayed=True,
+                )
+            )
+            m = _manager(indian=indian)
+            env = m.get_statements("TCS.NS", "income", "annual")
+        finally:
+            os.environ.pop("INDIAN_STOCK_MARKET_API_KEY", None)
+        self.assertEqual(env["status"], "live")
+        self.assertEqual(env["source"], "indian-api")
 
     def test_indian_ratios_cover_valuation_without_any_key(self):
         # No keys at all: the no-auth Indian leg still answers valuation.

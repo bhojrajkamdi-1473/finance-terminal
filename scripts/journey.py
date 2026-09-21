@@ -31,6 +31,16 @@ ROUTES = [
         ["RELIANCE", "Overview", "Last updated", "52W high", "Research Hub"],
     ),
     (
+        "company-meta",
+        "company/META",
+        ["META", "Overview", "Last updated"],
+    ),
+    (
+        "company-msft",
+        "company/MSFT",
+        ["MSFT", "Overview", "Last updated"],
+    ),
+    (
         "company-charts",
         "company/RELIANCE.NS/Charts",
         ["1Y", "SMA20", "TradingView"],

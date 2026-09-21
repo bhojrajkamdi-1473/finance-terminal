@@ -11,7 +11,7 @@ vanilla JS SPA (`terminal/`), SQLite storage, Render deployment
 | Yahoo Finance | quote, history, search, profile, RSS news, dividends/splits | free, no key | none | quote 30s, intraday 15m, daily 4h, search 10m | 429 backoff + 5m cooldown | delayed (~15m) | crumb-gated endpoints (options, holders, SEC) not used |
 | Alpha Vantage | overview, statements, earnings, estimates, news, IPO, macro, dividends, splits, shares, quote, daily history | free, key-gated | `ALPHA_VANTAGE_API_KEY` | quotes 6h, overview 24h, statements/IPO/macro 7d, earnings/news 24h/10m | 25 req/day shared; premium notices → honest unavailable | delayed | NSE coverage discovered per symbol via SYMBOL_SEARCH; never assumed |
 | Twelve Data | quote, history, search, statistics, earnings, dividends, splits, statements | free Basic, key-gated | `TWELVE_DATA_API_KEY` | quotes 30s, history 4h, statements 7d | 8 credits/min + 800/day token bucket | US real-time per plan claim, else delayed | NSE/BSE uncovered on free; statements cost ~100 credits |
-| Indian Stock Market API (free, no-auth; MIT upstream v3.0) | quote, profile (sector/industry), market fundamentals: market cap, P/E, EPS, book value, dividend yield, 52W range, volume (NSE/BSE only) | free, NO key | none | quote 5m, fundamentals 24h | Yahoo crumb handshake cached ~50m; 429 → backoff + honest fallback | delayed snapshot | NO statements, NO estimates, NO earnings series, NO ownership, NO news; ROE never supplied; Indian symbols only |
+| Indian Stock Market API (`stock.indianapi.in`) | quote, profile, statements (/stock + /statement + /historical_stats), history (/historical_data), actions, news, forecasts, targets, ownership (NSE/BSE only; keyed) — free no-auth fallback: quote + market fundamentals (market cap, P/E, EPS, book value, dividend yield, sector, industry, 52W) | free, keyed full / no-auth subset | `INDIAN_STOCK_MARKET_API_KEY` (x-api-key header; absent → no-auth subset) | quote 5m, domains 24h, statements 7d | 30/min + 2000/day self-imposed guard | delayed snapshot | Indian symbols only; quarterly statements only where the API returns them (never annual-substituted); ROE/margins only from keyed keyMetrics |
 | Stooq | daily history CSV (US suffix-less only) | free, no key | none | 4h (history chain) | failures → pass-through | end-of-day | bot-wall/401 → honest unavailable; mapping unverified elsewhere |
 | TradingView | chart widget ONLY | embed, no key | none for widget | n/a | n/a | delayed | data feeds disabled without `TRADINGVIEW_ENABLED=1` + documented scope |
 | Moneycontrol | none (research landing link) | n/a | none | n/a | n/a | n/a | site bot-gated; navigation only, never scraped |
@@ -51,17 +51,18 @@ are shown only from verified provider metadata — otherwise explicit
 ## Environment variables (names only — values never committed/logged)
 
 `ALPHA_VANTAGE_API_KEY`, `TWELVE_DATA_API_KEY`,
+`INDIAN_STOCK_MARKET_API_KEY` (keyed Indian domains; absent → free
+no-auth quote + market fundamentals subset),
 `FUNDAMENTALS_API_KEY` (alias), `TRADINGVIEW_ENABLED` (data feeds stay off
 unless `1` with documented scope), `TERMINAL_DB`, `TERMINAL_HOST`, `PORT`.
-(The former `INDIAN_STOCK_MARKET_API_KEY` is obsolete: the Indian leg is
-a free no-auth feed and ignores it.)
 `.env` and `*.db` are git-ignored; every JSON response passes deep secret
 redaction.
 
 ## Known limitations
 
 - No keys configured in this environment → AV/TD honestly
-  unavailable for their domains; Yahoo covers quotes/history/news/actions
-  and the no-auth Indian leg covers NSE/BSE market fundamentals.
+  unavailable for their domains; Yahoo covers quotes/history/news/actions,
+  the Indian leg covers NSE/BSE quote + market fundamentals without a key
+  (statements/ownership/forecasts need the key).
 - Twelve Data free plan: no NSE/BSE coverage; statements expensive.
 - Breadth universe = tracked symbols only, never presented as whole market.

@@ -234,6 +234,8 @@ class TestRatios(NoAuthTestCase):
 
 class TestUnsupportedDomains(NoAuthTestCase):
     def test_statements_estimates_earnings_holdings_news_actions(self):
+        # Keyless: keyed-only domains explain they need the key (with the
+        # NOT_CONFIGURED code) instead of pretending to be unsupported.
         p, _ = self._prov()
         for fn in (
             lambda: p.get_financial_statements("TCS.NS", "income", "annual"),
@@ -246,10 +248,281 @@ class TestUnsupportedDomains(NoAuthTestCase):
             env = fn()
             self.assertEqual(env["status"], "unavailable")
             self.assertIsNone(env["data"])
-            self.assertIn("not supplied", env["message"])
+            self.assertIn("INDIAN_STOCK_MARKET_API_KEY", env["message"])
+            self.assertEqual(env.get("code"), "NOT_CONFIGURED")
 
     def test_history_and_search_pass_through(self):
         p, _ = self._prov()
+        self.assertEqual(
+            p.get_historical_prices("TCS.NS")["status"], "unavailable"
+        )
+        self.assertEqual(p.search("tcs")["status"], "unavailable")
+
+
+def _krow(key, value, display=""):
+    return {"key": key, "displayName": display or (key + " "), "value": value}
+
+
+def _kstock() -> dict:
+    """Official /stock payload subset (shape verified live, Sep 2026)."""
+    return {
+        "companyName": "Tata Consultancy Services Limited",
+        "industry": "Information Technology",
+        "companyProfile": {
+            "companyDescription": "TCS is an IT services company.",
+            "mgIndustry": "Information Technology Services",
+            "isInId": "INE467B01029",
+            "exchangeCodeBse": "532540",
+            "exchangeCodeNse": "TCS",
+        },
+        "currentPrice": {"BSE": "2101.00", "NSE": "2105.00"},
+        "stockDetailsReusableData": {
+            "price": "2105.00",
+            "date": "16 Sep 2026",
+            "time": "10:28:24",
+            "percentChange": "1.20",
+            "high": "2110.00",
+            "low": "2090.00",
+            "yhigh": "3400.00",
+            "ylow": "2800.00",
+        },
+        "financials": [
+            {
+                "FiscalYear": 2026,
+                "EndDate": "2026-03-31",
+                "stockFinancialMap": {
+                    "INC": [
+                        _krow("NetIncome", "48000.00", "Net Income "),
+                        _krow(
+                            "DilutedWeightedAverageShares",
+                            "362.00",
+                            "Diluted Weighted Average Shares ",
+                        ),
+                        _krow("TotalRevenue", "255000.00", "Total Revenue "),
+                    ],
+                    "BAL": [
+                        _krow(
+                            "TotalCommonSharesOutstanding",
+                            "362.00",
+                            "Total Common Shares Outstanding ",
+                        ),
+                    ],
+                    "CAS": [],
+                },
+            }
+        ],
+        "keyMetrics": {
+            "valuation": [_krow("pPerEBasicExcludingExtraordinaryItemsTTM", "15.29")],
+            "persharedata": [
+                _krow("ePSBasicExcludingExtraordinaryItemsMostRecentFiscalYear", "137.67"),
+                _krow("bookValuePerShareMostRecentFiscalYear", "303.01"),
+            ],
+            "mgmtEffectiveness": [
+                _krow("returnOnAverageEquityMostRecentFiscalYear", "45.10"),
+            ],
+            "margins": [_krow("netProfitMarginPercentTrailing12Month", "18.80")],
+            "financialstrength": [],
+            "priceandVolume": [_krow("marketCap", "761000.00")],
+        },
+        "analystView": [
+            {"ratingName": "Buy", "ratingValue": 2, "numberOfAnalystsLatest": "18"},
+        ],
+        "recosBar": {
+            "meanValue": "2.10",
+            "noOfRecommendations": "34",
+            "tickerPercentage": "83.82",
+            "tickerRatingValue": "2.10",
+        },
+        "shareholding": [
+            {
+                "displayName": "Promoter",
+                "categories": [{"holdingDate": "2026-06-30", "percentage": "72.10"}],
+            },
+        ],
+        "stockCorporateActionData": {
+            "dividend": [
+                {
+                    "xdDate": "2026-06-12",
+                    "recordDate": "2026-06-12",
+                    "value": 12,
+                    "remarks": "Rs.12 final",
+                    "interimOrFinal": "Final",
+                    "dateOfAnnouncement": "2026-05-15",
+                }
+            ],
+            "splits": [],
+            "bonus": [],
+            "rights": [],
+            "annualGeneralMeeting": [],
+            "boardMeetings": [],
+        },
+        "recentNews": [
+            {
+                "headline": "TCS wins deal",
+                "date": "2026-09-15T04:29:02+0000",
+                "url": "/market/news/tcs-1.html",
+                "summary": "TCS announced a deal.",
+            }
+        ],
+    }
+
+
+class KeyedTestCase(unittest.TestCase):
+    def setUp(self):
+        self._old = dict(os.environ)
+        os.environ["INDIAN_STOCK_MARKET_API_KEY"] = "test-key-never-sent"
+
+    def tearDown(self):
+        os.environ.clear()
+        os.environ.update(self._old)
+
+    def _kprov(self, payload=None, fail=None):
+        p = IndianApiProvider()
+        calls = []
+
+        def kget(path, params):
+            calls.append((path, params))
+            if fail is not None:
+                raise fail
+            if payload is not None:
+                return payload
+            return _kstock()
+
+        p._kget = kget  # keyed transport seam (no network, no key sent)
+        return p, calls
+
+
+class TestKeyedQuote(KeyedTestCase):
+    def test_nse_bse_choice(self):
+        p, calls = self._kprov()
+        env = p.get_quote("TCS.NS")
+        self.assertEqual(env["status"], "delayed")
+        self.assertEqual(env["data"]["price"], 2105.00)
+        self.assertEqual(env["data"]["exchange"], "NSE")
+        env = p.get_quote("TCS.BO")
+        self.assertEqual(env["data"]["price"], 2101.00)
+        self.assertEqual(env["data"]["exchange"], "BSE")
+        # x-api-key header path used, never the key value in params
+        self.assertTrue(all(c[0] == "/stock" for c in calls))
+        self.assertNotIn("test-key-never-sent", str(calls))
+
+    def test_non_indian_passes_through(self):
+        p, calls = self._kprov()
+        env = p.get_quote("META")
+        self.assertEqual(env["status"], "unavailable")
+        self.assertEqual(calls, [])
+
+    def test_401_falls_back_to_free_leg(self):
+        from providers.indianapi import _UpstreamError
+
+        p, _ = self._kprov(
+            fail=_UpstreamError(
+                {
+                    "status": "error",
+                    "source": "indian-api",
+                    "code": "AUTH_ERROR",
+                    "message": "rejected the key",
+                    "data": None,
+                    "as_of": None,
+                }
+            )
+        )
+        marker = {"status": "delayed", "source": "indian-api", "data": {"price": 1.0}}
+        p._free_quote = lambda symbol, key_note=None: marker
+        env = p.get_quote("TCS.NS")
+        # falls back rather than failing the page with AUTH_ERROR
+        self.assertIs(env, marker)
+
+
+class TestKeyedDomains(KeyedTestCase):
+    def test_ratios_rich_with_roe(self):
+        p, _ = self._kprov()
+        d = p.get_ratios("TCS.NS")["data"]
+        self.assertEqual(d["PERatio"], 15.29)
+        self.assertEqual(d["EPS"], 137.67)
+        self.assertEqual(d["ROE"], 45.10)
+        self.assertEqual(d["_metric_source"], "indian-api keyMetrics")
+
+    def test_statements_annual_and_quarterly_honest(self):
+        p, _ = self._kprov()
+        env = p.get_financial_statements("TCS.NS", "income", "annual")
+        self.assertEqual(env["status"], "delayed")
+        self.assertEqual(env["data"]["reports"][0]["Net Income"], "48000.00")
+        # quarterly: /statement + stats seams absent -> honest miss
+        p._kget = lambda path, params: {}
+        env = p.get_financial_statements("TCS.NS", "income", "quarterly")
+        self.assertEqual(env["status"], "unavailable")
+        self.assertIn("quarterly", env["message"].lower())
+
+    def test_earnings_reported_eps(self):
+        p, _ = self._kprov()
+        env = p.get_earnings("TCS.NS")
+        annual = env["data"]["annual"]
+        self.assertEqual(annual[0]["fiscalDateEnding"], "2026-03-31")
+        # 48000 / 362 = 132.60
+        self.assertAlmostEqual(annual[0]["reportedEPS"], 132.60, places=1)
+
+    def test_estimates_ratings_plus_forecasts(self):
+        p, _ = self._kprov()
+        orig = p._kget
+
+        def kget(path, params):
+            if path == "/stock_forecasts":
+                return [{"horizon": "FY27", "eps": 150.0}]
+            if path == "/stock_target_price":
+                return {"target_price": 2400.0}
+            return orig(path, params)
+
+        p._kget = kget
+        env = p.get_estimates("TCS.NS")
+        d = env["data"]
+        self.assertEqual(d["analyst_ratings"]["no_of_recommendations"], 34)
+        self.assertEqual(d["forecasts"], [{"horizon": "FY27", "eps": 150.0}])
+        self.assertEqual(d["target_price"], {"value": 2400.0})
+
+    def test_actions_news_holdings(self):
+        p, _ = self._kprov()
+        d = p.get_actions("TCS.NS")["data"]
+        self.assertEqual(d["dividends"][0]["amount"], 12)
+        items = p.get_news("TCS.NS")["data"]["items"]
+        self.assertTrue(items[0]["url"].startswith("https://www.livemint.com/"))
+        own = p.get_shareholding("TCS.NS")["data"]["ownership"]
+        self.assertEqual(own[0]["category"], "Promoter")
+        self.assertEqual(own[0]["percentage"], 72.10)
+
+    def test_indian_history_and_stats(self):
+        p, _ = self._kprov(
+            payload={
+                "data": [
+                    {"date": "2026-09-01", "close": 2100.0, "volume": 1000},
+                    {"date": "2026-09-02", "close": 2105.0, "volume": 1100},
+                ]
+            }
+        )
+        env = p.get_indian_history("TCS.NS", "1m", "price")
+        self.assertEqual(env["status"], "delayed")
+        self.assertEqual(len(env["data"]["bars"]), 2)
+        self.assertEqual(env["data"]["bars"][0]["c"], 2100.0)
+        env = p.get_historical_stats("TCS.NS", "ratios")
+        self.assertEqual(env["status"], "delayed")
+        self.assertEqual(env["data"]["stat"], "ratios")
+        bad = p.get_indian_history("TCS.NS", "9Z", "price")
+        self.assertEqual(bad["status"], "error")
+        bad = p.get_historical_stats("TCS.NS", "nope")
+        self.assertEqual(bad["status"], "error")
+
+    def test_global_symbol_never_calls_keyed_api(self):
+        p, calls = self._kprov()
+        for fn in (
+            lambda: p.get_ratios("MSFT"),
+            lambda: p.get_earnings("MSFT"),
+            lambda: p.get_actions("MSFT"),
+        ):
+            fn()
+        self.assertEqual(calls, [])
+
+    def test_history_and_search_pass_through(self):
+        p, _ = self._kprov()
         self.assertEqual(
             p.get_historical_prices("TCS.NS")["status"], "unavailable"
         )
@@ -270,13 +543,14 @@ class TestRegistryWiring(NoAuthTestCase):
 
         status = registry.providers_status()
         ind_api = next(p for p in status["providers"] if p["id"] == "indian-api")
+        # Dual-mode: never key_REQUIRED; key_configured reflects the env.
         self.assertFalse(ind_api["key_required"])
-        self.assertTrue(ind_api["key_configured"])
+        self.assertFalse(ind_api["key_configured"])  # no key in test env
         self.assertTrue(ind_api["capabilities"]["quote"])
         self.assertTrue(ind_api["capabilities"]["fundamentals"])
-        self.assertFalse(ind_api["capabilities"]["statements"])
-        self.assertFalse(ind_api["capabilities"]["estimates"])
-        self.assertFalse(ind_api["capabilities"]["holdings"])
+        self.assertTrue(ind_api["capabilities"]["statements"])
+        self.assertTrue(ind_api["capabilities"]["estimates"])
+        self.assertTrue(ind_api["capabilities"]["holdings"])
 
 
 if __name__ == "__main__":

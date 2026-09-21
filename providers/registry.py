@@ -46,6 +46,7 @@ _tradingview = TradingViewProvider()
 
 # QUOTE chain: Indian leg first (passes non-Indian symbols through),
 # then Yahoo -> Twelve Data -> Alpha Vantage (scarce, 6 h cache).
+# The Indian leg answers keyed, else free no-auth quote/fundamentals.
 market_data = FallbackMarketData(
     legs=[
         ("indian-api", _indianapi),
@@ -149,14 +150,15 @@ def providers_status() -> dict:
                 if health.get("indian-api", {}).get("state") == "ok"
                 and health.get("indian-api", {}).get("last_ok")
                 else "unreachable",
-                "detail": "Free no-auth NSE/BSE feed (MIT upstream, "
-                "quoteSummary-backed). Delayed quote plus market "
-                "fundamentals (market cap, P/E, EPS, book value, "
-                "dividend yield, sector, industry, 52W range). No "
-                "statements, estimates, earnings series, ownership "
-                "or news — those stay on their legitimate providers.",
+                "detail": "NSE/BSE leg (x-api-key when configured, else "
+                "free no-auth quote + market fundamentals). Keyed: quote, "
+                "statements, history, stats, actions, news, forecasts, "
+                "targets, ownership. No-auth: quote, sector/industry, "
+                "market cap, P/E, EPS, book value, dividend yield, 52W.",
                 "key_required": False,
-                "key_configured": True,
+                "key_configured": bool(
+                    (os.environ.get("INDIAN_STOCK_MARKET_API_KEY") or "").strip()
+                ),
                 "capabilities": _base.describe(_indianapi),
                 "health": health.get("indian-api", {}),
                 "budget": _indianapi.budget_snapshot(),

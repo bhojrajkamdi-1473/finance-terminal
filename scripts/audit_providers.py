@@ -212,7 +212,10 @@ def main(argv: list[str]) -> int:
     print("== Credentials (booleans only, values never printed) ==")
     print(f"  ALPHA_VANTAGE_API_KEY configured:     {_has('ALPHA_VANTAGE_API_KEY')}")
     print(f"  TWELVE_DATA_API_KEY configured:         {_has('TWELVE_DATA_API_KEY')}")
-    print("  Indian Stock Market API:                  no-auth (no key required)")
+    print(
+        f"  INDIAN_STOCK_MARKET_API_KEY configured: {_has('INDIAN_STOCK_MARKET_API_KEY')}"
+        " (absent → free no-auth quote + market fundamentals)"
+    )
     print()
 
     yah = YahooMarketDataProvider()

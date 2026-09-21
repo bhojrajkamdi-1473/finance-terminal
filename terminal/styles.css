@@ -148,10 +148,22 @@ input.in:focus,select.in:focus,textarea.in:focus{outline:2px solid var(--acc);ou
 textarea.in{width:100%;min-height:90px;resize:vertical}
 label.f{display:flex;flex-direction:column;gap:3px;font-size:10px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--slate)}
 .tabs{display:flex;gap:2px;border-bottom:1px solid var(--line-2);margin:12px 0;overflow-x:auto;background:transparent}
+.tabs.sticky{position:sticky;top:0;background:var(--bg);z-index:10;padding-top:4px}
 .tabs button{background:none;border:none;color:var(--slate);padding:8px 12px;cursor:pointer;font-size:12.5px;font-weight:600;border-bottom:2px solid transparent;white-space:nowrap}
-.tabs button.on{color:var(--ink);border-bottom-color:var(--acc)}
+.tabs button.on{color:var(--acc-ink);border-bottom-color:var(--acc);font-weight:700}
 .tabs button:hover{color:var(--ink)}
 .tabs button:focus-visible{outline:2px solid var(--acc);outline-offset:-2px}
+/* data-sources rows: user-facing provenance, not a debug console */
+.dsrc{display:grid;gap:0;margin-top:4px}
+.dsrc .dr{display:grid;grid-template-columns:130px 1fr;gap:10px;padding:5px 0;border-bottom:1px solid var(--line);font-size:11.5px;align-items:baseline}
+.dsrc .dr:last-child{border-bottom:none}
+.dsrc .dl{font-size:9.5px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--slate)}
+.dsrc .dv{font-family:var(--mono);font-size:11px;color:var(--ink-2)}
+.dsrc .dv .src{display:inline}
+/* filter chips (news categories) */
+.fchips{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 8px}
+.fchips button{background:#fff;border:1px solid var(--line-2);color:var(--slate);border-radius:20px;padding:2px 11px;font-size:11px;font-weight:600;cursor:pointer}
+.fchips button.on{background:var(--acc);border-color:var(--acc);color:#fff}
 /* ---------- states ---------- */
 .skel{background:linear-gradient(90deg,#e8ecf1 25%,#f4f6f9 50%,#e8ecf1 75%);background-size:200% 100%;animation:sk 1.2s infinite;border-radius:var(--r-sm);min-height:16px;margin:6px 0}
 @keyframes sk{to{background-position:-200% 0}}
@@ -182,8 +194,9 @@ canvas.chart{width:100%;height:300px;display:block;cursor:crosshair}
 .alloc span{display:block;height:100%}
 .alloc-legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11px;color:var(--slate);margin-top:6px}
 .alloc-legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px}
-/* company header */
-.co-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+/* company header: institutional equity-research masthead */
+.co-head{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap;align-items:flex-start}
+.co-eyebrow{font-size:9.5px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);margin-bottom:2px}
 .co-id h1{font-size:17px;margin:0}
 .co-id .tk{font-family:var(--mono);font-size:11px;color:var(--slate);margin-top:2px}
 .co-id .mt{font-size:11px;color:var(--slate);margin-top:2px}
