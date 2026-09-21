@@ -665,6 +665,13 @@ class IndianApiProvider(MarketDataProvider):
         else:
             change = None
         previous_close = round(price - change, 2) if change is not None else None
+        free = self._free_detail_safe(symbol)
+        open_px = _num(sd.get("open"))
+        if open_px is None and free.get("open") is not None:
+            open_px = _num(free.get("open"))
+        volume = _num(sd.get("volume"))
+        if volume is None and free.get("volume") is not None:
+            volume = _num(free.get("volume"))
         quote = {
             "symbol": symbol,
             "name": payload.get("companyName"),
@@ -673,10 +680,10 @@ class IndianApiProvider(MarketDataProvider):
             "instrument_type": payload.get("instrumentType", "Equity"),
             "price": price,
             "previous_close": previous_close,
-            "open": _num(sd.get("open")),
+            "open": open_px,
             "day_high": _num(sd.get("high")),
             "day_low": _num(sd.get("low")),
-            "volume": _num(sd.get("volume")),
+            "volume": volume,
             "change": change,
             "change_pct": pct,
             "fifty_two_week_high": _num(sd.get("yhigh"))
@@ -825,6 +832,13 @@ class IndianApiProvider(MarketDataProvider):
             return self._keyed_ratios(symbol, payload)
         return self._free_ratios(symbol)
 
+    def _free_detail_safe(self, symbol: str) -> dict:
+        """No-auth detail for field-level fallback; {} on any failure."""
+        try:
+            return self._detail(symbol)
+        except Exception:
+            return {}
+
     def _keyed_ratios(self, symbol: str, payload: dict) -> dict:
         km = payload.get("keyMetrics") or {}
         cp = payload.get("companyProfile") or {}
@@ -894,6 +908,40 @@ class IndianApiProvider(MarketDataProvider):
             "SharesUnit": "Crore shares",
             "MarketCapKind": "REPORTED",
         }
+        # Field-level fallback: the keyed feed is thin for some symbols.
+        # Fill nulls from the provider's own no-auth feed (same leg,
+        # disclosed below). Units converted: no-auth market cap is INR
+        # raw, keyed unit is ₹ Crore.
+        free = self._free_detail_safe(symbol)
+        fallbacks = []
+        if free:
+            conv = {
+                "MarketCapitalization": ("market_cap", 1e-7),
+                "PERatio": ("pe_ratio", 1.0),
+                "EPS": ("eps", 1.0),
+                "BookValue": ("book_value", 1.0),
+                "DividendYield": ("dividend_yield", 1.0),
+                "52WeekHigh": ("year_high", 1.0),
+                "52WeekLow": ("year_low", 1.0),
+            }
+            for flat_key, (detail_key, scale) in conv.items():
+                if data.get(flat_key) is None and free.get(detail_key) is not None:
+                    try:
+                        data[flat_key] = round(
+                            float(free[detail_key]) * scale, 4
+                        )
+                        fallbacks.append(flat_key)
+                    except (TypeError, ValueError):
+                        continue
+            if data.get("Sector") is None and free.get("sector"):
+                data["Sector"] = free["sector"]
+                fallbacks.append("Sector")
+            if data.get("Industry") is None and free.get("industry"):
+                data["Industry"] = free["industry"]
+                fallbacks.append("Industry")
+        if fallbacks:
+            data["_fallback_fields"] = sorted(set(fallbacks))
+            data["_fallback_source"] = "indian-api quoteSummary (no-auth)"
         env = live_envelope(SOURCE, data, delayed=True)
         env["timeliness"] = "END-OF-DAY"
         env["timeliness_note"] = (

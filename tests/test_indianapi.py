@@ -376,7 +376,10 @@ class KeyedTestCase(unittest.TestCase):
         os.environ.clear()
         os.environ.update(self._old)
 
-    def _kprov(self, payload=None, fail=None):
+    def _kprov(self, payload=None, fail=None, free_detail=None):
+        from providers.indianapi import _UpstreamError
+        from providers.indianapi import unavailable as _unav
+
         p = IndianApiProvider()
         calls = []
 
@@ -389,6 +392,13 @@ class KeyedTestCase(unittest.TestCase):
             return _kstock()
 
         p._kget = kget  # keyed transport seam (no network, no key sent)
+        if free_detail is None:
+            # No-auth leg stubbed to fail closed: no network in unit tests.
+            p._detail = lambda s: (_ for _ in ()).throw(
+                _UpstreamError(_unav("indian-api", "free leg stubbed off"))
+            )
+        else:
+            p._detail = lambda s: free_detail
         return p, calls
 
 
@@ -520,6 +530,32 @@ class TestKeyedDomains(KeyedTestCase):
         ):
             fn()
         self.assertEqual(calls, [])
+
+    def test_field_fallback_fills_thin_keyed_rows(self):
+        # Keyed payload with nulls + free detail with values (INR raw
+        # market cap converted to ₹ Crore) — disclosed via _fallback_fields.
+        thin = _kstock()
+        thin["keyMetrics"] = {"valuation": [], "persharedata": []}
+        free = {
+            "market_cap": 7616073826304.0,
+            "pe_ratio": 15.29,
+            "eps": 137.67,
+            "book_value": 303.01,
+            "dividend_yield": 3.09,
+            "year_high": 3400.0,
+            "year_low": 2800.0,
+            "sector": "Technology",
+            "industry": "IT Services",
+            "market_time": None,
+            "company_name": "TCS",
+            "currency": "INR",
+        }
+        p, _ = self._kprov(payload=thin, free_detail=free)
+        d = p.get_ratios("TCS.NS")["data"]
+        self.assertAlmostEqual(d["MarketCapitalization"], 761607.38, places=1)
+        self.assertEqual(d["PERatio"], 15.29)
+        self.assertIn("MarketCapitalization", d["_fallback_fields"])
+        self.assertEqual(d["_fallback_source"], "indian-api quoteSummary (no-auth)")
 
     def test_history_and_search_pass_through(self):
         p, _ = self._kprov()
