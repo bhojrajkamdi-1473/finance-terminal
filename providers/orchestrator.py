@@ -36,6 +36,7 @@ EARNINGS_TTL = 24 * 3600.0
 ESTIMATES_TTL = 24 * 3600.0
 NEWS_TTL = 10 * 60.0
 ACTIONS_TTL = 24 * 3600.0
+IPO_TTL = 3600.0
 
 # Bump when merge/fallback semantics change so stale envelopes from an
 # older build are never served for the rest of a long TTL window.
@@ -934,6 +935,95 @@ class ProviderManager:
             }
 
         return self._cached_or(key, VALUATION_TTL, compute)
+
+    def get_ipo_dashboard(self) -> dict:
+        """IPO dashboard: IPO Guru (keyed, Indian) + AV calendar merged.
+
+        Rows stay source-tagged; GMP/subscription surface only with
+        source + timestamp. Disagreeing GMP sources are shown side by
+        side (GMP DISCREPANCY), never averaged.
+        """
+        key = "oipo:dashboard"
+
+        def compute() -> dict:
+            from providers import ipo as _ipo
+            from providers import ipoguru as _guru
+
+            calls: list[tuple[str, Callable[[], dict]]] = []
+            skipped: list[dict] = []
+            if _guru.key_configured():
+                calls.append(("ipo-guru", lambda: _guru.get_ipos()))
+            else:
+                skipped.append({"provider": "ipo-guru",
+                                "reason": "IPOGURU_API_KEY not configured."})
+            av_ok, av_reason = self._av_ready()
+            if av_ok and self.alphavantage is not None:
+                calls.append(("alphavantage",
+                              lambda: self.alphavantage.get_ipo_calendar()))
+            else:
+                skipped.append({"provider": "alphavantage",
+                                "reason": av_reason or "Leg not wired."})
+            results = self._fanout(key + ":fan", IPO_TTL, calls)
+            rows: list[dict] = []
+            for name in ("ipo-guru", "alphavantage"):
+                env = results.get(name, {})
+                if env.get("status") not in ("live", "delayed"):
+                    continue
+                for row in (env.get("data") or {}).get("rows") or []:
+                    if isinstance(row, dict):
+                        tagged = dict(row)
+                        tagged["_feed"] = name
+                        rows.append(tagged)
+            if not rows:
+                out = _honest_unavailable("IPO calendar", results, skipped)
+                out["gmp"] = _ipo.gmp_unavailable()
+                out["subscription"] = _ipo.subscription_unavailable()
+                return out
+            buckets = _ipo.classify(rows)
+            gmp_sources = [
+                {"source": "IPO Guru", "value": r.get("gmp_value"),
+                 "percent": r.get("gmp_percent"),
+                 "updated_at": r.get("gmp_updated_at"),
+                 "company": r.get("company_name")}
+                for r in rows
+                if r.get("gmp_value") is not None
+            ]
+            if gmp_sources:
+                gmp = {"status": "live", "source": "ipo-guru",
+                       "label": _ipo.GMP_LABEL, "data": gmp_sources,
+                       "discrepancy_note": _ipo.DISCREPANCY_LABEL + ": values shown "
+                       "per source, never averaged." if len({g["value"] for g in gmp_sources}) > 1 else None,
+                       "message": None}
+            else:
+                gmp = _ipo.gmp_unavailable()
+            subs = [r for r in rows if r.get("subscription_total") is not None]
+            subscription = (
+                {"status": "live", "source": "ipo-guru",
+                 "data": [{"company": r.get("company_name"),
+                           "qib": r.get("subscription_qib"),
+                           "nii": r.get("subscription_nii"),
+                           "retail": r.get("subscription_retail"),
+                           "total": r.get("subscription_total"),
+                           "updated_at": r.get("subscription_updated_at")}
+                          for r in subs],
+                 "message": None}
+                if subs else _ipo.subscription_unavailable()
+            )
+            return {
+                "status": "live",
+                "source": "orchestrator",
+                "as_of": _now_iso(),
+                "timeliness": "DELAYED",
+                "data": {"rows": rows},
+                "buckets": buckets,
+                "gmp": gmp,
+                "subscription": subscription,
+                "providers_queried": _queried(results),
+                "reconciliation": {"skipped": skipped},
+                "message": None,
+            }
+
+        return self._cached_or(key, IPO_TTL, compute)
 
     def get_earnings(self, symbol: str) -> dict:
         """AV earnings + TD earnings rows, reported-EPS cross-check."""

@@ -31,7 +31,7 @@
     else if (parts[0] === "research") P.pResearch();
     else if (parts[0] === "ipos") P.pIPOs();
     else if (parts[0] === "earnings") P.pEarnings();
-    else if (parts[0] === "actions") P.pCompanies();
+    else if (parts[0] === "actions") P.pActions();
     else if (parts[0] === "macro") P.pMacro();
     else if (parts[0] === "settings") P.pSettings();
     else P.pDashboard();
@@ -114,8 +114,31 @@
           });
           items = res.slice(0, 8);
           var wlMatches = [];
+          var FX = [["Screener", "#/screener"], ["Compare", "#/compare"], ["Watchlist", "#/watchlist"],
+            ["Portfolio", "#/portfolio"], ["Market news", "#/news"], ["IPO dashboard", "#/ipos"],
+            ["Earnings calendar", "#/earnings"], ["Corporate actions", "#/actions"], ["Macro", "#/macro"],
+            ["Markets", "#/markets"], ["Research notes", "#/research"], ["Settings", "#/settings"]];
+          var fxMatches = FX.filter(function (f) { return f[0].toUpperCase().indexOf(ql) >= 0; }).slice(0, 2);
+          var ipoMatches = [], ipoAt = 0, ipoCache = null;
+          try { ipoCache = JSON.parse(sessionStorage.getItem("ft-ipo") || "null"); } catch (e) { ipoCache = null; }
+          function fxRow(f, i) {
+            return '<div class="sr" role="option" data-i="f' + i + '"><span><span class="nm">' + F.esc(f[0]) + "</span> " +
+              "<span class='tk'>feature</span></span><span class='px'>→</span></div>";
+          }
+          function ipoRow(x, i) {
+            return '<div class="sr" role="option" data-i="p' + i + '"><span><span class="nm">' + F.esc(x.company_name || x.name || "?") + "</span> " +
+              "<span class='tk'>IPO · " + F.esc(x._bucket || x.status || "") + "</span></span><span class='px'>→</span></div>";
+          }
           function render() {
             var html = "";
+            if (fxMatches.length) {
+              html += "<div class='src' style='padding:6px 12px'>FEATURES</div>" +
+                fxMatches.map(function (x, i) { return fxRow(x, i); }).join("");
+            }
+            if (ipoMatches.length) {
+              html += "<div class='src' style='padding:6px 12px'>IPOS</div>" +
+                ipoMatches.map(function (x, i) { return ipoRow(x, i); }).join("");
+            }
             if (wlMatches.length) {
               html += "<div class='src' style='padding:6px 12px'>IN WATCHLIST</div>" +
                 wlMatches.map(function (x, i) { return row(x, "w" + i); }).join("");
@@ -124,12 +147,18 @@
             box.innerHTML = html || '<div class="sr"><span>No matches</span></div>';
             box.classList.remove("hidden");
             // merge watchlist rows into clickable items
-            var all = wlMatches.concat(items);
+            var all = fxMatches.concat(ipoMatches, wlMatches, items);
             box.querySelectorAll(".sr").forEach(function (d) {
               d.onclick = function () {
-                var k = d.getAttribute("data-i"), it;
-                if (String(k).charAt(0) === "w") it = all[Number(String(k).slice(1))];
-                else it = all[wlMatches.length + Number(k)];
+                var k = String(d.getAttribute("data-i"));
+                if (k.charAt(0) === "f") {
+                  var f = fxMatches[Number(k.slice(1))];
+                  hide(); inp.value = ""; location.hash = f[1]; return;
+                }
+                if (k.charAt(0) === "p") { hide(); inp.value = ""; location.hash = "#/ipos"; return; }
+                var it;
+                if (k.charAt(0) === "w") it = all[fxMatches.length + ipoMatches.length + Number(k.slice(1))];
+                else it = all[fxMatches.length + ipoMatches.length + wlMatches.length + Number(k)];
                 go(it.symbol, it.name);
               };
             });
@@ -157,6 +186,22 @@
               return (w.symbol + " " + (w.name || "")).toUpperCase().indexOf(ql) >= 0;
             }).slice(0, 3);
             render();
+          }
+          /* IPO name matches (cached hourly in session). */
+          function ipoFilter(rows) {
+            ipoMatches = (rows || []).filter(function (w) {
+              return ((w.company_name || w.name || "") + " " + (w.symbol || "")).toUpperCase().indexOf(ql) >= 0;
+            }).slice(0, 3);
+            if (ipoMatches.length && !box.classList.contains("hidden")) render();
+          }
+          if (ipoCache && Date.now() - (ipoCache.at || 0) < 3600000) {
+            ipoFilter(ipoCache.rows);
+          } else {
+            window.FT_API.get("ipo").then(function (ir) {
+              var rows = (((ir.body || {}).data || {}).rows) || [];
+              try { sessionStorage.setItem("ft-ipo", JSON.stringify({ at: Date.now(), rows: rows.slice(0, 200) })); } catch (e) { /* ignore */ }
+              ipoFilter(rows);
+            }).catch(function () { /* search works without IPO leg */ });
           }
         });
       }, 220);
@@ -215,12 +260,6 @@
     window.FT_PAGES.init();
     buildNav(); bindSearch(); clock(); providerPill();
     document.getElementById("top-refresh").onclick = function () { route(); };
-    // Corp-actions nav prompts for a symbol
-    document.querySelector('[data-r="actions"]').addEventListener("click", function (e) {
-      e.preventDefault();
-      var s = prompt("Symbol for corporate actions (e.g. RELIANCE.NS)?", "RELIANCE.NS");
-      if (s) location.hash = "#/company/" + encodeURIComponent(s.trim().toUpperCase()) + "/Actions";
-    });
     if (!location.hash) location.hash = "#/dashboard";
     route();
   });

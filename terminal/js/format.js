@@ -139,6 +139,63 @@
     return '<div class="prov">Source <b>' + esc(srcName(source)) + "</b> · " +
       esc(status || "?") + " · as of " + esc(asOf || "unavailable") + "</div>";
   }
+  /* Security typing: STOCK vs INDEX vs ETF. Indexes get index-level
+     presentation (level, breadth, trend) — never P/E, EPS, ROE cards. */
+  var INDEX_SYMS = ["^NSEI", "^NSEBANK", "^BSESN", "^CNXIT", "^CNXAUTO",
+    "NIFTY_FIN_SERVICE.NS", "^CNXFMCG", "^CNXPHARMA",
+    "^GSPC", "^IXIC", "^RUT", "^FTSE", "^STOXX50E", "^N225", "^HSI"];
+  function secType(symbol, quote) {
+    var s = String(symbol || "").toUpperCase();
+    var q = quote || {};
+    var t = String(q.instrument_type || q.type || "");
+    if (/etf/i.test(t) || / ETF$/.test(String(q.name || ""))) return "ETF";
+    if (s.charAt(0) === "^" || INDEX_SYMS.indexOf(s) >= 0 || /index/i.test(t)) return "INDEX";
+    return "STOCK";
+  }
+  function fmtStmt(v, ccy) {
+    /* Statement figures: Indian scale for INR (Cr / L Cr), M/B for rest.
+       Unit is shown once above the table — never mixed per cell. */
+    if (v === null || v === undefined || isNaN(Number(v))) return "—";
+    var n = Number(v), a = Math.abs(n);
+    if (ccy === "INR") {
+      if (a >= 1e12) return (n / 1e12).toFixed(2);
+      if (a >= 1e7) return (n / 1e7).toFixed(2);
+      if (a >= 1e5) return (n / 1e5).toFixed(2);
+      return n.toFixed(2);
+    }
+    if (a >= 1e9) return (n / 1e9).toFixed(2);
+    if (a >= 1e6) return (n / 1e6).toFixed(2);
+    return n.toFixed(2);
+  }
+  function stmtUnit(ccy, magnitude) {
+    if (ccy === "INR") {
+      if ((magnitude || 0) >= 1e12) return "₹ lakh crore";
+      return "₹ crore";
+    }
+    if ((magnitude || 0) >= 1e9) return "$ billion";
+    return "$ million";
+  }
+  function fmtPrice(v, ccy) {
+    if (v === null || v === undefined || isNaN(Number(v))) return "—";
+    return (ccy ? ccy + " " : "") + Number(v).toLocaleString("en-IN", {
+      minimumFractionDigits: 2, maximumFractionDigits: 2,
+    });
+  }
+  function fmtMult(v) {
+    if (v === null || v === undefined || isNaN(Number(v))) return "—";
+    return Number(v).toFixed(1) + "x";
+  }
+  function fmtTimeHM(ts) {
+    /* "24 Sep · 4:35 PM" for news rows. Accepts epoch or date strings. */
+    var d = null;
+    if (typeof ts === "number") d = new Date(ts * 1000);
+    else if (typeof ts === "string" && ts) d = new Date(ts);
+    if (!d || isNaN(d)) return "—";
+    try {
+      return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "Asia/Kolkata" }) +
+        " · " + d.toLocaleTimeString("en-GB", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" }).toUpperCase();
+    } catch (e) { return d.toISOString().slice(0, 16).replace("T", " "); }
+  }
   /* Company identity registry: canonical display metadata.
      Official logo assets ONLY with verified source (domain + asset URL
      confirmed against the company's own media). No verified asset =>
@@ -182,6 +239,7 @@
   window.FT_FMT = {
     fmtNum, fmtInt, fmtPct, fmtMoney, fmtIN, fmtDate, fmtDateTime, esc,
     dirClass, statusPill, srcName, fmtIST, secId, typeBadge, prov,
-    logo, logoFallback, LOGOS,
+    logo, logoFallback, LOGOS, secType, INDEX_SYMS,
+    fmtStmt, stmtUnit, fmtPrice, fmtMult, fmtTimeHM,
   };
 })();

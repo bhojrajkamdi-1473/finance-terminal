@@ -620,13 +620,8 @@
       el("co-wl").onclick = function () { addWatch(sym, q.name); };
       el("co-cmp").onclick = function () { location.hash = "#/compare"; sessionStorage.setItem("ft-cmp", sym); };
       el("co-pf").onclick = function () {
-        var qty = prompt("Quantity held for " + sym + "?", "10");
-        if (qty === null) return;
-        var px = prompt("Average buy price (" + (q.currency || "") + ")?", String(q.price || ""));
-        if (px === null) return;
-        API.post("portfolio", { symbol: sym, name: q.name || "", quantity: Number(qty), avg_price: Number(px) }).then(function (r) {
-          toast(r.body.ok ? sym + " added to portfolio." : ("Failed: " + (r.body.error || r.http)));
-        });
+        if (window.FT_CX && window.FT_CX.addHolding) { window.FT_CX.addHolding(sym, q || {}); return; }
+        toast("Portfolio entry is available on the new company page.");
       };
     }
   }

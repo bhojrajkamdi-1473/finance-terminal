@@ -577,33 +577,17 @@ class Handler(BaseHTTPRequestHandler):
         )
 
     def _handle_ipo(self, qs):
-        """IPO dashboard: classified calendar buckets + GMP/subscription
-        states. GMP is never synthesised: without a verified source the
-        tab reports honest unavailable with the labelling rules."""
+        """IPO dashboard via the orchestrator: IPO Guru + AV calendar
+        merged, source-tagged. GMP is never synthesised."""
         from providers import ipo as _ipo
 
-        def fetch():
-            return registry.fundamentals.get_ipo_calendar()
-
-        hit = _domain_cache.get("ipo:calendar")
-        if hit is not None:
-            env = dict(hit)
-            env["served_from"] = "cache"
-        else:
-            env = fetch()
-            if env.get("status") == "live":
-                _domain_cache.set("ipo:calendar", env, refresh.IPO_TTL)
-                env = dict(env)
-            env["served_from"] = env.get("served_from", "provider")
-        rows = ((env.get("data") or {}).get("rows")) or []
-        buckets = _ipo.classify(rows) if env.get("status") == "live" else {}
+        env = registry.manager.get_ipo_dashboard()
         out = dict(env)
-        out["buckets"] = buckets
-        out["gmp"] = _ipo.gmp_unavailable()
-        out["subscription"] = _ipo.subscription_unavailable()
+        out.setdefault("gmp", _ipo.gmp_unavailable())
+        out.setdefault("subscription", _ipo.subscription_unavailable())
         out["sources"] = [_ipo.ipoguru_status(),
                           {"provider": "alpha-vantage",
-                           "state": "live" if env.get("status") == "live" else "unavailable",
+                           "state": "live" if env.get("status") == "live" else "standby",
                            "detail": "IPO_CALENDAR feed (25 req/day free)."}]
         return _send_json(self, out, _envelope_status(env))
 
@@ -621,6 +605,28 @@ class Handler(BaseHTTPRequestHandler):
         valuation = registry.manager.get_valuation(symbol, quote_env)
         statements = registry.manager.get_statements(symbol, "income", "annual")
         estimates = registry.manager.get_estimates(symbol)
+        gmp = _ipo.gmp_unavailable(symbol)
+        subscription = _ipo.subscription_unavailable(symbol)
+        try:
+            from providers import ipoguru as _guru
+
+            if _guru.key_configured():
+                guru_env = _guru.get_ipos()
+                if guru_env.get("status") in ("live", "delayed"):
+                    cname = ((profile.get("data") or {}).get("name") or "").lower()
+                    for row in (guru_env.get("data") or {}).get("rows") or []:
+                        gname = str(row.get("company_name") or "").lower()
+                        if cname and gname and (cname in gname or gname in cname):
+                            if row.get("gmp_value") is not None:
+                                gmp = {"status": "live", "source": "ipo-guru",
+                                       "label": _ipo.GMP_LABEL, "data": [row],
+                                       "message": None}
+                            if row.get("subscription_total") is not None:
+                                subscription = {"status": "live", "source": "ipo-guru",
+                                                "data": [row], "message": None}
+                            break
+        except Exception:
+            pass
         return _send_json(self, {
             "ok": True,
             "symbol": symbol,
@@ -628,8 +634,8 @@ class Handler(BaseHTTPRequestHandler):
             "valuation": valuation,
             "financials": statements,
             "estimates": estimates,
-            "gmp": _ipo.gmp_unavailable(symbol),
-            "subscription": _ipo.subscription_unavailable(symbol),
+            "gmp": gmp,
+            "subscription": subscription,
         })
 
     def _handle_cached_domain(self, cache_key: str, ttl: float, fetch):

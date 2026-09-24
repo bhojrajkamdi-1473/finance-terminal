@@ -8,6 +8,11 @@
   var API, F;
   var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings",
     "News", "Actions", "Ownership", "Charts", "Technicals", "Research"];
+  /* Indexes get their own tab set and metric model — never P/E, EPS,
+     ROE cards. Every renderer below branches on secType(). */
+  var INDEX_TABS = ["Overview", "News", "Charts", "Technicals", "Research"];
+  var STOCK_ONLY = { Financials: 1, Valuation: 1, Estimates: 1, Earnings: 1, Ownership: 1, Actions: 1 };
+  function secType(sym, quote) { return window.FT_FMT.secType(sym, quote); }
   var timers = [];
   function later(ms, fn) { var id = setInterval(function () { fn(); }, ms); timers.push(id); }
   function clearCx() { timers.forEach(clearInterval); timers = []; }
@@ -77,12 +82,14 @@
   function pCompany(sym, tab) {
     API = window.FT_API; F = window.FT_FMT;
     sym = String(sym || "").toUpperCase();
-    if (CTABS.indexOf(tab) < 0) tab = "Overview";
+    var isIdx = secType(sym) === "INDEX";
+    var tabs = isIdx ? INDEX_TABS : CTABS;
+    if (tabs.indexOf(tab) < 0) tab = "Overview";
     clearCx();
     V().innerHTML =
       '<div class="cx-wrap"><div class="cx-head" id="cx-head">' + skel(2) + "</div>" +
       '<nav class="cx-tabs" role="tablist" aria-label="Company sections" id="cx-tabs">' +
-      CTABS.map(function (t) {
+      tabs.map(function (t) {
         return '<button role="tab" aria-selected="' + (t === tab) + '" data-t="' + t + '" class="' + (t === tab ? "on" : "") + '">' + t + "</button>";
       }).join("") + "</nav>" +
       '<div class="cx-grid"><div class="cx-main" id="cx-main">' + skel(5) + "</div>" +
@@ -174,6 +181,25 @@
       el.onkeydown = function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
     });
   }
+  /* Index metric strip: level context only — never stock multiples. */
+  function paintIndexStrip(sym, q, env) {
+    if (!E("cx-strip")) return;
+    var hi = q.fifty_two_week_high, lo = q.fifty_two_week_low, px = q.price;
+    var dist = (hi !== null && hi !== undefined && px !== null && px !== undefined && hi) ?
+      ((px - hi) / hi * 100) : null;
+    function cell(l, v, s) {
+      return '<div class="cx-m"><div class="l">' + l + '</div><div class="v">' + (v === null ? "—" : v) +
+        '</div><div class="s">' + esc(s || "") + "</div></div>";
+    }
+    E("cx-strip").innerHTML =
+      cell("Day high", (q.day_high === null || q.day_high === undefined) ? null : F.fmtNum(q.day_high), "index level") +
+      cell("Day low", (q.day_low === null || q.day_low === undefined) ? null : F.fmtNum(q.day_low), "index level") +
+      cell("52-week high", (hi === null || hi === undefined) ? null : F.fmtNum(hi), "index level") +
+      cell("52-week low", (lo === null || lo === undefined) ? null : F.fmtNum(lo), "index level") +
+      cell("Distance from high", dist === null ? null : F.fmtPct(dist), "calculated") +
+      cell("Prev close", (q.previous_close === null || q.previous_close === undefined) ? null : F.fmtNum(q.previous_close), "index level") +
+      '<div id="cx-insp"></div>';
+  }
   function showInspector(info) {
     var host = E("cx-insp");
     if (!host || !info) return;
@@ -188,6 +214,40 @@
       '<div class="cx-note">Calculated ' + esc(info.calculated_at || "") + ' · <button class="cx-btn2" id="cx-insp-x">Close</button></div></div>';
     E("cx-insp-x").onclick = function () { host.innerHTML = ""; };
   }
+  /* Accessible inline modal for portfolio entry (replaces browser prompt). */
+  function openHoldingModal(sym, q) {
+    closeHoldingModal();
+    var back = document.createElement("div");
+    back.className = "modal-back";
+    back.id = "cx-modal";
+    back.innerHTML = '<div class="modal" role="dialog" aria-modal="true" aria-label="Add holding">' +
+      "<h3>Add holding — " + esc(sym) + "</h3>" +
+      "<label class='lbl' for='cx-m-q'>Quantity</label>" +
+      "<input id='cx-m-q' class='cx-in' style='width:100%' value='10' inputmode='decimal'>" +
+      "<label class='lbl' for='cx-m-p' style='margin-top:8px;display:block'>Average buy price (" + esc(q.currency || "") + ")</label>" +
+      "<input id='cx-m-p' class='cx-in' style='width:100%' value='" + esc(String(q.price || "")) + "' inputmode='decimal'>" +
+      "<div class='row'><button class='cx-btn2' id='cx-m-x'>Cancel</button>" +
+      "<button class='cx-btn' id='cx-m-ok'>Save holding</button></div></div>";
+    document.body.appendChild(back);
+    function done() { closeHoldingModal(); }
+    E("cx-m-x").onclick = done;
+    back.onclick = function (ev) { if (ev.target === back) done(); };
+    back.onkeydown = function (ev) { if (ev.key === "Escape") done(); };
+    E("cx-m-ok").onclick = function () {
+      API.post("portfolio", {
+        symbol: sym, name: q.name || "",
+        quantity: Number(E("cx-m-q").value), avg_price: Number(E("cx-m-p").value),
+      }).then(function (r) {
+        toast(r.body.ok ? sym + " added to portfolio." : "Could not save holding.");
+        done();
+      });
+    };
+    E("cx-m-q").focus();
+  }
+  function closeHoldingModal() {
+    var m = E("cx-modal");
+    if (m) m.remove();
+  }
   function loadHead(sym) {
     Promise.all([API.get("company", { symbol: sym }), API.get("quote", { symbol: sym })]).then(function (rs) {
       if (!E("cx-head")) return;
@@ -200,6 +260,7 @@
         '<div class="cx-idrow">' + F.logo(sym, nm, 40) +
         '<div><h1 class="cx-name">' + esc(nm) + "</h1>" +
         '<div class="cx-sub">' + esc(sym.replace(/\.(NS|BO)$/, "")) + (exch ? " · " + esc(exch) : "") + (country ? " · " + esc(country) : "") +
+        (secType(sym) === "INDEX" ? " · Index" : "") +
         ((p.sector || p.industry) ? " · " + esc([p.sector, p.industry].filter(Boolean).join(" — ")) : "") + "</div></div></div>" +
         '<div class="cx-pxrow"><div><div class="cx-px" id="cx-px">' + F.fmtNum(q.price) + " <small>" + esc(q.currency || "") + "</small></div>" +
         '<div class="cx-chg" id="cx-chg"><span class="' + dir(q.change_pct) + '">' + F.fmtPct(q.change_pct) + "</span> " +
@@ -215,15 +276,8 @@
         });
       };
       E("cx-cmp").onclick = function () { location.hash = "#/compare"; try { sessionStorage.setItem("ft-cmp", sym); } catch (e) { /* ignore */ } };
-      E("cx-pf").onclick = function () {
-        var qty = prompt("Quantity held for " + sym + "?", "10");
-        if (qty === null) return;
-        var px = prompt("Average buy price (" + (q.currency || "") + ")?", String(q.price || ""));
-        if (px === null) return;
-        API.post("portfolio", { symbol: sym, name: q.name || "", quantity: Number(qty), avg_price: Number(px) }).then(function (r) {
-          toast(r.body.ok ? sym + " added to portfolio." : "Could not save holding.");
-        });
-      };
+      E("cx-pf").onclick = function () { openHoldingModal(sym, q); };
+      if (secType(sym) === "INDEX") { paintIndexStrip(sym, q, qenv); return; }
       API.get("ratios", { symbol: sym }).then(function (r) {
         if (!E("cx-strip")) return;
         var d = (r.body && r.body.data) || {};
@@ -290,6 +344,13 @@
   function renderTab(sym, tab) {
     var m = E("cx-main");
     if (!m) return;
+    if (secType(sym) === "INDEX" && STOCK_ONLY[tab]) {
+      m.innerHTML = sec("Not applicable to indexes",
+        "<div class='cx-empty'><b>Index security</b><p>Financial statements, valuation multiples, " +
+        "estimates, earnings and ownership apply to listed companies — not to index levels.</p>" +
+        "<p class='why'>Use Overview for trend and breadth, Charts for history, Technicals for structure.</p></div>");
+      return;
+    }
     var R = {
       Overview: tOverview, Financials: tFinancials, Valuation: tValuation,
       Estimates: tEstimates, Earnings: tEarnings, News: tNews, Actions: tActions,
@@ -367,24 +428,102 @@
   }
   function tOverview(sym, main) { perf(sym, main); }
   /* statement table shared by financials */
+  /* Priority rows first, full statement expandable, one consistent unit. */
+  var STMT_PRIORITY = [
+    ["revenue", ["totalrevenue", "revenue", "revenues", "sales"]],
+    ["EBITDA", ["ebitda"]],
+    ["EBIT", ["ebit", "operatingincome", "operatingprofit"]],
+    ["PBT", ["incomebeforetax", "profitbeforetax", "pbt"]],
+    ["PAT", ["netincome", "netearnings", "pat", "netprofit"]],
+    ["EPS", ["dilutedEPS", "eps"]],
+  ];
+  function stmtKey(report, aliases) {
+    var keys = Object.keys(report || {});
+    for (var i = 0; i < aliases.length; i++) {
+      for (var j = 0; j < keys.length; j++) {
+        if (keys[j].toLowerCase().replace(/[^a-z]/g, "") === aliases[i]) return keys[j];
+      }
+    }
+    return null;
+  }
   function stmtTable(title, env) {
     if (!env || !env.data || !((env.data.reports || []).length)) {
-      return sec(title.toUpperCase(), empty(title, "No statement data is supplied by a configured provider right now."));
+      return sec(title, empty(title, "No statement data is supplied by a configured provider right now."));
     }
-    var d = env.data, reps = d.reports.slice(0, 4);
-    var keys = Object.keys(reps[0]).filter(function (k) { return k !== "fiscalDateEnding" && k !== "reportedCurrency" && k !== "date"; }).slice(0, 12);
-    var h = '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Particulars</th>' +
+    var d = env.data, reps = d.reports.slice(0, 4), ccy = d.currency || "";
+    var mag = 0;
+    reps.forEach(function (r) {
+      Object.keys(r).forEach(function (k) {
+        var n = Number(r[k]);
+        if (!isNaN(n) && Math.abs(n) > mag) mag = Math.abs(n);
+      });
+    });
+    var unit = F.stmtUnit(ccy, mag);
+    function rowCells(k) {
+      var vals = reps.map(function (r) {
+        if (k === null) return null;
+        var v = r[k];
+        var n = Number(v);
+        return (v === "None" || isNaN(n)) ? null : n;
+      });
+      var yoy = (vals[0] !== null && vals[1] !== null && vals[1] !== 0) ? (vals[0] - vals[1]) / Math.abs(vals[1]) * 100 : null;
+      return { vals: vals, yoy: yoy };
+    }
+    function prow(label, k, ix, bold) {
+      var rc = rowCells(k);
+      return '<tr' + (ix % 2 ? ' class="zeb"' : "") + '><td' + (bold ? "><b>" + esc(label) + "</b>" : ">" + esc(label)) + "</td>" +
+        rc.vals.map(function (v) { return '<td class="num">' + (v === null ? "—" : F.fmtStmt(v, ccy)) + "</td>"; }).join("") +
+        '<td class="num ' + dir(rc.yoy) + '">' + (rc.yoy === null ? "—" : F.fmtPct(rc.yoy)) + "</td></tr>";
+    }
+    var head = '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Particulars (' + esc(unit) + ')</th>' +
       reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "?") + "</th>"; }).join("") +
       '<th scope="col" class="num">YoY</th></tr></thead><tbody>';
-    keys.forEach(function (k, ix) {
-      var vals = reps.map(function (r) { var n = Number(r[k]); return (r[k] === "None" || isNaN(n)) ? null : n; });
-      var yoy = (vals[0] !== null && vals[1] !== null && vals[1] !== 0) ? (vals[0] - vals[1]) / Math.abs(vals[1]) * 100 : null;
-      h += '<tr' + (ix % 2 ? ' class="zeb"' : "") + '><td>' + esc(k) + "</td>" +
-        vals.map(function (v) { return '<td class="num">' + (v === null ? "—" : F.fmtMoney(v)) + "</td>"; }).join("") +
-        '<td class="num ' + dir(yoy) + '">' + (yoy === null ? "—" : F.fmtPct(yoy)) + "</td></tr>";
+    var used = {}, pri = "";
+    STMT_PRIORITY.forEach(function (p, ix) {
+      var k = stmtKey(reps[0], p[1].map(function (a) { return a.toLowerCase(); }));
+      if (k) { used[k] = 1; pri += prow(p[0], k, ix, true); }
     });
-    return sec(title.toUpperCase(), h + "</tbody></table></div>" +
-      '<div class="cx-prov">Currency <b>' + esc(d.currency || "?") + "</b> · YoY shown only when mathematically valid.</div>" + prov(env));
+    var rest = Object.keys(reps[0]).filter(function (k) {
+      return !used[k] && ["fiscalDateEnding", "reportedCurrency", "date"].indexOf(k) < 0;
+    }).slice(0, 20);
+    var restHtml = rest.map(function (k, ix) { return prow(k, k, ix, false); }).join("");
+    var h = head + pri + "</tbody></table></div>";
+    if (restHtml) {
+      h += "<details style='margin-top:8px'><summary class='cx-note'>All line items (" + rest.length + ")</summary>" +
+        '<div class="cx-scroll" style="margin-top:6px"><table class="cx-t"><thead><tr><th scope="col">Particulars (' + esc(unit) + ')</th>' +
+        reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "?") + "</th>"; }).join("") +
+        '<th scope="col" class="num">YoY</th></tr></thead><tbody>' + restHtml + "</tbody></table></div></details>";
+    }
+    /* growth chart for income statements */
+    var chartId = "stmt-chart-" + Math.floor(Math.random() * 1e9);
+    if (title === "Income statement") {
+      h += "<div style='margin-top:10px'><canvas class='chart' id='" + chartId + "' style='height:200px' role='img' aria-label='Revenue, EBITDA and PAT chart'></canvas>" +
+        "<div class='cx-prov'>Actual reported periods only — never interpolated.</div></div>";
+    }
+    var out = sec(title, h +
+      '<div class="cx-prov">Currency <b>' + esc(ccy || "?") + "</b> · figures in <b>" + esc(unit) + "</b> · YoY shown only when mathematically valid.</div>" + prov(env));
+    if (title === "Income statement") {
+      setTimeout(function () {
+        var cv = document.getElementById(chartId);
+        if (!cv || !window.FT_CHART) return;
+        function series(aliases) {
+          var k = stmtKey(reps[reps.length - 1], aliases) || stmtKey(reps[0], aliases);
+          if (!k) return null;
+          return reps.slice().reverse().map(function (r) {
+            var n = Number(r[k]);
+            return (r[k] === "None" || isNaN(n)) ? null : n;
+          });
+        }
+        var labels = reps.slice().reverse().map(function (r) { return String(r.fiscalDateEnding || r.date || "").slice(0, 7); });
+        var sers = [
+          { name: "Revenue", values: series(["totalrevenue", "revenue", "revenues", "sales"]) },
+          { name: "EBITDA", values: series(["ebitda"]) },
+          { name: "PAT", values: series(["netincome", "netearnings", "pat", "netprofit"]) },
+        ].filter(function (s) { return s.values && s.values.some(function (v) { return v !== null; }); });
+        if (sers.length) window.FT_CHART.drawBars(cv, { labels: labels, series: sers });
+      }, 50);
+    }
+    return out;
   }
   function tFinancials(sym, main) {
     main.innerHTML = sec("Financial statements",
@@ -438,7 +577,15 @@
       var h = sec("Valuation",
         '<div class="cx-facts">' + grid.map(function (g) {
           return "<div><dt>" + g[0] + "</dt><dd>" + (g[1] === null ? "—" : g[1]) + "</dd></div>";
-        }).join("") + "</div>" + prov(env));
+        }).join("") + "</div>" + prov(env) +
+        '<p class="cx-note">Peer comparison lives in the Compare workspace (no automatic peer universe, no rankings). ' +
+        "<button class='cx-btn2' id='cx-peer'>Compare " + esc(sym) + " side-by-side →</button></p>");
+      E("cx-val").innerHTML = h;
+      var peerBtn = E("cx-peer");
+      if (peerBtn) peerBtn.onclick = function () {
+        try { sessionStorage.setItem("ft-cmp", sym); } catch (e) { /* ignore */ }
+        location.hash = "#/compare";
+      };
       var rec = env.reconciliation;
       if (rec && rec.comparisons && rec.comparisons.length) {
         h += '<section class="cx-sec"><h2>Cross-check</h2><details><summary class="cx-note">Primary vs other sources (' +
@@ -552,10 +699,15 @@
     }).catch(function () { if (E("cx-earn")) E("cx-earn").innerHTML = sec("Earnings", err()); });
   }
   function newsRow(n) {
-    var when = String(n.published_at || "").slice(0, 16).replace("T", " ");
-    var title = n.url ? '<a href="' + esc(n.url) + '" target="_blank" rel="noopener">' + esc(n.title || "Untitled") + "</a>" : esc(n.title || "Untitled");
-    return '<article class="cx-newsrow"><span class="tm">' + esc(when || "—") + '</span><span class="hl">' + title +
-      "</span><span class='src'>" + esc(n.source || "—") + "</span><span class='cat'>" + esc(n.category || "") + "</span></article>";
+    var title = esc(n.title || "Untitled");
+    var sum = n.summary ? esc(String(n.summary).replace(/\s+/g, " ").slice(0, 180)) : "";
+    var link = n.url ? "<a href='" + esc(n.url) + "' target='_blank' rel='noopener'>Read article →</a>" : "";
+    return '<article class="news-item"><b>' + title + "</b>" +
+      (sum ? "<p class='sum'>" + sum + "…</p>" : "") +
+      "<div class='meta'><span class='srcbadge'>" + esc(n.source || "—") + "</span> · " +
+      esc(F.fmtTimeHM(n.published_at)) +
+      (n.category ? " · " + esc(n.category) : "") +
+      (link ? " · " + link : "") + "</div></article>";
   }
   function tNews(sym, main) {
     main.innerHTML = '<div id="cx-news">' + skel(4) + "</div>";
@@ -672,7 +824,12 @@
   }
   function tTechnicals(sym, main) {
     main.innerHTML = '<div id="cx-tq">' + skel(5) + "</div>";
-    API.get("analytics", { symbol: sym }).then(function (r) {
+    Promise.all([
+      API.get("analytics", { symbol: sym }),
+      API.get("quote", { symbol: sym }),
+    ]).then(function (rs) {
+      var r = rs[0];
+      var lastPx = (((rs[1] || {}).body || {}).data || {}).price;
       if (!E("cx-tq")) return;
       var d = (r.body && r.body.data) || null;
       if (!d) {
@@ -684,13 +841,30 @@
       function fact(l, v, tip) {
         return "<div title='" + esc(tip || "") + "'><dt>" + l + "</dt><dd>" + v + "</dd></div>";
       }
+      var snap = d.snapshot || {};
+      /* Deterministic interpretation — only from calculated values. */
+      var interp = [];
+      var s50 = snap.sma50, s200 = snap.sma200, last = lastPx;
+      if (last !== null && last !== undefined && !isNaN(Number(last)) &&
+          s50 !== null && s50 !== undefined && s200 !== null && s200 !== undefined) {
+        interp.push(last > s50 && last > s200 ? "Price is above both the 50-day and 200-day averages."
+          : last < s50 && last < s200 ? "Price is below both the 50-day and 200-day averages."
+          : "Price sits between the 50-day and 200-day averages.");
+      }
+      if (snap.rsi14 !== null && snap.rsi14 !== undefined) {
+        interp.push("RSI " + F.fmtNum(snap.rsi14) +
+          (snap.rsi14 > 70 ? " — overheated zone." : snap.rsi14 < 30 ? " — oversold zone." : " — neutral zone."));
+      }
+      if (rs.rs_pp !== null && rs.rs_pp !== undefined) {
+        interp.push("Relative strength " + F.fmtPct(rs.rs_pp) + " vs " + (d.benchmark || "benchmark") + ".");
+      }
       var trend = sec("Trend",
         '<dl class="cx-facts">' +
         fact("Weinstein phase", Cv(ph.phase), "Position of price relative to its long moving average.") +
         fact("Trend template", (tt.passed === undefined ? "—" : tt.passed + " / " + tt.total), "Number of bullish trend conditions met.") +
-        fact("SMA 50", Num((d.snapshot || {}).sma50, function (v) { return F.fmtNum(v); }), "Average close, last 50 sessions.") +
-        fact("SMA 200", Num((d.snapshot || {}).sma200, function (v) { return F.fmtNum(v); }), "Average close, last 200 sessions.") +
-        "</dl>");
+        fact("SMA 50", Num(snap.sma50, function (v) { return F.fmtNum(v); }), "Average close, last 50 sessions.") +
+        fact("SMA 200", Num(snap.sma200, function (v) { return F.fmtNum(v); }), "Average close, last 200 sessions.") +
+        "</dl>" + (interp.length ? "<p class='interp'>" + esc(interp.join(" ")) + "</p>" : ""));
       var rel = sec("Relative strength",
         '<dl class="cx-facts">' +
         fact("Vs " + esc(d.benchmark || "benchmark"), rs.rs_pp === null || rs.rs_pp === undefined ? "—" : F.fmtPct(rs.rs_pp), "Outperformance in percentage points over the lookback.") +
@@ -754,5 +928,5 @@
   }
   /* publish override */
   if (window.FT_PAGES) window.FT_PAGES.pCompany = pCompany;
-  window.FT_CX = { pCompany: pCompany };
+  window.FT_CX = { pCompany: pCompany, addHolding: openHoldingModal };
 })();

@@ -3,10 +3,9 @@
 Source matrix (verified Sep 2026):
 - Alpha Vantage IPO_CALENDAR (keyed, free 25/day): working, US-centric,
   served through the existing fundamentals leg. No code copied.
-- IPO Guru: no verifiable public API contract found (no docs, no free
-  tier terms located). IPOGURU_API_KEY is reserved in .env.example;
-  the adapter reports honest unavailable rather than hitting an
-  unverified endpoint.
+- IPO Guru developer API (https://www.ipoguru.in/ipo-gmp-details-developer-api):
+  documented free tier (300 req/day, 15/min, X-API-KEY). Integrated
+  server-side with caching + 429 cooldown when IPOGURU_API_KEY is set.
 - InvestorGain / IPO Watch / Chittorgarh / IPO Central: editorial
   websites, no public JSON APIs located. NOT scraped (robots/ToS).
   Linked from Research Hub as external research, never presented
@@ -25,6 +24,7 @@ GMP rules (non-negotiable, enforced in payload + UI copy):
 from __future__ import annotations
 
 import os
+import re
 from datetime import date
 from typing import Any
 
@@ -47,10 +47,11 @@ def _parse_day(value: Any) -> date | None:
 
 
 def _row_get(row: dict, *names: str) -> Any:
-    lowered = {str(k).strip().lower(): v for k, v in (row or {}).items()}
+    lowered = {re.sub(r"[^a-z]", "", str(k).strip().lower()): v for k, v in (row or {}).items()}
     for name in names:
-        if name in lowered:
-            return lowered[name]
+        key = re.sub(r"[^a-z]", "", name)
+        if key in lowered:
+            return lowered[key]
     return None
 
 

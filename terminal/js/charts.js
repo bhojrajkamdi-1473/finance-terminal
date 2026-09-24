@@ -17,9 +17,9 @@
   };
   function palette() {
     try {
-      if (document.body && document.body.dataset.theme === "light") return C;
-    } catch (e) { /* default dark */ }
-    return (typeof document !== "undefined") ? C_DARK : C;
+      if (document.body && document.body.dataset.theme === "dark") return C_DARK;
+    } catch (e) { /* default light */ }
+    return C;
   }
   function sma(values, w) {
     var out = [];
@@ -159,5 +159,88 @@
       canvas.onmouseleave = hide;
     }
   }
-  window.FT_CHART = { drawPriceChart: drawPriceChart, sma: sma };
+  /* Sparkline: compact trend line for index cards. No axes, no tooltip. */
+  function drawSpark(canvas, closes, up) {
+    var P = palette();
+    var dpr = window.devicePixelRatio || 1;
+    var W = canvas.clientWidth || 180, H = canvas.clientHeight || 38;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    var vals = (closes || []).filter(function (v) { return v !== null && v !== undefined && !isNaN(v); });
+    if (vals.length < 2) return;
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals), span = hi - lo || 1;
+    function x(i) { return 2 + (i / (vals.length - 1)) * (W - 4); }
+    function y(v) { return 3 + (1 - (v - lo) / span) * (H - 6); }
+    var col = up === false ? P.dn : P.up;
+    ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.lineJoin = "round";
+    ctx.beginPath();
+    vals.forEach(function (v, i) { if (i) ctx.lineTo(x(i), y(v)); else ctx.moveTo(x(i), y(v)); });
+    ctx.stroke();
+    ctx.lineTo(x(vals.length - 1), H); ctx.lineTo(x(0), H); ctx.closePath();
+    ctx.globalAlpha = 0.12; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
+  }
+  /* Grouped bars: financial statement charts (revenue/EBITDA/PAT...). */
+  function drawBars(canvas, groups, opts) {
+    var P = palette();
+    opts = opts || {};
+    var dpr = window.devicePixelRatio || 1;
+    var W = canvas.clientWidth || 600, H = canvas.clientHeight || 220;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    var series = groups.series || [], labels = groups.labels || [];
+    if (!series.length || !labels.length) {
+      ctx.fillStyle = P.ink; ctx.font = "12px sans-serif";
+      ctx.fillText("Insufficient data", 16, 30);
+      return;
+    }
+    var cols = opts.colors || [P.smas[0], P.smas[1], P.smas[2], "#7B5CF6"];
+    var all = [];
+    series.forEach(function (s) { (s.values || []).forEach(function (v) { if (v !== null && v !== undefined) all.push(v); }); });
+    if (!all.length) {
+      ctx.fillStyle = P.ink; ctx.font = "12px sans-serif";
+      ctx.fillText("Insufficient data", 16, 30);
+      return;
+    }
+    var mx = Math.max.apply(null, all.concat([0])), mn = Math.min.apply(null, all.concat([0]));
+    var span = mx - mn || 1;
+    var padL = 56, padB = 26, padT = 8;
+    var zeroY = padT + (1 - (0 - mn) / span) * (H - padT - padB);
+    function y(v) { return padT + (1 - (v - mn) / span) * (H - padT - padB); }
+    ctx.strokeStyle = P.grid; ctx.fillStyle = P.ink;
+    ctx.font = "10px 'JetBrains Mono','IBM Plex Mono',Consolas,monospace"; ctx.lineWidth = 1;
+    for (var g = 0; g <= 3; g++) {
+      var gv = mn + (span * g) / 3, gy = Math.round(y(gv)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - 6, gy); ctx.stroke();
+    }
+    ctx.beginPath(); ctx.moveTo(padL, zeroY); ctx.lineTo(W - 6, zeroY);
+    ctx.strokeStyle = P.ink; ctx.stroke();
+    var slot = (W - padL - 10) / labels.length, bw = Math.min(26, (slot - 10) / series.length);
+    labels.forEach(function (lab, i) {
+      var cx = padL + slot * i + slot / 2;
+      series.forEach(function (s, j) {
+        var v = (s.values || [])[i];
+        if (v === null || v === undefined) return;
+        var h = Math.abs(y(v) - zeroY);
+        ctx.fillStyle = cols[j % cols.length];
+        ctx.fillRect(cx - (series.length * bw) / 2 + j * bw, Math.min(y(v), zeroY), bw - 1, Math.max(1, h));
+      });
+      ctx.fillStyle = P.ink;
+      ctx.fillText(String(lab).slice(0, 10), cx - 20, H - 8);
+    });
+    /* legend */
+    var lx = padL;
+    ctx.font = "10px sans-serif";
+    series.forEach(function (s, j) {
+      ctx.fillStyle = cols[j % cols.length];
+      ctx.fillRect(lx, 2, 8, 8);
+      ctx.fillStyle = P.ink;
+      ctx.fillText(s.name || "", lx + 11, 9);
+      lx += ctx.measureText(s.name || "").width + 26;
+    });
+  }
+  window.FT_CHART = { drawPriceChart: drawPriceChart, drawSpark: drawSpark, drawBars: drawBars, sma: sma };
 })();
