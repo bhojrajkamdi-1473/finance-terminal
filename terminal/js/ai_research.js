@@ -122,7 +122,9 @@
       '<button class="cx-btn" id="cxai-run">Run analysis</button></div>' +
       '<div class="cx-note">Evidence-grounded multi-agent research. Research only — never investment advice.</div>' +
       '<div class="cx-note" id="cxai-meta">Checking availability…</div>' +
-      '<div id="cxai-out" style="margin-top:8px"></div></section>';
+      '<div id="cxai-out" style="margin-top:8px"></div>' +
+      '<details style="margin-top:8px"><summary class="cx-note">Recent runs (audit trail)</summary>' +
+      '<div id="cxai-runs" class="cx-note">Loading…</div></details></section>';
     Array.prototype.forEach.call(host.querySelectorAll("[data-d]"), function (b) {
       b.onclick = function () {
         Array.prototype.forEach.call(host.querySelectorAll("[data-d]"), function (x) { x.classList.remove("on"); });
@@ -152,6 +154,14 @@
         if (!b.ok || !b.report) { fail(b.reason || b.error); return; }
         host.querySelector("#cxai-out").innerHTML = reportHtml(b.report);
         meta(b.report);
+        window.FT_API.get("ai/runs", { ticker: sym, limit: 5 }).then(function (rx) {
+          var el = host.querySelector("#cxai-runs");
+          if (!el) return;
+          var runs = (((rx || {}).body) || {}).runs || [];
+          if (runs.length) el.innerHTML = runs.map(function (r) {
+            return "<div>" + esc(r.ticker) + " · " + esc(r.depth) + " · " + esc(r.model || "evidence") + "</div>";
+          }).join("");
+        }).catch(function () { /* optional */ });
       }).catch(function () { btn.disabled = false; fail("Network error while running analysis."); });
     };
     window.FT_API.get("ai/research", { ticker: sym, depth: "standard" }).then(function (x) {
@@ -162,6 +172,15 @@
         if (m) m.textContent = "No cached analysis yet — press Run analysis.";
       }
     }).catch(function () { /* stay quiet; user can run */ });
+    window.FT_API.get("ai/runs", { ticker: sym, limit: 5 }).then(function (x) {
+      var el = host.querySelector("#cxai-runs");
+      if (!el) return;
+      var b = (x && x.body) || {}, runs = b.runs || [];
+      el.innerHTML = runs.length ? runs.map(function (r) {
+        return "<div>" + esc(r.ticker) + " · " + esc(r.depth) + " · " + esc(r.model || "evidence") +
+          " · " + esc(dayTime(new Date((r.created_at || 0) * 1000).toISOString())) + "</div>";
+      }).join("") : "No recorded runs for this ticker yet.";
+    }).catch(function () { /* audit list is optional */ });
   }
   /* legacy compare/watchlist hooks (non-breaking) */
   function scan() {

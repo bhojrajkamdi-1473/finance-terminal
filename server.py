@@ -320,6 +320,8 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_ai_status()
         if path == "/api/ai/research":
             return self._handle_ai_research_get(qs)
+        if path == "/api/ai/runs":
+            return self._handle_ai_runs(qs)
         return self._serve_static(path)
 
     def do_POST(self):
@@ -1255,6 +1257,30 @@ class Handler(BaseHTTPRequestHandler):
             self,
             {"ok": True, **st, "cache": "standard 4h · deep 2h", "endpoint": "/api/ai/research"},
         )
+
+    def _handle_ai_runs(self, qs):
+        """Research run ledger: metadata only, never bodies or secrets."""
+        try:
+            from services.ai_research import ledger as _ledger
+        except Exception as exc:
+            return _send_json(
+                self,
+                {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": f"AI module error: {exc}"[:200]},
+                502,
+            )
+        try:
+            limit = int(qs.get("limit", ["20"])[0] or 20)
+        except (ValueError, TypeError):
+            limit = 20
+        conn = store.connect()
+        try:
+            runs = _ledger.recent_runs(conn, (qs.get("ticker", [""])[0] or ""), limit)
+            used = _ledger.count_today(conn)
+        finally:
+            conn.close()
+        return _send_json(self, {"ok": True, "runs": runs,
+                                 "budget": {"used_today": used,
+                                            "daily_limit": _ledger.daily_budget()}})
 
     def _min_portfolio(self, body) -> dict | None:
         pf = body.get("portfolio") if isinstance(body, dict) else None

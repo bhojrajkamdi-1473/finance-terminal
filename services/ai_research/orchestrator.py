@@ -101,6 +101,27 @@ def run_research(
             out["cache"] = {"hit": True, "key_hash": key[:24] + "…", "ttl_note": RESEARCH_TTL_NOTE}
             return out
 
+    # Daily run budget (Paperclip-style hard stop): executed runs only,
+    # cache hits are free. Best-effort — a ledger failure never blocks.
+    try:
+        from services import store as _store
+
+        _conn = _store.connect()
+        try:
+            from . import ledger as _ledger
+
+            if _ledger.budget_exhausted(_conn):
+                raise _llm.LLMError(
+                    f"AI run budget exhausted for today ({_ledger.daily_budget()} runs).",
+                    kind="RATE_LIMIT",
+                )
+        finally:
+            _conn.close()
+    except _llm.LLMError:
+        raise
+    except Exception:
+        pass
+
     if progress:
         try:
             progress("prepare", "done")
@@ -184,6 +205,7 @@ def run_research(
         "provider_count": bundle["provider_count"],
         "grounding": {k: (v or {}).get("verdict") for k, v in grounding.items()},
         "stages": {role: ("done" if (agent_results.get(role) or {}).get("ok") else "failed") for role in _agents.AGENT_ORDER},
+        "disclaimer": "Research only — not investment advice. Verify figures against primary sources before acting.",
     }
     problems = _schemas.validate_report(report)
     if problems:
@@ -198,6 +220,28 @@ def run_research(
         "cache": {"hit": False, "key_hash": key[:24] + "…", "ttl_note": RESEARCH_TTL_NOTE},
     }
     _cache.set(key, out, depth)
+    # Audit-trail record (best-effort; never breaks the response).
+    try:
+        from services import store as _store
+
+        from . import ledger as _ledger
+
+        _conn = _store.connect()
+        try:
+            _ledger.record_run(
+                _conn, ticker=symbol, depth=depth, sections=wanted,
+                model=model if use_llm else "Terminal evidence synthesis",
+                provider=provider if use_llm else "none",
+                context_hash=bundle["context_hash"],
+                stages=report.get("stages") or {},
+                grounding=report.get("grounding") or {},
+                provider_count=bundle["provider_count"],
+                llm_backed=use_llm,
+            )
+        finally:
+            _conn.close()
+    except Exception:
+        pass
     return out
 
 
