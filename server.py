@@ -159,6 +159,11 @@ def _secret_values() -> list[str]:
         "FUNDAMENTALS_API_KEY",
         "TWELVE_DATA_API_KEY",
         "INDIAN_STOCK_MARKET_API_KEY",
+        "AI_API_KEY",
+        "AI_MODEL",
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "OPENROUTER_API_KEY",
     ):
         _secret_val = (os.environ.get(_secret_name) or "").strip()
         if len(_secret_val) >= 8:
@@ -295,6 +300,10 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_market_overview()
         if path == "/api/providers":
             return _send_json(self, {"ok": True, **registry.providers_status()})
+        if path == "/api/ai/status":
+            return self._handle_ai_status()
+        if path == "/api/ai/research":
+            return self._handle_ai_research_get(qs)
         return self._serve_static(path)
 
     def do_POST(self):
@@ -344,6 +353,10 @@ class Handler(BaseHTTPRequestHandler):
                     )
                 store.watchlist_reorder(conn, symbols)
                 return _send_json(self, {"ok": True})
+            if path == "/api/ai/research":
+                return self._handle_ai_research_post(body)
+            if path == "/api/ai/compare":
+                return self._handle_ai_compare_post(body)
         finally:
             conn.close()
         return _send_json(self, {"ok": False, "error": "unknown endpoint"}, 404)
@@ -1097,6 +1110,113 @@ class Handler(BaseHTTPRequestHandler):
             return None
         _domain_cache.set(key, env["data"], refresh.FUNDAMENTALS_TTL)
         return env["data"]
+
+    # -- AI research (evidence-grounded, server-side only) --------------
+    def _handle_ai_status(self):
+        try:
+            from services.ai_research import config as _aicfg
+        except Exception as exc:
+            return _send_json(
+                self,
+                {"ok": False, "available": False, "reason": f"AI module error: {exc}"[:200]},
+                502,
+            )
+        st = _aicfg.status()
+        return _send_json(
+            self,
+            {"ok": True, **st, "cache": "standard 4h · deep 2h", "endpoint": "/api/ai/research"},
+        )
+
+    def _min_portfolio(self, body) -> dict | None:
+        pf = body.get("portfolio") if isinstance(body, dict) else None
+        if not isinstance(pf, dict):
+            return None
+        out = {}
+        for key in ("symbol", "weight_pct", "avg_price", "current_value", "pnl_pct"):
+            if pf.get(key) is not None:
+                out[key] = pf[key]
+        return out or None
+
+    def _handle_ai_research_get(self, qs):
+        try:
+            from services.ai_research import orchestrator as _ai
+        except Exception as exc:
+            return _send_json(
+                self,
+                {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": f"AI module error: {exc}"[:200]},
+                502,
+            )
+        ticker = (qs.get("ticker", [""])[0] or qs.get("symbol", [""])[0] or "").strip()
+        depth = (qs.get("depth", ["standard"])[0] or "standard").strip()
+        try:
+            out = _ai.run_research(ticker, depth)
+        except ValueError as exc:
+            return _send_json(self, {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": str(exc)[:300]}, 400)
+        except Exception as exc:
+            kind = getattr(exc, "kind", None) or "RESEARCH_FAILED"
+            code = 504 if kind in ("LLM_TIMEOUT",) else (429 if kind == "RATE_LIMIT" else 502)
+            return _send_json(
+                self,
+                {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": str(exc)[:300], "kind": kind},
+                code,
+            )
+        return _send_json(self, out)
+
+    def _handle_ai_research_post(self, body):
+        try:
+            from services.ai_research import orchestrator as _ai
+        except Exception as exc:
+            return _send_json(
+                self,
+                {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": f"AI module error: {exc}"[:200]},
+                502,
+            )
+        try:
+            out = _ai.run_research(
+                (body or {}).get("ticker", ""),
+                (body or {}).get("depth", "standard"),
+                (body or {}).get("sections"),
+                portfolio=self._min_portfolio(body or {}),
+                force=bool((body or {}).get("force")),
+            )
+        except ValueError as exc:
+            return _send_json(self, {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": str(exc)[:300]}, 400)
+        except Exception as exc:
+            kind = getattr(exc, "kind", None) or "RESEARCH_FAILED"
+            code = 504 if kind in ("LLM_TIMEOUT",) else (429 if kind == "RATE_LIMIT" else 502)
+            return _send_json(
+                self,
+                {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": str(exc)[:300], "kind": kind},
+                code,
+            )
+        return _send_json(self, out)
+
+    def _handle_ai_compare_post(self, body):
+        """Side-by-side research for two securities. No winner score."""
+        try:
+            from services.ai_research import orchestrator as _ai
+        except Exception as exc:
+            return _send_json(
+                self,
+                {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": f"AI module error: {exc}"[:200]},
+                502,
+            )
+        body = body or {}
+        left_raw = body.get("left", body.get("ticker", ""))
+        right_raw = body.get("right", body.get("compare_with", ""))
+        depth = body.get("depth", "standard")
+        results = {}
+        for slot, raw in (("left", left_raw), ("right", right_raw)):
+            try:
+                results[slot] = _ai.run_research(raw, depth, body.get("sections"))
+            except ValueError as exc:
+                return _send_json(
+                    self, {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": f"{slot}: {exc}"[:300]}, 400
+                )
+            except Exception as exc:
+                kind = getattr(exc, "kind", None) or "RESEARCH_FAILED"
+                results[slot] = {"ok": False, "error": "AI RESEARCH UNAVAILABLE", "reason": str(exc)[:300], "kind": kind}
+        return _send_json(self, {"ok": True, "depth": depth, **results})
 
     # -- static ---------------------------------------------------------
     def _serve_static(self, path: str):

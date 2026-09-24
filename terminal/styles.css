@@ -221,3 +221,20 @@ a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{ou
 }
 @media(max-width:640px){.g4{grid-template-columns:1fr 1fr}.co-px{text-align:left}.kpis{grid-template-columns:repeat(2,1fr)}}
 @media print{#sidenav,#topbar .search-wrap,.topbar-right{display:none}}
+
+/* ---------- AI research panel ---------- */
+.ai-panel{border-left:4px solid var(--acc)}
+.ai-stages{list-style:none;margin:8px 0;padding:0;display:flex;flex-wrap:wrap;gap:6px 14px}
+.ai-stages li{font-size:12px;color:var(--slate)}
+.ai-stages li.ai-st-done{color:var(--ok);font-weight:650}
+.ai-stages li.ai-st-running{color:var(--acc);font-weight:700}
+.ai-stages li.ai-st-failed{color:var(--bad)}
+.ai-dot{font-weight:700;margin-right:4px}
+.ai-meta{font-size:12px;color:var(--slate);margin:6px 0 10px}
+.ai-sect{border:1px solid var(--line);border-radius:8px;margin:8px 0;background:#fff}
+.ai-sect>summary{cursor:pointer;padding:10px 12px;font-size:13px;list-style:none}
+.ai-sect-body{padding:0 12px 12px;font-size:12.5px;line-height:1.6}
+.ai-text{margin:6px 0;white-space:normal;overflow-wrap:anywhere}
+.ai-points{margin:6px 0;padding-left:18px}
+.ai-points li{margin:3px 0}
+@media(max-width:640px){.ai-stages{gap:4px 10px}.ai-sect-body{font-size:12px}}
