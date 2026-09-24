@@ -190,6 +190,7 @@ def compute_all(
     ca, _, _ = _pick(bal0, "current_assets")
     cash, _, _ = _pick(bal0, "cash")
     inv, _, _ = _pick(bal0, "inventory")
+    recv, _, _ = _pick(bal0, "receivables")
     cl, _, _ = _pick(bal0, "current_liabilities")
     debt, _, _ = _pick(bal0, "total_debt")
     if debt is None:
@@ -238,6 +239,9 @@ def compute_all(
     if gp is not None and rev:
         put(_result("gross_margin", "Gross Margin", gp / rev * 100, "%", "(Revenue - COGS) / Revenue x 100",
                     [_inp("Revenue", rev, rev_p, source), _inp("Gross Profit", gp, rev_p, source)]))
+    if ebitda is not None and rev:
+        put(_result("ebitda_margin", "EBITDA Margin", ebitda / rev * 100, "%", "EBITDA / Revenue x 100",
+                    [_inp("EBITDA", ebitda, eb_p, source), _inp("Revenue", rev, rev_p, source)]))
     if ebit is not None and rev:
         put(_result("op_margin", "Operating Margin", ebit / rev * 100, "%", "EBIT / Revenue x 100",
                     [_inp("EBIT", ebit, eb_p, source), _inp("Revenue", rev, rev_p, source)],
@@ -272,6 +276,12 @@ def compute_all(
         if base:
             put(_result("asset_turnover", "Asset Turnover", rev / base, "x", "Revenue / Average Assets",
                         [_inp("Revenue", rev, rev_p, source), _inp("Assets", base, _period(bal0), source)]))
+    if cogs is not None and inv:
+        put(_result("inventory_turnover", "Inventory Turnover", cogs / inv, "x", "COGS / Inventory",
+                    [_inp("COGS", cogs, rev_p, source), _inp("Inventory", inv, eq0_p, source)]))
+    if rev is not None and recv:
+        put(_result("receivables_turnover", "Receivables Turnover", rev / recv, "x", "Revenue / Receivables",
+                    [_inp("Revenue", rev, rev_p, source), _inp("Receivables", recv, eq0_p, source)]))
     # -- growth (CAGR over available annual reports) --
     def cagr(key: str, label: str, item: str) -> None:
         pts = [(_pick(r, item)[0], _period(r)) for r in income[:5]]
@@ -320,6 +330,12 @@ def compute_all(
     if market_cap and ni:
         put(_result("pe_from_mcap", "P/E (mcap)", market_cap / ni, "x", "Market Cap / Net Income",
                     [_inp("Market Cap", market_cap, "quote", "quote"), _inp("Net Income", ni, ni_p, source)]))
+    if market_cap and eq0:
+        put(_result("pb_calc", "P/B", market_cap / eq0, "x", "Market Cap / Equity",
+                    [_inp("Market Cap", market_cap, "quote", "quote"), _inp("Equity", eq0, eq0_p, source)]))
+    if fcf is not None and market_cap:
+        put(_result("fcf_yield", "FCF Yield", fcf / market_cap * 100, "%", "Free Cash Flow / Market Cap x 100",
+                    [_inp("FCF", fcf, cfo_p, source), _inp("Market Cap", market_cap, "quote", "quote")]))
     return out
 
 

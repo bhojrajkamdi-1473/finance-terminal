@@ -27,9 +27,9 @@
   function esc(s) { return (window.FT_FMT ? window.FT_FMT.esc(String(s === null || s === undefined ? "" : s)) : String(s)); }
   /* Clean any backend token into an em-dash for display. */
   function Cv(v) {
-    if (v === null || v === undefined) return "—";
+    if (v === null || v === undefined) return "";
     var s = String(v).trim();
-    if (/^(none|null|undefined|nan|-|n\/a)$/i.test(s) || s === "") return "—";
+    if (/^(none|null|undefined|nan|-|n\/a)$/i.test(s) || s === "") return "";
     return esc(s);
   }
   function Num(v, fn) {
@@ -56,11 +56,20 @@
       return d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
     } catch (e) { return "—"; }
   }
+  /* Single provenance line per section. Unknown parts are dropped;
+     nothing renders when nothing is known. No "?", no placeholders. */
   function prov(env) {
     if (!env) return "";
-    var src = esc(window.FT_FMT.srcName(env.source));
-    var st = esc(env.timeliness || env.status || "");
-    return '<div class="cx-prov">Source <b>' + src + "</b> · " + st + " · as of <b>" + esc(day(env.as_of)) + "</b></div>";
+    var F2 = window.FT_FMT, parts = [];
+    var src = env.source ? F2.srcName(env.source) : "";
+    if (src && src !== "?") parts.push("Data · " + src);
+    else parts.push("Market data");
+    var st = env.timeliness || env.status || "";
+    if (/delay/i.test(st)) parts.push("delayed");
+    var asof = String(env.as_of || "").slice(0, 10);
+    if (/^\d{4}-\d{2}-\d{2}/.test(asof)) parts.push(asof);
+    if (parts.length <= 1) return "";
+    return '<div class="cx-prov">' + esc(parts.join(" · ")) + "</div>";
   }
   function empty(title, why) {
     return '<div class="cx-empty" role="status"><b>' + esc(title) + "</b><p>No verified data available.</p>" +
@@ -120,7 +129,16 @@
     if (c) c.innerHTML = '<span class="' + dir(q.change_pct) + '">' + F.fmtPct(q.change_pct) + "</span> " +
       '<span class="mut">(' + F.fmtNum(q.change) + " " + esc(q.currency || "") + ")</span>";
     var s = E("cx-srcline");
-    if (s) s.innerHTML = badge(env.timeliness || env.status) + " " + esc(F.srcName(env.source)) + " · " + esc(day(env.as_of));
+    if (s) {
+      var bits = [];
+      var src = env.source ? F.srcName(env.source) : "";
+      if (src && src !== "?") bits.push(src);
+      var st = env.timeliness || env.status || "";
+      if (/delay/i.test(st)) bits.push("delayed");
+      var asof = String(env.as_of || "").slice(0, 10);
+      if (/^\d{4}-\d{2}-\d{2}/.test(asof)) bits.push(asof);
+      s.innerHTML = bits.length ? bits.map(esc).join(" · ") : "";
+    }
   }
   /* Metric strip with REPORTED/CALCULATED badges + formula inspector.
      Every metric carries its provenance; CALCULATED cells open the
@@ -166,14 +184,17 @@
       ["52W Low", (q.fifty_two_week_low === null || q.fifty_two_week_low === undefined) ? null : { v: F.fmtNum(q.fifty_two_week_low), kind: "REPORTED", info: null }],
     ];
     STRIP_INFO = {};
-    E("cx-strip").innerHTML = cells.map(function (c, ix) {
+    var liveCells = cells.filter(function (c) { return c[1] && c[1].v !== null; });
+    if (!liveCells.length) { E("cx-strip").innerHTML = ""; return; }
+    E("cx-strip").innerHTML = liveCells.map(function (c, ix) {
       var n = c[1];
-      if (!n || n.v === null) return '<div class="cx-m"><div class="l">' + c[0] + '</div><div class="v">—</div><div class="s">unavailable</div></div>';
       var key = "m" + ix;
       STRIP_INFO[key] = n.info;
-      var clickable = n.info ? " data-insp='" + key + "' role='button' tabindex='0' title='Open formula inspector' style='cursor:pointer'" : "";
+      var clickable = n.info ? " data-insp='" + key + "' role='button' tabindex='0' title='Open formula inspector: " +
+        esc(n.info.formula || "") + "' style='cursor:pointer'" : "";
+      var sub = n.kind === "CALCULATED" ? "calculated" + ((n.info && n.info.variant) ? " · " + esc(n.info.variant) : "") : "";
       return '<div class="cx-m"' + clickable + '><div class="l">' + c[0] + qBadge(n.kind) + '</div><div class="v">' + n.v +
-        '</div><div class="s">' + (n.kind === "CALCULATED" ? "calculated" + ((n.info && n.info.variant) ? " · " + esc(n.info.variant) : "") : "reported") + "</div></div>";
+        "</div>" + (sub ? "<div class='s'>" + sub + "</div>" : "") + "</div>";
     }).join("") + '<div id="cx-insp"></div>';
     Array.prototype.forEach.call(E("cx-strip").querySelectorAll("[data-insp]"), function (el) {
       function open() { showInspector(STRIP_INFO[el.getAttribute("data-insp")]); }
@@ -405,28 +426,184 @@
     });
     API.get("news", { symbol: sym, limit: 5 }).then(function (r) {
       if (!E("cx-ov-news")) return;
-      var items = ((r.body && r.body.data) || {}).items || [];
+      var items = (((r.body || {}).data) || {}).items || [];
       E("cx-ov-news").innerHTML = sec("Latest news",
         items.length ? items.slice(0, 5).map(newsRow).join("") + prov(r.body)
         : empty("Latest news", "No news items were returned for this security."));
     });
+    /* Fundamental trend: reported revenue/PAT bars + deterministic read. */
+    API.get("fundamentals", { symbol: sym, statement: "income", period: "annual" }).then(function (r) {
+      var host = E("cx-main");
+      if (!host) return;
+      var reps = ((((r.body || {}).data) || {}).reports) || [];
+      if (reps.length < 2) return;
+      function series(keys) {
+        return reps.slice(0, 4).reverse().map(function (rep) {
+          for (var i = 0; i < keys.length; i++) {
+            var n = Number(rep[keys[i]]);
+            if (rep[keys[i]] !== "None" && !isNaN(n)) return n;
+          }
+          return null;
+        });
+      }
+      var labels = reps.slice(0, 4).reverse().map(function (x) { return String(x.fiscalDateEnding || x.date || "").slice(0, 7); });
+      var rev = series(["totalRevenue", "revenue", "revenues", "sales"]);
+      var pat = series(["netIncome", "net_income", "netEarnings"]);
+      var ok = function (s) { return s.some(function (v) { return v !== null; }); };
+      if (!ok(rev) && !ok(pat)) return;
+      var box = document.createElement("div");
+      var I = window.FT_INTERP;
+      var interp = "";
+      var rr = rev.filter(function (v) { return v !== null; });
+      if (rr.length >= 2 && rr[rr.length - 2]) {
+        var yoy = (rr[rr.length - 1] - rr[rr.length - 2]) / Math.abs(rr[rr.length - 2]) * 100;
+        interp = I.growth("Revenue", null, yoy, null, labels[labels.length - 1]);
+      }
+      box.innerHTML = sec("Fundamental trend",
+        '<div class="an-grid"><div class="an-6"><div class="lbl">Revenue</div>' +
+        (ok(rev) ? "<canvas class='chart' id='cx-ov-rev' style='height:150px' role='img' aria-label='Revenue trend'></canvas>" : "") +
+        '</div><div class="an-6"><div class="lbl">Net profit</div>' +
+        (ok(pat) ? "<canvas class='chart' id='cx-ov-pat' style='height:150px' role='img' aria-label='Net profit trend'></canvas>" : "") +
+        "</div></div>" +
+        (interp ? "<p class='interp'>" + esc(interp) + "</p>" : "") + prov(r.body));
+      var news = E("cx-ov-news");
+      news.parentNode.insertBefore(box, news);
+      setTimeout(function () {
+        if (ok(rev) && document.getElementById("cx-ov-rev"))
+          window.FT_CHART.drawBars(document.getElementById("cx-ov-rev"), { labels: labels, series: [{ name: "Revenue", values: rev }] });
+        if (ok(pat) && document.getElementById("cx-ov-pat"))
+          window.FT_CHART.drawBars(document.getElementById("cx-ov-pat"), { labels: labels, series: [{ name: "PAT", values: pat }] });
+      }, 60);
+    }).catch(function () { /* overview works without statements */ });
     API.get("ratiosheet", { symbol: sym }).then(function (r) {
       if (!E("cx-ov-ratio")) return;
       var sheet = (r.body && r.body.data) || null, disp = (sheet && sheet.display) || {};
       var keys = ["roe", "roa", "roce", "net_margin", "debt_equity", "current_ratio"];
       var cells = keys.map(function (k) {
         var n = disp[k];
-        if (!n) return "<div><dt>" + k.toUpperCase().replace("_", "/") + "</dt><dd>—</dd></div>";
+        if (!n || n.value === null || n.value === undefined) return ""; // omitted, never placeholder
         var v = n.unit === "%" ? Number(n.value).toFixed(1) + "%" : Number(n.value).toFixed(2) + "x";
-        var b = n.kind === "CALCULATED" ? " <span class='cx-q cx-q-calc'>CALC</span>" : " <span class='cx-q cx-q-rep'>REP</span>";
+        var b = n.kind === "CALCULATED" ? " <span class='cx-q cx-q-calc'>CALC</span>" : "";
         return "<div><dt>" + esc(n.label) + b + "</dt><dd>" + v + "</dd></div>";
       }).join("");
+      if (!cells) { E("cx-ov-ratio").innerHTML = ""; return; }
       E("cx-ov-ratio").innerHTML = sec("Key ratios",
         '<dl class="cx-facts">' + cells + "</dl>" +
         '<div class="cx-note">REPORTED values come from the provider; CALC values from the terminal ratio engine. Detail in Valuation.</div>');
     }).catch(function () { if (E("cx-ov-ratio")) E("cx-ov-ratio").innerHTML = ""; });
   }
-  function tOverview(sym, main) { perf(sym, main); }
+  function tOverview(sym, main) {
+    if (secType(sym) === "INDEX") { perfIndex(sym, main); return; }
+    perf(sym, main);
+  }
+  /* Index overview: breadth, heatmap, contributors, range, structure.
+     No stock multiples, ever. */
+  function perfIndex(sym, main) {
+    var V = window.FT_VIZ, I = window.FT_INTERP;
+    main.innerHTML = '<div id="cx-ix-perf">' + skel(3) + '</div><div id="cx-ix-range"></div>' +
+      '<div id="cx-ix-breadth">' + skel(2) + '</div><div id="cx-ix-heat"></div>' +
+      '<div id="cx-ix-mov"></div><div id="cx-ix-tech">' + skel(2) + "</div>" +
+      '<div id="cx-ix-news">' + skel(3) + "</div>";
+    API.get("history", { symbol: sym, range: "1Y", interval: "1d" }).then(function (r) {
+      if (!E("cx-ix-perf")) return;
+      var bars = (((r.body || {}).data) || {}).bars || [];
+      var cl = bars.map(function (b) { return b.c; });
+      function ret(back) {
+        if (cl.length < back + 1) return null;
+        var now = cl[cl.length - 1], old = cl[cl.length - 1 - back];
+        if (now === null || old === null || !old) return null;
+        return (now - old) / Math.abs(old) * 100;
+      }
+      var cells = [["1D", 1], ["1W", 5], ["1M", 21], ["3M", 63], ["6M", 126], ["1Y", 252]]
+        .map(function (p) { return { label: p[1], value: ret(p[0]) === null ? null : F.fmtPct(ret(p[0])) }; })
+        .filter(function (c) { return c.value !== null; });
+      var note = I.trend("The index", cl, "the trailing year of verified closes");
+      E("cx-ix-perf").innerHTML = sec("Performance",
+        (cells.length ? '<dl class="cx-facts">' + cells.map(function (c) {
+          return "<div><dt>" + c.label + "</dt><dd>" + c.value + "</dd></div>";
+        }).join("") + "</dl>" : "") +
+        (note ? "<p class='interp'>" + esc(note) + "</p>" : "") + prov(r.body));
+    });
+    API.get("quote", { symbol: sym }).then(function (r) {
+      if (!E("cx-ix-range")) return;
+      var qq = (r.body && r.body.data) || {};
+      var hi = qq.fifty_two_week_high, lo = qq.fifty_two_week_low, px = qq.price;
+      if (hi === null || hi === undefined || lo === null || lo === undefined || !hi || hi === lo) return;
+      var pos = px !== null && px !== undefined ? Math.round((px - lo) / (hi - lo) * 100) : null;
+      E("cx-ix-range").innerHTML = sec("52-week range",
+        '<div class="bar-row"><span>Low ' + F.fmtNum(lo) + "</span>" +
+        '<span class="tr"><span class="fl" style="display:block;width:' + (pos === null ? 0 : pos) +
+        '%;background:var(--acc)"></span></span><b>High ' + F.fmtNum(hi) + "</b></div>" +
+        (pos !== null ? "<p class='interp'>Trading " + pos + "% up the 52-week range.</p>" : "") + prov(r.body));
+    });
+    API.get("market-overview").then(function (r) {
+      if (!E("cx-ix-breadth")) return;
+      var items = ((r.body || {}).items) || [];
+      var eq = items.filter(function (i) {
+        return i.quote && i.quote.price !== null && i.quote.price !== undefined &&
+          i.symbol.charAt(0) !== "^" && !/NIFTY_FIN/.test(i.symbol);
+      });
+      var adv = eq.filter(function (i) { return (i.quote.change_pct || 0) > 0; }).length;
+      var dec = eq.filter(function (i) { return (i.quote.change_pct || 0) < 0; }).length;
+      var unch = eq.length - adv - dec;
+      var note = I.breadth(adv, dec, unch, "the tracked universe");
+      E("cx-ix-breadth").innerHTML = sec("Market breadth",
+        V.bars([
+          { label: "Advancing", value: adv, display: String(adv) },
+          { label: "Declining", value: dec, display: String(dec) },
+          { label: "Unchanged", value: unch, display: String(unch) },
+        ]) + (note ? "<p class='interp'>" + esc(note) + " Tracked universe — a participation proxy, not full market breadth.</p>" : ""));
+      var heat = E("cx-ix-heat");
+      if (heat) {
+        var sectors = [["^CNXIT", "IT"], ["^CNXAUTO", "Auto"], ["^CNXFMCG", "FMCG"],
+          ["^CNXPHARMA", "Pharma"], ["^NSEBANK", "Banking"]];
+        var by = {};
+        items.forEach(function (i) { by[i.symbol] = i; });
+        heat.innerHTML = sec("Sector heatmap",
+          V.heatmap(sectors.map(function (p) {
+            var v = (by[p[0]] || {}).quote || {};
+            return { label: p[1], value: v.change_pct, sub: "NSE sector index" };
+          }), { fmt: function (v) { return F.fmtPct(v); } }) +
+          "<p class='interp'>Equal-size tiles show performance only — no weight data is available.</p>");
+      }
+      var mv = E("cx-ix-mov");
+      if (mv) {
+        function rows(list, title) {
+          if (!list.length) return "";
+          return "<h3 style='margin:10px 0 4px;font-size:13px'>" + title + "</h3><ul class='ranklist'>" +
+            list.slice(0, 5).map(function (i) {
+              return "<li><span class='rk'>·</span><span><a href='#/company/" + esc(i.symbol) + "'>" +
+                esc(i.quote.name || i.symbol) + "</a></span><b class='" + F.dirClass(i.quote.change_pct) + "'>" +
+                F.fmtPct(i.quote.change_pct) + "</b></li>";
+            }).join("") + "</ul>";
+        }
+        var g = eq.slice().sort(function (a, b) { return (b.quote.change_pct || 0) - (a.quote.change_pct || 0); });
+        var l = eq.slice().sort(function (a, b) { return (a.quote.change_pct || 0) - (b.quote.change_pct || 0); });
+        var html = rows(g.filter(function (i) { return (i.quote.change_pct || 0) > 0; }), "Top contributors (tracked)") +
+          rows(l.filter(function (i) { return (i.quote.change_pct || 0) < 0; }), "Top detractors (tracked)");
+        mv.innerHTML = html ? sec("Contributors", html +
+          "<p class='interp'>Ranked from the tracked universe — a proxy, not official index attribution.</p>") : "";
+      }
+    });
+    API.get("technical", { symbol: sym }).then(function (r) {
+      if (!E("cx-ix-tech")) return;
+      var dd = (r.body && r.body.data) || null;
+      if (!dd) return;
+      E("cx-ix-tech").innerHTML = sec("Technical structure",
+        '<dl class="cx-facts">' +
+        (dd.rsi14 !== null && dd.rsi14 !== undefined ? "<div><dt>RSI 14</dt><dd>" + F.fmtNum(dd.rsi14) + "</dd></div>" : "") +
+        (dd.sma50 !== null && dd.sma50 !== undefined ? "<div><dt>SMA 50</dt><dd>" + F.fmtNum(dd.sma50) + "</dd></div>" : "") +
+        (dd.sma200 !== null && dd.sma200 !== undefined ? "<div><dt>SMA 200</dt><dd>" + F.fmtNum(dd.sma200) + "</dd></div>" : "") +
+        "</dl>" +
+        (I.rsi(dd.rsi14) ? "<p class='interp'>" + esc(I.rsi(dd.rsi14)) + "</p>" : "") + prov(r.body));
+    });
+    API.get("news", { symbol: sym, limit: 5 }).then(function (r) {
+      if (!E("cx-ix-news")) return;
+      var items = (((r.body || {}).data) || {}).items || [];
+      if (!items.length) return;
+      E("cx-ix-news").innerHTML = sec("Latest news", items.slice(0, 5).map(newsRow).join("") + prov(r.body));
+    });
+  }
   /* statement table shared by financials */
   /* Priority rows first, full statement expandable, one consistent unit. */
   var STMT_PRIORITY = [
@@ -472,8 +649,8 @@
     function prow(label, k, ix, bold) {
       var rc = rowCells(k);
       return '<tr' + (ix % 2 ? ' class="zeb"' : "") + '><td' + (bold ? "><b>" + esc(label) + "</b>" : ">" + esc(label)) + "</td>" +
-        rc.vals.map(function (v) { return '<td class="num">' + (v === null ? "—" : F.fmtStmt(v, ccy)) + "</td>"; }).join("") +
-        '<td class="num ' + dir(rc.yoy) + '">' + (rc.yoy === null ? "—" : F.fmtPct(rc.yoy)) + "</td></tr>";
+        rc.vals.map(function (v) { return '<td class="num">' + (v === null ? "" : F.fmtStmt(v, ccy)) + "</td>"; }).join("") +
+        '<td class="num ' + dir(rc.yoy) + '">' + (rc.yoy === null ? "" : F.fmtPct(rc.yoy)) + "</td></tr>";
     }
     var head = '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Particulars (' + esc(unit) + ')</th>' +
       reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "?") + "</th>"; }).join("") +
@@ -520,7 +697,23 @@
           { name: "EBITDA", values: series(["ebitda"]) },
           { name: "PAT", values: series(["netincome", "netearnings", "pat", "netprofit"]) },
         ].filter(function (s) { return s.values && s.values.some(function (v) { return v !== null; }); });
-        if (sers.length) window.FT_CHART.drawBars(cv, { labels: labels, series: sers });
+        if (sers.length) {
+          window.FT_CHART.drawBars(cv, { labels: labels, series: sers });
+          var I = window.FT_INTERP, rev = sers[0].values.filter(function (v) { return v !== null; });
+          var interp = "";
+          if (rev.length >= 3 && rev[0] > 0 && rev[rev.length - 1] > 0) {
+            var cagr = (Math.pow(rev[rev.length - 1] / rev[0], 1 / (rev.length - 1)) - 1) * 100;
+            interp = I.growth("Revenue", cagr, null, labels[0] + "–" + labels[labels.length - 1], null);
+          } else if (rev.length >= 2 && rev[rev.length - 2]) {
+            interp = I.growth("Revenue", null, (rev[rev.length - 1] - rev[rev.length - 2]) / Math.abs(rev[rev.length - 2]) * 100, null, labels[labels.length - 1]);
+          }
+          if (interp) {
+            var p = document.createElement("p");
+            p.className = "interp";
+            p.textContent = interp;
+            cv.parentNode.appendChild(p);
+          }
+        }
       }, 50);
     }
     return out;
@@ -575,8 +768,8 @@
         ["Book value", r.BookValue && r.BookValue !== "None" && !isNaN(Number(r.BookValue)) ? F.fmtNum(Number(r.BookValue)) : null],
         ["Dividend yield", r.DividendYield && r.DividendYield !== "None" ? r.DividendYield + "%" : null]];
       var h = sec("Valuation",
-        '<div class="cx-facts">' + grid.map(function (g) {
-          return "<div><dt>" + g[0] + "</dt><dd>" + (g[1] === null ? "—" : g[1]) + "</dd></div>";
+        '<div class="cx-facts">' + grid.filter(function (g) { return g[1] !== null; }).map(function (g) {
+          return "<div><dt>" + g[0] + "</dt><dd>" + g[1] + "</dd></div>";
         }).join("") + "</div>" + prov(env) +
         '<p class="cx-note">Peer comparison lives in the Compare workspace (no automatic peer universe, no rankings). ' +
         "<button class='cx-btn2' id='cx-peer'>Compare " + esc(sym) + " side-by-side →</button></p>");
@@ -591,7 +784,7 @@
         h += '<section class="cx-sec"><h2>Cross-check</h2><details><summary class="cx-note">Primary vs other sources (' +
           rec.comparisons.length + " fields)</summary>" + '<div class="cx-scroll" style="margin-top:8px"><table class="cx-t"><thead><tr><th scope="col">Metric</th><th scope="col">Primary</th><th scope="col">Other source</th></tr></thead><tbody>' +
           rec.comparisons.map(function (c) {
-            var other = (c.cross_check || []).map(function (o) { return esc(o.source) + ": " + Cv(o.value); }).join("; ") || "—";
+            var other = (c.cross_check || []).map(function (o) { var v = Cv(o.value); return v ? esc(o.source) + ": " + v : ""; }).filter(Boolean).join("; ");
             return "<tr><td>" + esc(c.field) + "</td><td class='num'>" + Cv(c.primary && c.primary.value) + "</td><td>" + other + "</td></tr>";
           }).join("") + "</tbody></table></div></details></section>";
       }
@@ -639,8 +832,8 @@
     }).catch(function () { if (E("cx-val")) E("cx-val").innerHTML = sec("Valuation", err()); });
   }
   function estCell(v) {
-    if (v === undefined || v === null) return "—";
-    if (typeof v === "string" && /^(none|null|undefined|nan|-|n\/a)$/i.test(v.trim())) return "—";
+    if (v === undefined || v === null) return "";
+    if (typeof v === "string" && /^(none|null|undefined|nan|-|n\/a)$/i.test(v.trim())) return "";
     return esc(String(v));
   }
   function tEstimates(sym, main) {
@@ -690,7 +883,7 @@
             var cls = (typeof sv === "number") ? dir(sv) : "";
             return "<tr><td>" + estCell(x.fiscalDateEnding || x.reportedDate) + "</td><td class='num'>" + estCell(x.reportedEPS) +
               "</td><td class='num'>" + estCell(x.estimatedEPS) + "</td><td class='num " + cls + "'>" +
-              (sv === undefined || sv === null ? "—" : typeof sv === "number" ? F.fmtPct(sv) : estCell(sv)) + "</td></tr>";
+              (sv === undefined || sv === null || sv === "" ? "" : typeof sv === "number" ? F.fmtPct(sv) : estCell(sv)) + "</td></tr>";
           }).join("") + "</tbody></table></div>";
       }
       E("cx-earn").innerHTML = sec("Earnings", prov(r.body)) +
@@ -775,11 +968,12 @@
       E("cx-own").innerHTML = sec("Ownership",
         '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Holder class</th><th scope="col" class="num">Holding</th><th scope="col">As of</th></tr></thead><tbody>' +
         owns.map(function (o, ix) {
-          return "<tr" + (ix % 2 ? ' class="zeb"' : "") + "><td>" + Cv(o.category) + "</td><td class='num'>" +
-            (o.percentage === null || o.percentage === undefined ? "—" : Number(o.percentage).toFixed(2) + "%") +
+          var pct = (o.percentage === null || o.percentage === undefined) ? "" : Number(o.percentage).toFixed(2) + "%";
+          return "<tr" + (ix % 2 ? ' class="zeb"' : "") + "><td>" + Cv(o.category) + "</td><td class='num'>" + pct +
             "</td><td>" + Cv(o.holding_date) + "</td></tr>";
         }).join("") + "</tbody></table></div>" +
-        '<div class="cx-note">Total ' + (total ? total.toFixed(1) + "%" : "—") + " across reported classes · as of <b>" + esc((owns[0] || {}).holding_date || "—") + "</b></div>" + prov(r.body));
+        (total ? '<div class="cx-note">Total ' + total.toFixed(1) + "% across reported classes" +
+          (owns[0] && owns[0].holding_date ? " · as of <b>" + esc(owns[0].holding_date) + "</b>" : "") + "</div>" : "") + prov(r.body));
     }).catch(function () { if (E("cx-own")) E("cx-own").innerHTML = sec("Ownership", err()); });
   }
   function tCharts(sym, main) {
@@ -839,6 +1033,7 @@
       var ph = d.phase || {}, rs = d.relative_strength || {}, vcp = d.vcp || {},
         bo = d.breakout || {}, tt = d.trend_template || {}, rr = d.risk_reward || {};
       function fact(l, v, tip) {
+        if (v === null || v === undefined || v === "—" || v === "") return ""; // omitted, never placeholder
         return "<div title='" + esc(tip || "") + "'><dt>" + l + "</dt><dd>" + v + "</dd></div>";
       }
       var snap = d.snapshot || {};

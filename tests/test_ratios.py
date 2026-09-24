@@ -104,6 +104,28 @@ class RatioEngineTest(unittest.TestCase):
         out = R.compute_all([av_income()], [av_balance(eq=0.0)], [])
         self.assertNotIn("roe", out)
 
+    def test_new_ratios(self):
+        inc = [dict(av_income(), costOfRevenue="600")]
+        bal = [dict(av_balance(), inventory="150",
+                    currentnetreceivables="200")]
+        out = R.compute_all(inc, bal, [av_cash()],
+                            price=280.0, market_cap=280000.0)
+        self.assertAlmostEqual(out["ebitda_margin"]["value"], 20.0, places=2)
+        self.assertAlmostEqual(out["pb_calc"]["value"], 280.0, places=2)
+        self.assertAlmostEqual(out["fcf_yield"]["value"], 120.0 / 280000.0 * 100,
+                               places=4)
+        self.assertAlmostEqual(out["inventory_turnover"]["value"], 600.0 / 150.0,
+                               places=2)
+        self.assertAlmostEqual(out["receivables_turnover"]["value"], 1000.0 / 200.0,
+                               places=2)
+        for key in ("ebitda_margin", "pb_calc", "fcf_yield",
+                    "inventory_turnover", "receivables_turnover"):
+            node = out[key]
+            self.assertEqual(node["kind"], "CALCULATED")
+            self.assertTrue(node["formula"])
+            self.assertTrue(node["inputs"])
+            self.assertIn("calculated_at", node)
+
 
 if __name__ == "__main__":
     unittest.main()

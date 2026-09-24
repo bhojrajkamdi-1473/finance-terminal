@@ -24,16 +24,18 @@
     } catch (e) { return "—"; }
   }
   function obsList(list) {
-    if (!list || !list.length) return '<div class="cx-note">Insufficient evidence.</div>';
-    return '<ul class="cx-obs">' + list.map(function (o) {
+    var live = (list || []).filter(function (o) { return o && clean(o.statement); });
+    if (!live.length) return "";
+    return '<ul class="cx-obs">' + live.map(function (o) {
       var meta = [o.source, o.period].filter(function (x) { return x && !/^(none|null)$/i.test(String(x)); }).join(" · ");
-      return "<li>" + esc(clean(o.statement) || "—") + (meta ? '<span class="om">' + esc(meta) + "</span>" : "") + "</li>";
+      return "<li>" + esc(clean(o.statement)) + (meta ? '<span class="om">' + esc(meta) + "</span>" : "") + "</li>";
     }).join("") + "</ul>";
   }
   function metricGrid(metrics) {
-    if (!metrics || !metrics.length) return "";
-    return '<dl class="cx-facts">' + metrics.map(function (m) {
-      return "<div><dt>" + esc(m.label || "") + "</dt><dd>" + (m.display ? esc(m.display) : "—") + "</dd></div>";
+    var live = (metrics || []).filter(function (m) { return m && m.display; });
+    if (!live.length) return "";
+    return '<dl class="cx-facts">' + live.map(function (m) {
+      return "<div><dt>" + esc(m.label || "") + "</dt><dd>" + esc(m.display) + "</dd></div>";
     }).join("") + "</dl>";
   }
   function rsec(title, node, open) {
@@ -43,41 +45,50 @@
     if (node.summary && clean(node.summary)) inner += '<p class="cx-exec">' + esc(clean(node.summary)) + "</p>";
     inner += metricGrid(node.metrics) + obsList(node.observations);
     if ((!node.observations || !node.observations.length) && node.points && node.points.length && !node.text && !node.summary) {
-      inner += '<ul class="cx-obs">' + node.points.slice(0, 5).map(function (p) { return "<li>" + esc(clean(p) || "—") + "</li>"; }).join("") + "</ul>";
+      var pts = node.points.filter(clean).slice(0, 5);
+      if (pts.length) inner += '<ul class="cx-obs">' + pts.map(function (p) { return "<li>" + esc(clean(p)) + "</li>"; }).join("") + "</ul>";
     }
+    if (!inner) return ""; // omit empty sections entirely
     return '<details class="cx-sec" style="padding:12px 14px"' + (open ? " open" : "") + '><summary style="cursor:pointer;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--cx-sub);font-weight:750">' +
       esc(title) + "</summary><div style='margin-top:8px'>" + inner + "</div></details>";
   }
-  function reportHtml(r) {
-    var h = "";
-    if (!r.llm_backed) {
-      h += '<div class="cx-empty" style="margin-bottom:12px"><b>AI synthesis unavailable</b><p>Verified market data is available below. Configure an LLM provider to enable generated synthesis.</p></div>';
-    }
-    var snap = (r.executive_snapshot || {}).text || (r.executive_snapshot || {}).summary || "";
-    if (clean(snap)) h += '<section class="cx-sec"><h2>Executive summary</h2><p class="cx-exec">' + esc(clean(snap)) + "</p></section>";
-    h += rsec("Fundamentals", r.fundamentals, false);
-    h += rsec("Valuation", r.valuation, false);
-    h += rsec("Technical structure", r.technical, false);
-    var ns = r.news_sentiment || {};
-    var nh = '<section class="cx-sec"><h2>News &amp; sentiment</h2>' + obsList(ns.observations);
+  function newsSec(ns) {
+    ns = ns || {};
+    if ((!ns.observations || !ns.observations.length) && (!ns.items || !ns.items.length)) return "";
+    var h = '<section class="cx-sec"><h2>News &amp; sentiment</h2>' + obsList(ns.observations);
     if (ns.items && ns.items.length) {
-      nh += '<div style="margin-top:6px">' + ns.items.slice(0, 6).map(function (n) {
+      h += '<div style="margin-top:6px">' + ns.items.slice(0, 6).map(function (n) {
         var t = n.url ? '<a href="' + esc(n.url) + '" target="_blank" rel="noopener">' + esc(clean(n.title) || "Untitled") + "</a>" : esc(clean(n.title) || "Untitled");
         return '<div class="cx-newsrow"><span class="tm">' + esc(String(n.published_at || "").slice(0, 10)) + "</span><span class='hl'>" + t +
           "</span><span class='src'>" + esc(n.source || "") + "</span></div>";
       }).join("") + "</div>";
     }
-    nh += "</section>";
-    h += nh;
+    return h + "</section>";
+  }
+  function reportHtml(r) {
+    var h = "";
+    if (!r.llm_backed) {
+      h += "<div class='cx-note' style='margin-bottom:8px'>Deterministic research mode — every section below is built from verified data.</div>";
+    }
+    var snap = (r.executive_snapshot || {}).text || (r.executive_snapshot || {}).summary || "";
+    if (clean(snap)) h += '<section class="cx-sec"><h2>Research snapshot</h2><p class="cx-exec">' + esc(clean(snap)) + "</p></section>";
+    /* Two-column snapshot: fundamentals left, market context right. */
+    h += "<div class='an-grid'><div class='an-6'>" +
+      rsec("Fundamentals", r.fundamentals, false) +
+      rsec("Valuation", r.valuation, false) + "</div><div class='an-6'>" +
+      rsec("Technical structure", r.technical, false) +
+      newsSec(r.news_sentiment) + "</div></div>";
     h += '<section class="cx-sec"><h2>Bull case / Bear case</h2><div class="cx-cols"><div class="cx-col bull"><h4>Bull case</h4>' +
       obsList((r.bull_case || {}).observations) + '</div><div class="cx-col bear"><h4>Bear case</h4>' +
       obsList((r.bear_case || {}).observations) + "</div></div></section>";
     var risks = (r.risks || {}).observations || [];
-    h += '<section class="cx-sec"><h2>Risk factors</h2>' + (risks.length ?
-      '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Risk</th><th scope="col">Evidence</th></tr></thead><tbody>' +
-      risks.map(function (o) {
-        return "<tr><td>" + esc(clean(o.statement) || "—") + "</td><td>" + esc([o.source, o.period].filter(Boolean).join(" · ") || "—") + "</td></tr>";
-      }).join("") + "</tbody></table></div>" : '<div class="cx-note">Insufficient evidence.</div>') + "</section>";
+    if (risks.length) {
+      h += '<section class="cx-sec"><h2>Risk factors</h2>' +
+        '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Risk</th><th scope="col">Evidence</th></tr></thead><tbody>' +
+        risks.filter(function (o) { return clean(o.statement); }).map(function (o) {
+          return "<tr><td>" + esc(clean(o.statement)) + "</td><td>" + esc([o.source, o.period].filter(Boolean).join(" · ")) + "</td></tr>";
+        }).join("") + "</tbody></table></div></section>";
+    }
     if (r.data_gaps && r.data_gaps.length) {
       var labels = { estimates: "No verified analyst estimates available.", ownership: "Ownership breakdown unavailable.",
         earnings: "Earnings history unavailable.", news: "Recent news unavailable.", income_annual: "Statements unavailable from configured providers.",
@@ -92,7 +103,7 @@
       r.sources.forEach(function (s) {
         if (s.category === "AI" || seen[s.provider]) return;
         seen[s.provider] = 1;
-        rows.push("<tr><td>" + esc(s.provider) + "</td><td>" + esc(s.status || "") + "</td><td>" + esc(s.as_of ? dayTime(s.as_of) : "—") + "</td></tr>");
+        rows.push("<tr><td>" + esc(s.provider) + "</td><td>" + esc(s.status || "") + "</td><td>" + esc(s.as_of ? dayTime(s.as_of) : "") + "</td></tr>");
       });
       h += '<section class="cx-sec"><h2>Sources</h2><details><summary class="cx-note">Show contributing sources (' + rows.length + ")</summary>" +
         '<div class="cx-scroll" style="margin-top:8px"><table class="cx-t"><thead><tr><th scope="col">Source</th><th scope="col">Status</th><th scope="col">As of</th></tr></thead><tbody>' +
@@ -120,8 +131,11 @@
     });
     function meta(r) {
       var m = host.querySelector("#cxai-meta");
-      if (m) m.textContent = "Last updated: " + dayTime(r.generated_at) + "  ·  Sources: " + (r.provider_count === undefined ? "—" : r.provider_count) +
-        "  ·  " + (r.llm_backed ? "AI synthesis · " + r.model : "Verified-data analysis");
+      if (!m) return;
+      var bits = ["Last updated: " + dayTime(r.generated_at)];
+      if (r.provider_count !== undefined && r.provider_count !== null) bits.push("Sources: " + r.provider_count);
+      bits.push(r.llm_backed ? "AI synthesis · " + r.model : "Verified-data analysis");
+      m.textContent = bits.join("  ·  ");
     }
     function fail(reason) {
       host.querySelector("#cxai-out").innerHTML =

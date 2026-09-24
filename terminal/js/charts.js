@@ -242,5 +242,66 @@
       lx += ctx.measureText(s.name || "").width + 26;
     });
   }
-  window.FT_CHART = { drawPriceChart: drawPriceChart, drawSpark: drawSpark, drawBars: drawBars, sma: sma };
+  /* Multi-series lines (compare performance, GMP trend). Shared axis. */
+  function drawLines(canvas, groups, opts) {
+    var P = palette();
+    opts = opts || {};
+    var dpr = window.devicePixelRatio || 1;
+    var W = canvas.clientWidth || 600, H = canvas.clientHeight || 220;
+    canvas.width = W * dpr; canvas.height = H * dpr;
+    var ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, W, H);
+    var series = (groups.series || []).filter(function (s) {
+      return s.values && s.values.some(function (v) { return v !== null && v !== undefined && !isNaN(v); });
+    });
+    var labels = groups.labels || [];
+    if (!series.length) {
+      ctx.fillStyle = P.ink; ctx.font = "12px sans-serif";
+      ctx.fillText("Insufficient data", 16, 30);
+      return;
+    }
+    var cols = opts.colors || [P.smas[0], P.smas[1], P.smas[2], "#7B5CF6", "#00D68F", "#F5A623"];
+    var all = [];
+    series.forEach(function (s) { s.values.forEach(function (v) { if (v !== null && v !== undefined && !isNaN(v)) all.push(v); }); });
+    var mx = Math.max.apply(null, all), mn = Math.min.apply(null, all), span = mx - mn || 1;
+    var padL = 52, padB = 22, padT = 8;
+    function x(i, n) { return padL + (i / Math.max(n - 1, 1)) * (W - padL - 8); }
+    function y(v) { return padT + (1 - (v - mn) / span) * (H - padT - padB); }
+    ctx.strokeStyle = P.grid; ctx.fillStyle = P.ink;
+    ctx.font = "10px 'JetBrains Mono','IBM Plex Mono',Consolas,monospace"; ctx.lineWidth = 1;
+    for (var g = 0; g <= 3; g++) {
+      var gv = mn + (span * g) / 3, gy = Math.round(y(gv)) + 0.5;
+      ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - 8, gy); ctx.stroke();
+      var lab = gv >= 1000 ? (gv / 1000).toFixed(1) + "k" : gv >= 100 ? gv.toFixed(0) : gv.toFixed(1);
+      ctx.fillText(lab, 4, gy + 3);
+    }
+    series.forEach(function (s, j) {
+      var n = s.values.length;
+      ctx.strokeStyle = cols[j % cols.length]; ctx.lineWidth = 2; ctx.lineJoin = "round";
+      ctx.beginPath();
+      var started = false;
+      s.values.forEach(function (v, i) {
+        if (v === null || v === undefined || isNaN(v)) { started = false; return; }
+        if (!started) { ctx.moveTo(x(i, n), y(v)); started = true; }
+        else ctx.lineTo(x(i, n), y(v));
+      });
+      ctx.stroke();
+    });
+    var lx = padL;
+    ctx.font = "11px sans-serif";
+    series.forEach(function (s, j) {
+      ctx.fillStyle = cols[j % cols.length];
+      ctx.fillRect(lx, 2, 8, 8);
+      ctx.fillStyle = P.ink;
+      ctx.fillText(s.name || "", lx + 11, 9);
+      try { lx += ctx.measureText(s.name || "").width + 26; } catch (e) { lx += 90; }
+    });
+    if (labels.length) {
+      ctx.fillStyle = P.ink;
+      ctx.fillText(String(labels[0]).slice(0, 10), padL, H - 6);
+      ctx.fillText(String(labels[labels.length - 1]).slice(0, 10), W - 60, H - 6);
+    }
+  }
+  window.FT_CHART = { drawPriceChart: drawPriceChart, drawSpark: drawSpark, drawBars: drawBars, drawLines: drawLines, sma: sma };
 })();

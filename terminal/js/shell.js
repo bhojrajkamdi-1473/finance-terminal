@@ -120,9 +120,10 @@
           "<th scope='col' class='num'>GMP (UNOFFICIAL)</th><th scope='col' class='num'>GMP %</th>" +
           "<th scope='col'>Updated</th></tr></thead><tbody>" +
           gl.map(function (g) {
-            return "<tr><td>" + esc(g.company || "—") + "<br><span class='cx-note'>IPO Guru · unofficial chatter, not a price promise</span></td>" +
-              "<td class='num'>₹" + esc(String(g.value)) + "</td><td class='num'>" + esc(String(g.percent === null || g.percent === undefined ? "—" : g.percent + "%")) +
-              "</td><td>" + esc(g.updated_at || "—") + "</td></tr>";
+            if (g.value === null || g.value === undefined) return "";
+            return "<tr><td>" + esc(g.company || "") + "<br><span class='cx-note'>IPO Guru · unofficial chatter, not a price promise</span></td>" +
+              "<td class='num'>₹" + esc(String(g.value)) + "</td><td class='num'>" + esc(String(g.percent === null || g.percent === undefined ? "" : g.percent + "%")) +
+              "</td><td>" + esc(g.updated_at || "") + "</td></tr>";
           }).join("") + "</tbody></table></div>" +
           ((gmp && gmp.discrepancy_note) ? "<div class='cx-note'>Status: GMP DISCREPANCY — values shown per source, never averaged.</div>" : "");
         return;
@@ -139,17 +140,23 @@
           "<th scope='col' class='num'>QIB</th><th scope='col' class='num'>NII</th>" +
           "<th scope='col' class='num'>Retail</th><th scope='col' class='num'>Total</th><th scope='col'>Updated</th></tr></thead><tbody>" +
           sd.map(function (s) {
-            function x(v) { return v === null || v === undefined ? "—" : esc(String(v)) + "x"; }
-            return "<tr><td>" + esc(s.company || "—") + "</td><td class='num'>" + x(s.qib) + "</td><td class='num'>" + x(s.nii) +
-              "</td><td class='num'>" + x(s.retail) + "</td><td class='num'><b>" + x(s.total) + "</b></td><td>" + esc(s.updated_at || "—") + "</td></tr>";
+            function x(v) { return v === null || v === undefined ? "" : esc(String(v)) + "x"; }
+            return "<tr><td>" + esc(s.company || "") + "</td><td class='num'>" + x(s.qib) + "</td><td class='num'>" + x(s.nii) +
+              "</td><td class='num'>" + x(s.retail) + "</td><td class='num'><b>" + x(s.total) + "</b></td><td>" + esc(s.updated_at || "") + "</td></tr>";
           }).join("") + "</tbody></table></div>";
+        var bars = sd.filter(function (s) { return s.total !== null && s.total !== undefined && !isNaN(Number(s.total)); })
+          .map(function (s) { return { label: String(s.company || "?").slice(0, 22), value: Number(s.total), display: Number(s.total).toFixed(2) + "x" }; });
+        if (bars.length && window.FT_VIZ) {
+          host.innerHTML = "<div style='margin-bottom:8px'>" + window.FT_VIZ.bars(bars) + "</div>" + host.innerHTML;
+        }
         return;
       }
       var rows = tab === "Calendar"
         ? Object.keys(buckets).reduce(function (a, k) { return a.concat(buckets[k]); }, [])
         : (buckets[tab.toLowerCase()] || []);
+      rows = rows.filter(function (w) { return (w.name || w.company || w.symbol || w.ticker); });
       if (!rows.length) {
-        host.innerHTML = "<div class='cx-empty'><b>" + esc(tab) + "</b><p>No verified data available.</p></div>";
+        host.innerHTML = "<div class='cx-note'>No " + esc(tab.toLowerCase()) + " IPOs right now.</div>";
         return;
       }
       host.innerHTML = '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Company</th>' +
@@ -168,19 +175,19 @@
         b.onclick = function () { detail(rows[Number(b.getAttribute("data-ipo"))]); };
       });
     }
-    function pick(w, keys) {
+      function pick(w, keys) {
       for (var i = 0; i < keys.length; i++) {
         for (var k in w) {
           if (String(k).toLowerCase().replace(/[^a-z]/g, "") === keys[i].replace(/[^a-z]/g, "") && w[k]) return String(w[k]).slice(0, 10);
         }
       }
-      return "—";
+      return "";
     }
     function band(w) {
       var lo = pick(w, ["pricerangelow", "pricelow", "lowerband", "floorprice"]);
       var hi = pick(w, ["pricerangehigh", "pricehigh", "upperband", "capprice", "offerprice"]);
-      if (lo === "—" && hi === "—") return "—";
-      return lo === "—" ? hi : hi === "—" ? lo : lo + " – " + hi;
+      if (!lo && !hi) return "";
+      return !lo ? hi : !hi ? lo : lo + " – " + hi;
     }
     function detail(w) {
       var host = $("ipo-det");
@@ -194,21 +201,28 @@
         var prof = ((b.profile || {}).data) || {}, val = ((b.valuation || {}).data) || {};
         var gm = b.gmp || {}, sb = b.subscription || {};
         var grow = (gm.data && gm.data[0]) || null;
-        var gmpHtml = (grow && grow.gmp_value !== null && grow.gmp_value !== undefined)
-          ? "<dl class='cx-facts'><div><dt>GMP (unofficial)</dt><dd>₹" + esc(String(grow.gmp_value)) + "</dd></div>" +
-            "<div><dt>GMP %</dt><dd>" + esc(String(grow.gmp_percent === null || grow.gmp_percent === undefined ? "—" : grow.gmp_percent + "%")) + "</dd></div>" +
-            "<div><dt>Updated</dt><dd>" + esc(grow.gmp_updated_at || "—") + "</dd></div>" +
-            (grow.estimated_listing_price !== null && grow.estimated_listing_price !== undefined ?
-              "<div><dt>Indicative listing</dt><dd>₹" + esc(String(grow.estimated_listing_price)) + " (indicative GMP-derived estimate)</dd></div>" : "") + "</dl>"
+        var facts = [];
+        if (grow && grow.gmp_value !== null && grow.gmp_value !== undefined)
+          facts.push("<div><dt>GMP (unofficial)</dt><dd>₹" + esc(String(grow.gmp_value)) + "</dd></div>");
+        if (grow && grow.gmp_percent !== null && grow.gmp_percent !== undefined)
+          facts.push("<div><dt>GMP %</dt><dd>" + esc(String(grow.gmp_percent)) + "%</dd></div>");
+        if (grow && grow.gmp_updated_at)
+          facts.push("<div><dt>Updated</dt><dd>" + esc(grow.gmp_updated_at) + "</dd></div>");
+        if (grow && grow.estimated_listing_price !== null && grow.estimated_listing_price !== undefined)
+          facts.push("<div><dt>Indicative listing</dt><dd>₹" + esc(String(grow.estimated_listing_price)) + " (indicative GMP-derived estimate)</dd></div>");
+        var gmpHtml = facts.length ? "<dl class='cx-facts'>" + facts.join("") + "</dl>"
           : "<div class='cx-empty'><b>Grey market premium</b>" +
             "<p><span class='cx-q cx-q-warn'>UNOFFICIAL GREY MARKET PREMIUM</span></p>" +
             "<p>" + esc(gm.message || "No verified GMP source.") + "</p></div>";
         host.innerHTML = "<section class='cx-sec'><h2>" + esc(prof.name || sym) + " — issue file</h2>" +
           "<p class='cx-note'>" + esc((prof.description || "").slice(0, 400)) + "</p>" +
-          "<dl class='cx-facts'><div><dt>Sector</dt><dd>" + esc(prof.sector || "—") + "</dd></div>" +
-          "<div><dt>P/E</dt><dd>" + esc((val.metrics && val.metrics.pe && val.metrics.pe.value) || "—") + "</dd></div>" +
-          "<div><dt>Market cap</dt><dd>" + esc((val.metrics && val.metrics.market_cap && val.metrics.market_cap.value) || "—") + "</dd></div></dl>" +
-          gmpHtml +
+          "<dl class='cx-facts'>" +
+          (prof.sector ? "<div><dt>Sector</dt><dd>" + esc(prof.sector) + "</dd></div>" : "") +
+          ((val.metrics && val.metrics.pe && val.metrics.pe.value !== null && val.metrics.pe.value !== undefined)
+            ? "<div><dt>P/E</dt><dd>" + esc(String(val.metrics.pe.value)) + "</dd></div>" : "") +
+          ((val.metrics && val.metrics.market_cap && val.metrics.market_cap.value !== null && val.metrics.market_cap.value !== undefined)
+            ? "<div><dt>Market cap</dt><dd>" + esc(String(val.metrics.market_cap.value)) + "</dd></div>" : "") +
+          "</dl>" + gmpHtml +
           "<div class='cx-note' style='margin-top:6px'>Structured analysis inputs only — never apply/avoid advice. " +
           "Subscription: " + esc((sb.data && sb.data.length) ? "live figures in Subscription tab" : (sb.message || "unavailable")) + "</div></section>";
         host.scrollIntoView();
@@ -260,133 +274,193 @@
     $("ca-go").onclick = go;
     $("ca-s").onkeydown = function (e) { if (e.key === "Enter") go(); };
   }
-  if (window.FT_PAGES) window.FT_PAGES.pActions = pActions;
   /* ---------- dashboard: market intelligence (overrides pDashboard) ---------- */
   var SPARK_IDX = [["^NSEI", "Nifty 50"], ["^BSESN", "Sensex"], ["^NSEBANK", "Bank Nifty"],
     ["^CNXIT", "Nifty IT"], ["^GSPC", "S&P 500"], ["^IXIC", "Nasdaq"]];
   var SECTORS = [["^CNXIT", "IT"], ["^CNXAUTO", "Auto"], ["^CNXFMCG", "FMCG"],
     ["^CNXPHARMA", "Pharma"], ["^NSEBANK", "Bank"]];
+  /* ---------- dashboard: analytical workspace (overrides pDashboard) ----------
+     Flow: pulse -> performance -> heatmap -> breadth/movers -> regime/news. */
+  var SPARK_IDX = [["^NSEI", "Nifty 50"], ["^BSESN", "Sensex"], ["^NSEBANK", "Bank Nifty"],
+    ["^CNXIT", "Nifty IT"], ["^GSPC", "S&P 500"], ["^IXIC", "Nasdaq"]];
+  var SECTORS = [["^CNXIT", "IT"], ["^CNXAUTO", "Auto"], ["^CNXFMCG", "FMCG"],
+    ["^CNXPHARMA", "Pharma"], ["^NSEBANK", "Banking"]];
   function pDashboard() {
-    var API = window.FT_API, F = window.FT_FMT;
+    var API = window.FT_API, F = window.FT_FMT, V = window.FT_VIZ, I = window.FT_INTERP;
     function esc2(s) { return F.esc(s === null || s === undefined ? "" : String(s)); }
     $("view").innerHTML = "<h1 class='h-page'>Market dashboard</h1>" +
-      "<div class='sub'>Delayed market data · sparklines from verified history · auto-refresh 60s</div>" +
-      "<section aria-label='Market snapshot'><h2>Market snapshot</h2><div class='idx-grid' id='d-idx'>" +
-      SPARK_IDX.map(function () { return "<div class='idx-card'><div class='cx-skel'></div></div>"; }).join("") +
-      "</div><div id='d-interp' style='margin-top:8px'></div></section>" +
-      "<div class='dash-grid' style='margin-top:12px'><div>" +
-      "<section aria-label='Market movers'><h2>Market movers</h2>" +
-      "<div class='seg' role='group' aria-label='Movers filter' id='d-seg'>" +
-      "<button data-m='gain' class='on'>Gainers</button><button data-m='lose'>Losers</button>" +
-      "<button data-m='vol'>Volume</button></div>" +
-      "<div class='card' style='margin-top:8px'><div id='d-mov'></div></div>" +
-      "<div id='d-breadth' style='margin-top:8px'></div></div>" +
-      "<section aria-label='Sector performance' style='margin-top:12px'><h2>Sector performance</h2>" +
-      "<div class='card'><div id='d-sect'></div></div></section>" +
-      "</div><div>" +
-      "<section aria-label='Latest news'><h2>Latest market news</h2><div class='card'><div id='d-news'></div></div></section>" +
-      "<section aria-label='IPO pulse' style='margin-top:12px'><h2>IPO pulse</h2><div class='card'><div id='d-ipo'></div></div></section>" +
-      "</div></div>";
-    var quotes = {};
+      "<div class='sub'>Delayed market data · every visual answers what changed and by how much</div>" +
+      "<section aria-label='Market pulse'><h2>Market pulse</h2><div class='pulse' id='d-pulse'>" +
+      SPARK_IDX.map(function () { return "<div class='pcell'><div class='cx-skel'></div></div>"; }).join("") +
+      "</div><div id='d-pulsesrc'></div></section>" +
+      "<div class='an-grid' style='margin-top:12px'>" +
+      "<div class='an-8'><section aria-label='Market performance'><h2>Market performance</h2>" +
+      "<div class='card'><div id='d-perf'></div><div id='d-perfnote'></div></div></section></div>" +
+      "<div class='an-4'><section aria-label='Market regime'><h2>Market regime</h2>" +
+      "<div class='card'><div id='d-regime'></div></div></section></div>" +
+      "<div class='an-4'><section aria-label='Sector heatmap'><h2>Sector heatmap</h2>" +
+      "<div class='card'><div id='d-heat'></div><div id='d-heatnote'></div></div></section></div>" +
+      "<div class='an-8'><section aria-label='Market breadth'><h2>Market breadth</h2>" +
+      "<div class='card'><div id='d-breadth'></div></div></section></div>" +
+      "<div class='an-4'><section aria-label='Top gainers'><h2>Top gainers</h2>" +
+      "<div class='card'><div id='d-gain'></div></div></section></div>" +
+      "<div class='an-4'><section aria-label='Top losers'><h2>Top losers</h2>" +
+      "<div class='card'><div id='d-lose'></div></div></section></div>" +
+      "<div class='an-4'><section aria-label='Most active'><h2>Most active</h2>" +
+      "<div class='card'><div id='d-vol'></div></div></section></div>" +
+      "<div class='an-8'><section aria-label='Index structure'><h2>Nifty 50 structure</h2>" +
+      "<div class='card'><div id='d-struct'></div></div></section></div>" +
+      "<div class='an-8'><section aria-label='Latest news'><h2>Latest market news</h2>" +
+      "<div class='card'><div id='d-news'></div></div></section></div>" +
+      "<div class='an-4'><section aria-label='IPO pulse'><h2>IPO pulse</h2>" +
+      "<div class='card'><div id='d-ipo'></div></div></section></div>" +
+      "</div>";
+    var quotes = {}, hists = {};
+    function q(sym) { return (quotes[sym] || {}).quote || {}; }
+    function ret(closes, back) {
+      if (!closes || closes.length < back + 1) return null;
+      var now = closes[closes.length - 1], old = closes[closes.length - 1 - back];
+      if (now === null || old === null || !old) return null;
+      return (now - old) / Math.abs(old) * 100;
+    }
     API.get("market-overview").then(function (r) {
       var items = ((r.body || {}).items) || [];
       items.forEach(function (i) { quotes[i.symbol] = i; });
-      paintCards();
-      paintMovers("gain");
-      paintSectors();
-      SPARK_IDX.forEach(function (p, ix) { spark(p[0], ix); });
+      paintPulse();
+      paintMovers();
+      var needed = SPARK_IDX.map(function (p) { return p[0]; });
+      var done = 0;
+      needed.forEach(function (s) {
+        API.get("history", { symbol: s, range: "1Y", interval: "1d" }).then(function (h) {
+          var bars = (((h.body || {}).data) || {}).bars || [];
+          hists[s] = bars.map(function (b) { return b.c; });
+          if (++done === needed.length) paintHist();
+          else paintPulseSparks();
+        }).catch(function () { if (++done === needed.length) paintHist(); });
+      });
     });
-    function q(sym) { return (quotes[sym] || {}).quote || {}; }
-    function paintCards() {
-      var host = $("d-idx");
+    function paintPulse() {
+      var host = $("d-pulse");
       if (!host) return;
-      host.innerHTML = SPARK_IDX.map(function (p, ix) {
+      var cells = [];
+      SPARK_IDX.forEach(function (p, ix) {
         var v = q(p[0]);
-        if (v.price === null || v.price === undefined) {
-          return "<div class='idx-card'><div class='nm'>" + p[1] + "</div><div class='vl'>—</div>" +
-            "<div class='ft'>No verified quote.</div></div>";
+        if (!V.hasV(v.price)) return;
+        cells.push("<div class='pcell'><div class='pnm'>" + p[1] + "</div>" +
+          "<div class='pvl'>" + F.fmtNum(v.price) + "</div>" +
+          "<div class='" + F.dirClass(v.change_pct) + "' style='font-weight:650'>" + F.fmtPct(v.change_pct) + "</div>" +
+          "<canvas class='spark' id='sp-" + ix + "' aria-hidden='true'></canvas></div>");
+      });
+      host.innerHTML = cells.join("");
+      var first = q("^NSEI");
+      $("d-pulsesrc").innerHTML = V.srcLine({ label: "Market data", source: "yahoo", timeliness: "delayed", asOf: first.as_of });
+      paintPulseSparks();
+    }
+    function paintPulseSparks() {
+      SPARK_IDX.forEach(function (p, ix) {
+        var cv = $("sp-" + ix), cl = hists[p[0]];
+        if (!cv || !cl || cl.length < 5) return;
+        window.FT_CHART.drawSpark(cv, cl, cl[cl.length - 1] >= cl[0]);
+      });
+    }
+    function paintHist() {
+      paintPulseSparks();
+      var host = $("d-perf");
+      if (host) {
+        var rows = [];
+        SPARK_IDX.forEach(function (p) {
+          var cl = hists[p[0]] || [];
+          var m = ret(cl, 21);
+          if (m !== null) rows.push({ label: p[1], value: m, display: F.fmtPct(m) });
+        });
+        host.innerHTML = V.bars(rows) ||
+          V.emptyFeature("Market performance", "Not enough verified history to compute returns.");
+        var note = I.trend("Nifty 50", hists["^NSEI"] || [], "the last month of verified closes");
+        $("d-perfnote").innerHTML = note ? "<p class='interp'>" + esc2(note) + "</p>" : "";
+      }
+      var heat = $("d-heat");
+      if (heat) {
+        var tiles = SECTORS.map(function (p) {
+          var v = q(p[0]);
+          return { label: p[1], value: v.change_pct, sub: "NSE sector index" };
+        });
+        heat.innerHTML = V.heatmap(tiles, { fmt: function (v) { return F.fmtPct(v); } }) ||
+          V.emptyFeature("Sector heatmap", "Sector index quotes are unavailable.");
+        var hh = $("d-heatnote");
+        if (hh && tiles.some(function (t) { return V.hasV(t.value); })) {
+          var worst = tiles.slice().sort(function (a, b) { return a.value - b.value; })[0];
+          var best = tiles.slice().sort(function (a, b) { return b.value - a.value; })[0];
+          hh.innerHTML = "<p class='interp'>" + esc2(best.label + " leads at " + F.fmtPct(best.value) +
+            " while " + worst.label + " trails at " + F.fmtPct(worst.value) + ". Equal-size tiles: performance only, no weight data.") + "</p>";
         }
-        var cls = F.dirClass(v.change_pct);
-        return "<div class='idx-card'><div class='nm'>" + p[1] + "</div>" +
-          "<div class='vl'>" + F.fmtNum(v.price) + "</div>" +
-          "<div class='" + cls + "' style='font-size:13px;font-weight:650'>" + F.fmtPct(v.change_pct) + "</div>" +
-          "<canvas class='spark' id='sp-" + ix + "' aria-hidden='true'></canvas>" +
-          "<div class='ft'>" + esc2(F.srcName((quotes[p[0]] || {}).source || v.source)) + " · delayed</div></div>";
+      }
+      var rg = $("d-regime");
+      if (rg) {
+        var cl = hists["^NSEI"] || [];
+        var m1m = ret(cl, 21), m3m = ret(cl, 63);
+        var sma200 = cl.length > 200 ? cl.slice(-200).reduce(function (a, b) { return a + b; }, 0) / 200 : null;
+        var last = cl.length ? cl[cl.length - 1] : null;
+        var trendState = (m3m === null) ? null : (m3m >= 5 ? "Bullish" : m3m <= -5 ? "Bearish" : "Neutral");
+        var dist = (last !== null && sma200) ? (last - sma200) / sma200 * 100 : null;
+        var cells = [
+          { label: "Trend", value: trendState, sub: "3M Nifty move" },
+          { label: "Momentum", value: m1m === null ? null : F.fmtPct(m1m), sub: "1M Nifty" },
+          { label: "Distance from 200D", value: dist === null ? null : F.fmtPct(dist), sub: "SMA" },
+        ];
+        var rtext = I.regime({ trend: trendState ? trendState.toLowerCase() : null,
+          momentum: m1m === null ? null : (m1m >= 0 ? "positive" : "negative") });
+        rg.innerHTML = V.kpiStrip(cells) + (rtext ? "<p class='interp'>" + esc2(rtext) + "</p>" : "");
+      }
+      var st = $("d-struct");
+      if (st) {
+        var nq = q("^NSEI");
+        var hi = nq.fifty_two_week_high, lo = nq.fifty_two_week_low, px = nq.price;
+        var pos = (hi && lo && px && hi !== lo) ? Math.round((px - lo) / (hi - lo) * 100) : null;
+        st.innerHTML = V.kpiStrip([
+          { label: "52-week high", value: V.hasV(hi) ? F.fmtNum(hi) : null },
+          { label: "52-week low", value: V.hasV(lo) ? F.fmtNum(lo) : null },
+          { label: "Position in range", value: pos === null ? null : pos + "%" },
+        ]) + (pos !== null ? "<p class='interp'>Nifty 50 sits " + pos + "% up its 52-week range.</p>" : "");
+      }
+    }
+    function moverRows(list) {
+      return list.map(function (i) {
+        var c = i.quote;
+        return "<li><span class='rk'>·</span><span><a href='#/company/" + esc2(i.symbol) + "'>" +
+          esc2(c.name || i.symbol) + "</a> <span class='tk'>" + esc2(i.symbol) + "</span></span>" +
+          "<b>" + F.fmtNum(c.price) + "</b><b class='" + F.dirClass(c.change_pct) + "'>" + F.fmtPct(c.change_pct) + "</b></li>";
       }).join("");
     }
-    function spark(sym, ix) {
-      API.get("history", { symbol: sym, range: "3M", interval: "1d" }).then(function (r) {
-        var cv = $("sp-" + ix);
-        if (!cv) return;
-        var bars = (((r.body || {}).data) || {}).bars || [];
-        var closes = bars.map(function (b) { return b.c; });
-        if (closes.length < 5) return;
-        var up = closes[closes.length - 1] >= closes[0];
-        window.FT_CHART.drawSpark(cv, closes, up);
-        if (ix === 0) {
-          var m = (closes[closes.length - 1] - closes[0]) / closes[0] * 100;
-          var el = $("d-interp");
-          if (el) el.innerHTML = "<p class='interp'>Nifty 50 " +
-            (m >= 0 ? "gained " + F.fmtPct(m) : "lost " + F.fmtPct(m)) +
-            " over the last 3 months of verified closes (" + bars.length + " sessions).</p>";
-        }
-      }).catch(function () { /* card keeps quote; spark optional */ });
-    }
-    function paintMovers(mode) {
-      var host = $("d-mov");
-      if (!host) return;
+    function paintMovers() {
       var eq = Object.keys(quotes).map(function (s) { return quotes[s]; })
-        .filter(function (i) { return i.quote && i.symbol.charAt(0) !== "^" && !/NIFTY_FIN/.test(i.symbol); });
-      eq.sort(function (a, b) {
-        if (mode === "lose") return (a.quote.change_pct || 0) - (b.quote.change_pct || 0);
-        if (mode === "vol") return (b.quote.volume || 0) - (a.quote.volume || 0);
-        return (b.quote.change_pct || 0) - (a.quote.change_pct || 0);
-      });
-      host.innerHTML = '<table class="t"><thead><tr><th scope="col">Company</th><th scope="col" class="num">Price</th>' +
-        '<th scope="col" class="num">Change %</th><th scope="col" class="num">Volume</th></tr></thead><tbody>' +
-        eq.slice(0, 8).map(function (i) {
-          var c = i.quote;
-          return "<tr data-sym='" + esc2(i.symbol) + "' style='cursor:pointer'><td class='txt'><a href='#/company/" +
-            esc2(i.symbol) + "'>" + esc2(c.name || i.symbol) + "</a><br><span class='tk'>" + esc2(i.symbol) + "</span></td>" +
-            "<td class='num'><b>" + F.fmtNum(c.price) + "</b></td>" +
-            "<td class='num " + F.dirClass(c.change_pct) + "'>" + F.fmtPct(c.change_pct) + "</td>" +
-            "<td class='num'>" + F.fmtInt(c.volume) + "</td></tr>";
-        }).join("") + "</tbody></table>";
+        .filter(function (i) { return i.quote && V.hasV(i.quote.price) && i.symbol.charAt(0) !== "^" && !/NIFTY_FIN/.test(i.symbol); });
+      function put(id, list, note) {
+        var host = $(id);
+        if (!host) return;
+        host.innerHTML = list.length ? "<ul class='ranklist'>" + moverRows(list.slice(0, 6)) + "</ul>" + (note || "") : "";
+      }
+      var gains = eq.slice().sort(function (a, b) { return (b.quote.change_pct || -1e9) - (a.quote.change_pct || -1e9); });
+      var losers = eq.slice().sort(function (a, b) { return (a.quote.change_pct || 1e9) - (b.quote.change_pct || 1e9); });
+      var vols = eq.slice().sort(function (a, b) { return (b.quote.volume || 0) - (a.quote.volume || 0); });
+      put("d-gain", gains.filter(function (i) { return (i.quote.change_pct || 0) > 0; }));
+      put("d-lose", losers.filter(function (i) { return (i.quote.change_pct || 0) < 0; }));
+      put("d-vol", vols, "<div class='cx-note'>By reported volume.</div>");
       var adv = eq.filter(function (i) { return (i.quote.change_pct || 0) > 0; }).length;
       var dec = eq.filter(function (i) { return (i.quote.change_pct || 0) < 0; }).length;
+      var unch = eq.length - adv - dec;
       var bh = $("d-breadth");
-      if (bh) bh.innerHTML = "<div class='card'><h3>Market breadth</h3><div class='bar-row'><span>Advances</span>" +
-        "<span class='tr'><span class='fl' style='display:block;width:" + pct(adv, adv + dec) + "%;background:var(--up)'></span></span><b>" + adv + "</b></div>" +
-        "<div class='bar-row'><span>Declines</span>" +
-        "<span class='tr'><span class='fl' style='display:block;width:" + pct(dec, adv + dec) + "%;background:var(--dn)'></span></span><b>" + dec + "</b></div>" +
-        "<p class='interp'>" + (adv > dec ? "Breadth is positive: more tracked stocks advanced than declined."
-          : adv < dec ? "Breadth is negative: decliners outnumber advancers in the tracked universe."
-          : "Breadth is even across the tracked universe.") + " Tracked universe only — not the whole market.</p></div>";
-      Array.prototype.forEach.call(document.querySelectorAll("#d-seg button"), function (b) {
-        b.classList.toggle("on", b.getAttribute("data-m") === mode);
-        b.onclick = function () { paintMovers(b.getAttribute("data-m")); };
-      });
-      Array.prototype.forEach.call(host.querySelectorAll("tr[data-sym]"), function (tr) {
-        tr.onclick = function () { location.hash = "#/company/" + encodeURIComponent(tr.getAttribute("data-sym")); };
-      });
-    }
-    function pct(a, b) { return b ? Math.round(a / b * 100) : 0; }
-    function paintSectors() {
-      var host = $("d-sect");
-      if (!host) return;
-      var rows = SECTORS.map(function (p) {
-        var v = q(p[0]);
-        return { name: p[1], chg: (v.change_pct === null || v.change_pct === undefined) ? null : v.change_pct };
-      }).filter(function (r) { return r.chg !== null; });
-      if (!rows.length) { host.innerHTML = "<div class='cx-note'>Sector indices unavailable.</div>"; return; }
-      var mx = Math.max.apply(null, rows.map(function (r) { return Math.abs(r.chg); }).concat([1]));
-      host.innerHTML = rows.map(function (r) {
-        var w = Math.round(Math.abs(r.chg) / mx * 100);
-        var col = r.chg >= 0 ? "var(--up)" : "var(--dn)";
-        return "<div class='bar-row'><span>" + esc2(r.name) + "</span>" +
-          "<span class='tr'><span class='fl' style='display:block;width:" + w + "%;background:" + col + "'></span></span>" +
-          "<b class='" + F.dirClass(r.chg) + "'>" + F.fmtPct(r.chg) + "</b></div>";
-      }).join("") + "<div class='cx-note'>NSE sector indices as sector proxies · delayed.</div>";
+      if (bh) {
+        var total = adv + dec + unch;
+        var I2 = window.FT_INTERP;
+        function bar(l, v, col) {
+          var w = total ? Math.round(v / total * 100) : 0;
+          return "<div class='bar-row'><span>" + l + "</span>" +
+            "<span class='tr'><span class='fl' style='display:block;width:" + w + "%;background:" + col + "'></span></span><b>" + v + "</b></div>";
+        }
+        bh.innerHTML = bar("Advancing", adv, "var(--up)") + bar("Declining", dec, "var(--dn)") + bar("Unchanged", unch, "var(--faint)") +
+          "<p class='interp'>" + esc2(I2.breadth(adv, dec, unch, "the tracked universe") +
+            " Tracked universe — a participation proxy, not full market breadth.") + "</p>";
+      }
     }
     API.get("news", { limit: 6 }).then(function (r) {
       var host = $("d-news");
@@ -394,25 +468,217 @@
       var items = (((r.body || {}).data) || {}).items || [];
       host.innerHTML = items.length ? items.slice(0, 6).map(function (n) {
         var t = n.url ? "<a href='" + esc2(n.url) + "' target='_blank' rel='noopener'>" + esc2(n.title || "") + "</a>" : esc2(n.title || "");
-        var sum = n.summary ? esc2(String(n.summary).slice(0, 140)) : "";
+        var sum = n.summary ? esc2(String(n.summary).slice(0, 130)) : "";
         return "<article class='news-item'>" + t + (sum ? "<p class='sum'>" + sum + "</p>" : "") +
-          "<div class='meta'>" + esc2(n.source || "") + " · " + esc2(F.fmtTimeHM(n.published_at)) +
-          " · <a href='#/news'>Read article →</a></div></article>";
-      }).join("") : "<div class='cx-note'>No headlines right now.</div>";
+          "<div class='meta'>" + esc2(n.source || "") + " · " + esc2(F.fmtTimeHM(n.published_at)) + "</div></article>";
+      }).join("") : "";
     });
     API.get("ipo").then(function (r) {
       var host = $("d-ipo");
       if (!host) return;
       var b = (r.body || {}).buckets || null;
-      if (!b) { host.innerHTML = "<div class='cx-note'>IPO feed unavailable — open the IPO page for status.</div>"; return; }
+      if (!b) { host.innerHTML = ""; return; }
       function n(k) { return (b[k] || []).length; }
-      host.innerHTML = "<div class='bar-row'><span>Open</span><b>" + n("open") + "</b></div>" +
-        "<div class='bar-row'><span>Upcoming</span><b>" + n("upcoming") + "</b></div>" +
-        "<div class='bar-row'><span>Listed</span><b>" + n("listed") + "</b></div>" +
-        "<p class='interp'><a href='#/ipos'>Open IPO dashboard →</a></p>";
+      var cells = [];
+      if (n("open")) cells.push({ label: "Open", value: n("open") });
+      if (n("upcoming")) cells.push({ label: "Upcoming", value: n("upcoming") });
+      if (n("listed")) cells.push({ label: "Listed", value: n("listed") });
+      host.innerHTML = V.kpiStrip(cells) + "<p class='interp'><a href='#/ipos'>Open IPO dashboard →</a></p>";
     });
   }
   if (window.FT_PAGES) window.FT_PAGES.pDashboard = pDashboard;
+
+  if (window.FT_PAGES) window.FT_PAGES.pActions = pActions;
+  /* ---------- compare: analytical rebuild (overrides pCompare) ----------
+     Visual bars first, performance chart, trends, dynamic table last.
+     A row renders only when >=1 company has the metric. Calculated
+     values come from the canonical ratio sheet — never recomputed. */
+  function pCompare() {
+    var API = window.FT_API, F = window.FT_FMT, V = window.FT_VIZ, I = window.FT_INTERP;
+    function esc2(s) { return F.esc(s === null || s === undefined ? "" : String(s)); }
+    var preset = "";
+    try { preset = sessionStorage.getItem("ft-cmp") || ""; sessionStorage.removeItem("ft-cmp"); } catch (e) { /* ignore */ }
+    $("view").innerHTML = "<h1 class='h-page'>Compare</h1>" +
+      "<div class='sub'>Evidence side-by-side. No winner scores, no rankings.</div>" +
+      "<div class='card'><div class='row'><input id='k-s' class='in' aria-label='Symbols' style='flex:1;min-width:220px' " +
+      "placeholder='Comma-separated, e.g. RELIANCE.NS, TCS.NS, INFY.NS' value='" + esc2(preset || "RELIANCE.NS,TCS.NS,INFY.NS") + "'>" +
+      "<button class='btn primary' id='k-go'>Compare</button></div><div id='k-out' style='margin-top:10px'></div></div>";
+    function numOf(v) {
+      if (v === null || v === undefined) return null;
+      if (typeof v === "string" && /^(none|null|undefined|nan|-|n\/a)$/i.test(v.trim())) return null;
+      var n = Number(v);
+      return isNaN(n) ? null : n;
+    }
+    function go() {
+      var syms = $("k-s").value.split(",").map(function (s) { return s.trim().toUpperCase(); }).filter(Boolean).slice(0, 4);
+      if (syms.length < 2) { $("k-out").innerHTML = "<div class='cx-note'>Enter at least 2 symbols.</div>"; return; }
+      $("k-out").innerHTML = "<div class='cx-skel'></div><div class='cx-skel'></div><div class='cx-skel'></div>";
+      Promise.all(syms.map(function (s) {
+        return Promise.all([
+          API.get("quote", { symbol: s }),
+          API.get("ratios", { symbol: s }),
+          API.get("ratiosheet", { symbol: s }).catch(function () { return { body: null }; }),
+          API.get("fundamentals", { symbol: s, statement: "income", period: "annual" }).catch(function () { return { body: null }; }),
+          API.get("history", { symbol: s, range: "1Y", interval: "1d" }).catch(function () { return { body: null }; }),
+        ]).then(function (x) {
+          return { symbol: s, quote: ((x[0].body || {}).data) || null,
+            rep: ((x[1].body || {}).data) || {},
+            sheet: ((((x[2] || {}).body) || {}).data) || null,
+            fin: ((((x[3] || {}).body) || {}).data) || null,
+            hist: ((((x[4] || {}).body) || {}).data) || null };
+        });
+      })).then(function (cols) {
+        if (!$("k-out")) return;
+        paint(cols);
+      }).catch(function () {
+        if ($("k-out")) $("k-out").innerHTML = "<div class='cx-empty'><b>Compare</b><p>One or more legs failed. Other pages remain available.</p></div>";
+      });
+    }
+    function repVal(c, key) { return numOf(c.rep[key]); }
+    function calcVal(c, key) {
+      var d = (c.sheet && c.sheet.display) || {};
+      var n = d[key];
+      return (n && n.value !== null && n.value !== undefined) ? Number(n.value) : null;
+    }
+    function metricVal(c, repKey, calcKey) {
+      var r = repVal(c, repKey);
+      return r !== null ? { v: r, kind: "REPORTED" } : (calcVal(c, calcKey) !== null ? { v: calcVal(c, calcKey), kind: "CALCULATED" } : null);
+    }
+    function growth(c, item) {
+      var reps = ((c.fin || {}).reports) || [];
+      var keys = item === "rev" ? ["totalRevenue", "revenue", "revenues", "sales"] : ["netIncome", "net_income", "netEarnings"];
+      function val(r) {
+        for (var i = 0; i < keys.length; i++) {
+          var n = numOf(r[keys[i]]);
+          if (n !== null) return n;
+        }
+        return null;
+      }
+      if (reps.length < 2) return null;
+      var a = val(reps[0]), b = val(reps[1]);
+      if (a === null || b === null || !b) return null;
+      return (a - b) / Math.abs(b) * 100;
+    }
+    function barSection(title, defs, cols, fmt) {
+      var rows = defs.map(function (d) {
+        var vals = cols.map(function (c) { return metricVal(c, d.rep, d.calc); });
+        if (vals.every(function (x) { return !x; })) return null; // omit empty rows
+        return { label: d.label, vals: vals };
+      }).filter(Boolean);
+      if (!rows.length) return "";
+      var mx = 0;
+      rows.forEach(function (r) { r.vals.forEach(function (x) { if (x && Math.abs(x.v) > mx) mx = Math.abs(x.v); }); });
+      mx = mx || 1;
+      var h = "<section aria-label='" + esc2(title) + "'><h2>" + esc2(title) + "</h2><div class='card'>";
+      rows.forEach(function (r) {
+        h += "<div style='margin:8px 0'><div class='lbl'>" + esc2(r.label) + "</div>";
+        r.vals.forEach(function (x, ix) {
+          if (!x) return;
+          var w = Math.max(2, Math.round(Math.abs(x.v) / mx * 100));
+          h += "<div class='cmpbar'><span title='" + esc2(cols[ix].symbol) + "'>" + esc2(cols[ix].symbol.replace(/\.(NS|BO)$/, "")) +
+            (x.kind === "CALCULATED" ? " <span class='cx-q cx-q-calc'>CALC</span>" : "") + "</span>" +
+            "<span class='tr'><span class='fl' style='left:0;width:" + w + "%;background:" +
+            (x.v >= 0 ? "var(--acc)" : "var(--dn)") + "'></span></span>" +
+            "<b>" + fmt(x.v) + "</b></div>";
+        });
+        h += "</div>";
+      });
+      return h + "</div></section>";
+    }
+    function paint(cols) {
+      var host = $("k-out");
+      var h = "<div class='seg' style='margin-bottom:8px'>" + cols.map(function (c) {
+        var nm = ((c.quote || {}).name) || c.symbol;
+        return "<a class='btn sm' href='#/company/" + esc2(c.symbol) + "'>" + esc2(nm) + "</a>";
+      }).join("") + "</div>";
+      function f1(v) { return v === null ? "" : v.toFixed(1) + "x"; }
+      function f2(v) { return v === null ? "" : v.toFixed(1) + "%"; }
+      function fM(v, ccy) { return v === null ? "" : F.fmtMoney(v); }
+      h += barSection("Valuation", [
+        { label: "P/E", rep: "PERatio", calc: "pe_calc" },
+        { label: "P/B", rep: "PriceToBookRatio", calc: "pb_calc" },
+        { label: "Dividend yield", rep: "DividendYield", calc: "div_yield_calc" },
+      ], cols, function (v) { return v.toFixed(2); });
+      h += barSection("Profitability", [
+        { label: "ROE", rep: "ROE", calc: "roe" },
+        { label: "ROCE", rep: null, calc: "roce" },
+        { label: "Net margin", rep: "ProfitMargin", calc: "net_margin" },
+      ], cols, function (v) { return v.toFixed(1) + "%"; });
+      /* growth bars from reported statements */
+      var grows = [["Revenue growth", "rev"], ["PAT growth", "ni"]].map(function (g) {
+        var vals = cols.map(function (c) {
+          var v = growth(c, g[1]);
+          return v === null ? null : { v: v, kind: "REPORTED" };
+        });
+        return vals.every(function (x) { return !x; }) ? null : { label: g[0], vals: vals };
+      }).filter(Boolean);
+      if (grows.length) {
+        h += "<section aria-label='Growth'><h2>Growth</h2><div class='card'>";
+        grows.forEach(function (r) {
+          var mx = Math.max.apply(null, r.vals.map(function (x) { return x ? Math.abs(x.v) : 0; }).concat([1]));
+          h += "<div style='margin:8px 0'><div class='lbl'>" + r.label + " (YoY)</div>";
+          r.vals.forEach(function (x, ix) {
+            if (!x) return;
+            var w = Math.max(2, Math.round(Math.abs(x.v) / mx * 100));
+            h += "<div class='cmpbar'><span>" + esc2(cols[ix].symbol.replace(/\.(NS|BO)$/, "")) + "</span>" +
+              "<span class='tr'><span class='fl' style='left:0;width:" + w + "%;background:" +
+              (x.v >= 0 ? "var(--up)" : "var(--dn)") + "'></span></span><b>" + F.fmtPct(x.v) + "</b></div>";
+          });
+          h += "</div>";
+        });
+        h += "</div></section>";
+      }
+      h += barSection("Balance sheet", [
+        { label: "Debt / Equity", rep: null, calc: "debt_equity" },
+        { label: "Current ratio", rep: null, calc: "current_ratio" },
+      ], cols, function (v) { return v.toFixed(2) + "x"; });
+      /* performance lines (normalized to 100) */
+      var perf = cols.map(function (c) {
+        var bars = ((c.hist || {}).bars) || [];
+        var cl = bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null && v !== undefined; });
+        if (cl.length < 20) return null;
+        var base = cl[0];
+        return { name: c.symbol.replace(/\.(NS|BO)$/, ""), values: cl.map(function (v) { return v / base * 100; }) };
+      }).filter(Boolean);
+      if (perf.length >= 2) {
+        var cid = "cmp-perf";
+        h += "<section aria-label='Price performance'><h2>Price performance (rebased = 100)</h2>" +
+          "<div class='card'><canvas class='chart' id='" + cid + "' style='height:220px' role='img' aria-label='Rebased price comparison'></canvas>" +
+          V.srcLine({ label: "Market data", source: "yahoo", timeliness: "delayed" }) + "</div></section>";
+      }
+      /* detailed table, last and dynamic */
+      var detDefs = [
+        ["Price", function (c) { return (c.quote || {}).price !== null && (c.quote || {}).price !== undefined ? F.fmtNum(c.quote.price) : null; }],
+        ["Market cap", function (c) { var v = repVal(c, "MarketCapitalization"); return v === null ? null : F.fmtIN(v, (c.quote || {}).currency); }],
+        ["P/E", function (c) { var m = metricVal(c, "PERatio", "pe_calc"); return m ? m.v.toFixed(1) + "x" : null; }],
+        ["EPS", function (c) { var v = repVal(c, "EPS"); return v === null ? null : F.fmtNum(v); }],
+        ["ROE", function (c) { var m = metricVal(c, "ROE", "roe"); return m ? m.v.toFixed(1) + "%" : null; }],
+        ["Book value", function (c) { var v = repVal(c, "BookValue"); return v === null ? null : F.fmtNum(v); }],
+        ["Dividend yield", function (c) { var v = repVal(c, "DividendYield"); return v === null ? null : Number(v).toFixed(2) + "%"; }],
+      ];
+      var detRows = detDefs.map(function (d) {
+        var vals = cols.map(d[1]);
+        return vals.every(function (x) { return x === null; }) ? null : { label: d[0], vals: vals };
+      }).filter(Boolean);
+      if (detRows.length) {
+        h += "<section aria-label='Detailed table'><h2>Detailed table</h2><div class='cx-scroll'><table class='cx-t'><thead><tr><th scope='col'>Metric</th>" +
+          cols.map(function (c) { return "<th scope='col' class='num'>" + esc2(c.symbol) + "</th>"; }).join("") +
+          "</tr></thead><tbody>" + detRows.map(function (r) {
+            return "<tr><td>" + esc2(r.label) + "</td>" + r.vals.map(function (v) {
+              return "<td class='num'>" + (v === null ? "" : esc2(v)) + "</td>";
+            }).join("") + "</tr>";
+          }).join("") + "</tbody></table></div></section>";
+      }
+      host.innerHTML = h || V.emptyFeature("Compare", "None of the selected companies returned comparable data.");
+      if (perf.length >= 2 && $("cmp-perf")) {
+        window.FT_CHART.drawLines($("cmp-perf"), { labels: [], series: perf });
+      }
+    }
+    $("k-go").onclick = go;
+    $("k-s").onkeydown = function (e) { if (e.key === "Enter") go(); };
+    go();
+  }
+  if (window.FT_PAGES) window.FT_PAGES.pCompare = pCompare;
   function theme() {
     try {
       var q = (location.search || "").match(/theme=(light|dark)/);
