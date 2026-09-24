@@ -115,6 +115,79 @@
     var s = E("cx-srcline");
     if (s) s.innerHTML = badge(env.timeliness || env.status) + " " + esc(F.srcName(env.source)) + " · " + esc(day(env.as_of));
   }
+  /* Metric strip with REPORTED/CALCULATED badges + formula inspector.
+     Every metric carries its provenance; CALCULATED cells open the
+     inspector (formula, inputs, period, source, timestamp). */
+  var STRIP_INFO = {};
+  function qBadge(kind) {
+    if (kind === "CALCULATED") return " <span class='cx-q cx-q-calc' title='Calculated by the terminal ratio engine'>CALC</span>";
+    if (kind === "REPORTED") return " <span class='cx-q cx-q-rep' title='Reported by the data provider'>REP</span>";
+    return "";
+  }
+  function qVal(node, fmt) {
+    if (!node || node.value === null || node.value === undefined || isNaN(Number(node.value))) return null;
+    return fmt(Number(node.value));
+  }
+  function paintStrip(sym, d, q, sheet) {
+    function rep(raw, fmt) {
+      if (raw === undefined || raw === null || /^(none|-|n\/a)$/i.test(String(raw)) || isNaN(Number(raw))) return null;
+      return { v: fmt(Number(raw)), kind: "REPORTED", info: null };
+    }
+    function x1(v) { return v.toFixed(1) + "x"; }
+    var disp = (sheet && sheet.display) || {};
+    function pick(repNode, calcKey, fmt) {
+      if (repNode) return repNode;
+      var c = disp[calcKey];
+      var v = qVal(c, fmt);
+      if (v === null) return null;
+      return { v: v, kind: "CALCULATED", info: c };
+    }
+    var roeRep = (d.ROE && d.ROE !== "None" && !isNaN(Number(d.ROE)))
+      ? { v: Number(d.ROE).toFixed(1) + "%", kind: "REPORTED", info: null } : null;
+    var cells = [
+      ["Market Cap", rep(d.MarketCapitalization && d.MarketCapitalization !== "None" ? d.MarketCapitalization : null,
+        function (v) { return F.fmtIN(v, q.currency); })],
+      ["P/E", rep(d.PERatio && d.PERatio !== "None" ? d.PERatio : null, x1) ||
+        (disp.pe_calc ? { v: qVal(disp.pe_calc, x1), kind: "CALCULATED", info: disp.pe_calc } : null)],
+      ["EPS", rep(d.EPS && d.EPS !== "None" ? d.EPS : null, function (v) { return F.fmtNum(v); })],
+      ["ROE", pick(roeRep, "roe", function (v) { return v.toFixed(1) + "%"; })],
+      ["ROCE", disp.roce ? { v: qVal(disp.roce, function (v) { return v.toFixed(1) + "%"; }), kind: "CALCULATED", info: disp.roce } : null],
+      ["Book Value", rep(d.BookValue && d.BookValue !== "None" ? d.BookValue : null, function (v) { return F.fmtNum(v); })],
+      ["Div Yield", rep(d.DividendYield && d.DividendYield !== "None" ? d.DividendYield : null, function (v) { return v.toFixed(2) + "%"; })],
+      ["Debt/Eq", disp.debt_equity ? { v: qVal(disp.debt_equity, x1), kind: "CALCULATED", info: disp.debt_equity } : null],
+      ["52W High", (q.fifty_two_week_high === null || q.fifty_two_week_high === undefined) ? null : { v: F.fmtNum(q.fifty_two_week_high), kind: "REPORTED", info: null }],
+      ["52W Low", (q.fifty_two_week_low === null || q.fifty_two_week_low === undefined) ? null : { v: F.fmtNum(q.fifty_two_week_low), kind: "REPORTED", info: null }],
+    ];
+    STRIP_INFO = {};
+    E("cx-strip").innerHTML = cells.map(function (c, ix) {
+      var n = c[1];
+      if (!n || n.v === null) return '<div class="cx-m"><div class="l">' + c[0] + '</div><div class="v">—</div><div class="s">unavailable</div></div>';
+      var key = "m" + ix;
+      STRIP_INFO[key] = n.info;
+      var clickable = n.info ? " data-insp='" + key + "' role='button' tabindex='0' title='Open formula inspector' style='cursor:pointer'" : "";
+      return '<div class="cx-m"' + clickable + '><div class="l">' + c[0] + qBadge(n.kind) + '</div><div class="v">' + n.v +
+        '</div><div class="s">' + (n.kind === "CALCULATED" ? "calculated" + ((n.info && n.info.variant) ? " · " + esc(n.info.variant) : "") : "reported") + "</div></div>";
+    }).join("") + '<div id="cx-insp"></div>';
+    Array.prototype.forEach.call(E("cx-strip").querySelectorAll("[data-insp]"), function (el) {
+      function open() { showInspector(STRIP_INFO[el.getAttribute("data-insp")]); }
+      el.onclick = open;
+      el.onkeydown = function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
+    });
+  }
+  function showInspector(info) {
+    var host = E("cx-insp");
+    if (!host || !info) return;
+    host.innerHTML = '<div class="cx-inspector" role="dialog" aria-label="Formula inspector"><b>' + esc(info.label || "Calculated metric") +
+      " " + esc(String(info.value)) + esc(info.unit || "") + " — CALCULATED</b>" +
+      '<div class="cx-kv"><span class="k">Formula</span><span class="w">' + esc(info.formula || "") + "</span></div>" +
+      (info.inputs || []).map(function (i) {
+        return '<div class="cx-kv"><span class="k">' + esc(i.label || "") + (i.period ? " (" + esc(i.period) + ")" : "") +
+          '</span><span class="w">' + esc(i.value === null || i.value === undefined ? "—" : String(i.value)) + " · " + esc(i.source || "") + "</span></div>";
+      }).join("") +
+      (info.variant ? '<div class="cx-note">Variant: ' + esc(info.variant) + "</div>" : "") +
+      '<div class="cx-note">Calculated ' + esc(info.calculated_at || "") + ' · <button class="cx-btn2" id="cx-insp-x">Close</button></div></div>';
+    E("cx-insp-x").onclick = function () { host.innerHTML = ""; };
+  }
   function loadHead(sym) {
     Promise.all([API.get("company", { symbol: sym }), API.get("quote", { symbol: sym })]).then(function (rs) {
       if (!E("cx-head")) return;
@@ -154,20 +227,14 @@
       API.get("ratios", { symbol: sym }).then(function (r) {
         if (!E("cx-strip")) return;
         var d = (r.body && r.body.data) || {};
-        function m(label, raw, sub) {
-          var v = (raw === undefined || raw === null || /^(none|-|n\/a)$/i.test(String(raw))) ? "—" : esc(String(raw));
-          return '<div class="cx-m"><div class="l">' + label + '</div><div class="v">' + v + '</div><div class="s">' + esc(sub || "") + "</div></div>";
-        }
-        function x1(v) { return (v === null || v === undefined || isNaN(Number(v))) ? null : Number(v).toFixed(1) + "x"; }
-        E("cx-strip").innerHTML =
-          m("Market Cap", d.MarketCapitalization && d.MarketCapitalization !== "None" ? F.fmtIN(Number(d.MarketCapitalization), q.currency) : null, "reported") +
-          m("P/E", d.PERatio && d.PERatio !== "None" ? x1(d.PERatio) : null, "TTM") +
-          m("EPS", d.EPS && d.EPS !== "None" && !isNaN(Number(d.EPS)) ? F.fmtNum(Number(d.EPS)) : null, "TTM") +
-          m("ROE", d.ROE && d.ROE !== "None" ? d.ROE + "%" : null, "reported") +
-          m("Book Value", d.BookValue && d.BookValue !== "None" && !isNaN(Number(d.BookValue)) ? F.fmtNum(Number(d.BookValue)) : null, "reported") +
-          m("52W High", (q.fifty_two_week_high === null || q.fifty_two_week_high === undefined) ? null : F.fmtNum(q.fifty_two_week_high), "quote") +
-          m("52W Low", (q.fifty_two_week_low === null || q.fifty_two_week_low === undefined) ? null : F.fmtNum(q.fifty_two_week_low), "quote") +
-          m("Div Yield", d.DividendYield && d.DividendYield !== "None" ? d.DividendYield + "%" : null, "reported");
+        paintStrip(sym, d, q, null);
+        /* Ratio sheet (REPORTED first, CALCULATED fill) upgrades the strip
+           when it arrives; reported cells never flicker to calculated. */
+        API.get("ratiosheet", { symbol: sym }).then(function (rs) {
+          if (!E("cx-strip")) return;
+          var sheet = (rs.body && rs.body.data) || null;
+          if (sheet) paintStrip(sym, d, q, sheet);
+        }).catch(function () { /* strip already painted */ });
       });
     });
   }
@@ -236,7 +303,7 @@
   function perf(sym, main) {
     /* Overview analyst dashboard. */
     main.innerHTML = '<div id="cx-ov-biz">' + skel(2) + '</div><div id="cx-ov-perf">' + skel(2) + '</div>' +
-      '<div id="cx-ov-tech">' + skel(2) + '</div><div id="cx-ov-news">' + skel(3) + "</div>";
+      '<div id="cx-ov-tech">' + skel(2) + '</div><div id="cx-ov-ratio">' + skel(2) + '</div><div id="cx-ov-news">' + skel(3) + "</div>";
     API.get("company", { symbol: sym }).then(function (r) {
       if (!E("cx-ov-biz")) return;
       var p = (r.body && r.body.data) || null;
@@ -282,6 +349,21 @@
         items.length ? items.slice(0, 5).map(newsRow).join("") + prov(r.body)
         : empty("Latest news", "No news items were returned for this security."));
     });
+    API.get("ratiosheet", { symbol: sym }).then(function (r) {
+      if (!E("cx-ov-ratio")) return;
+      var sheet = (r.body && r.body.data) || null, disp = (sheet && sheet.display) || {};
+      var keys = ["roe", "roa", "roce", "net_margin", "debt_equity", "current_ratio"];
+      var cells = keys.map(function (k) {
+        var n = disp[k];
+        if (!n) return "<div><dt>" + k.toUpperCase().replace("_", "/") + "</dt><dd>—</dd></div>";
+        var v = n.unit === "%" ? Number(n.value).toFixed(1) + "%" : Number(n.value).toFixed(2) + "x";
+        var b = n.kind === "CALCULATED" ? " <span class='cx-q cx-q-calc'>CALC</span>" : " <span class='cx-q cx-q-rep'>REP</span>";
+        return "<div><dt>" + esc(n.label) + b + "</dt><dd>" + v + "</dd></div>";
+      }).join("");
+      E("cx-ov-ratio").innerHTML = sec("Key ratios",
+        '<dl class="cx-facts">' + cells + "</dl>" +
+        '<div class="cx-note">REPORTED values come from the provider; CALC values from the terminal ratio engine. Detail in Valuation.</div>');
+    }).catch(function () { if (E("cx-ov-ratio")) E("cx-ov-ratio").innerHTML = ""; });
   }
   function tOverview(sym, main) { perf(sym, main); }
   /* statement table shared by financials */
@@ -367,6 +449,46 @@
           }).join("") + "</tbody></table></div></details></section>";
       }
       E("cx-val").innerHTML = h;
+      /* Canonical calculated ratios (single engine, formula inspectors). */
+      API.get("ratiosheet", { symbol: sym }).then(function (rs2) {
+        if (!E("cx-val")) return;
+        var sheet = (rs2.body && rs2.body.data) || null;
+        if (!sheet || !sheet.display) return;
+        var order = ["roe", "roa", "roce", "gross_margin", "op_margin", "net_margin",
+          "current_ratio", "quick_ratio", "debt_equity", "net_debt_ebitda",
+          "interest_coverage", "asset_turnover", "revenue_cagr", "pat_cagr",
+          "fcf_margin", "cfo_pat", "payout_ratio"];
+        var rows = order.filter(function (k) { return sheet.display[k]; }).map(function (k) {
+          return sheet.display[k];
+        });
+        if (!rows.length) return;
+        function disp(n) {
+          if (n.unit === "%") return Number(n.value).toFixed(1) + "%";
+          if (n.unit === "x") return Number(n.value).toFixed(2) + "x";
+          return esc(String(n.value));
+        }
+        var el = document.createElement("div");
+        el.innerHTML = sec("Calculated ratios",
+          '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Ratio</th><th scope="col" class="num">Value</th><th scope="col">Quality</th><th scope="col">Detail</th></tr></thead><tbody>' +
+          rows.map(function (n, ix) {
+            return "<tr><td>" + esc(n.label) + (n.variant ? " <span class='cx-note'>(" + esc(n.variant) + ")</span>" : "") +
+              "</td><td class='num'>" + disp(n) + "</td><td><span class='cx-q cx-q-calc'>CALC</span></td>" +
+              "<td><button class='cx-btn2' data-calc='" + ix + "'>Formula</button></td></tr>";
+          }).join("") + "</tbody></table></div>" +
+          '<div id="cx-calc-insp"></div><div class="cx-prov">Single canonical engine · click Formula for inputs, period, source, timestamp.</div>');
+        E("cx-val").appendChild(el);
+        Array.prototype.forEach.call(el.querySelectorAll("[data-calc]"), function (b) {
+          b.onclick = function () {
+            var n = rows[Number(b.getAttribute("data-calc"))];
+            E("cx-calc-insp").innerHTML = '<div class="cx-inspector"><b>' + esc(n.label) + " " + disp(n) +
+              "</b><div class='cx-kv'><span class='k'>Formula</span><span class='w'>" + esc(n.formula || "") + "</span></div>" +
+              (n.inputs || []).map(function (i) {
+                return "<div class='cx-kv'><span class='k'>" + esc(i.label || "") + (i.period ? " (" + esc(i.period) + ")" : "") +
+                  "</span><span class='w'>" + esc(i.value === null || i.value === undefined ? "—" : String(i.value)) + " · " + esc(i.source || "") + "</span></div>";
+              }).join("") + '<div class="cx-note">Calculated ' + esc(n.calculated_at || "") + "</div></div>";
+          };
+        });
+      }).catch(function () { /* reported grid already shown */ });
     }).catch(function () { if (E("cx-val")) E("cx-val").innerHTML = sec("Valuation", err()); });
   }
   function estCell(v) {

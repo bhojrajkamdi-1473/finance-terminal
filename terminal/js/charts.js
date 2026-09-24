@@ -9,6 +9,18 @@
     volUp: "rgba(24,121,78,.30)", volDn: "rgba(192,53,53,.30)",
     cross: "#9aa3af", smas: ["#1a56c4", "#9a6b12", "#6d4fc2"],
   };
+  var C_DARK = {
+    grid: "#1E2A45", ink: "#8A9BC0", up: "#00D68F", dn: "#FF4D6A",
+    upFill: "rgba(0,214,143,.14)", dnFill: "rgba(255,77,106,.14)",
+    volUp: "rgba(0,214,143,.30)", volDn: "rgba(255,77,106,.30)",
+    cross: "#4A5A7A", smas: ["#3B7BF6", "#F5A623", "#7B5CF6"],
+  };
+  function palette() {
+    try {
+      if (document.body && document.body.dataset.theme === "light") return C;
+    } catch (e) { /* default dark */ }
+    return (typeof document !== "undefined") ? C_DARK : C;
+  }
   function sma(values, w) {
     var out = [];
     for (var i = 0; i < values.length; i++) {
@@ -33,6 +45,7 @@
   }
   function drawPriceChart(canvas, bars, opts) {
     opts = opts || {};
+    C = palette();
     var smas = opts.sma || [20, 50];
     var dpr = window.devicePixelRatio || 1;
     var W = canvas.clientWidth || 800, H = canvas.clientHeight || 300;

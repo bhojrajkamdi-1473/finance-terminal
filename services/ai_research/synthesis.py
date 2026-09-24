@@ -119,6 +119,13 @@ def build_fallback_report(symbol: str, legs: dict, facts: dict, wanted: list[str
         if facts.get(key) is not None:
             disp = _fmt_money(facts[key], ccy) if fmt is None else fmt.format(facts[key])
             val_obs.append(_obs(f"{label} {disp} (reported)", vsrc, "TTM"))
+    for key, label in (("roe", "ROE"), ("roce", "ROCE"), ("debt_equity", "Debt/Equity"),
+                       ("current_ratio", "Current ratio"), ("net_margin", "Net margin")):
+        if facts.get(key) is not None and facts.get(f"{key}_kind") == "CALCULATED":
+            unit = "%" if key in ("roe", "roce", "net_margin") else ("x" if key != "current_ratio" else "x")
+            extra = f" [{facts[f'{key}_variant']}]" if facts.get(f"{key}_variant") else ""
+            val_obs.append(_obs(f"{label} {facts[key]:.2f}{unit} (calculated{extra})",
+                                "Terminal ratio engine", None))
     sections["valuation"] = {"observations": val_obs[:5], "metrics": _metric_list(facts, ccy, ("pe", "pb", "eps", "dividend_yield", "market_cap", "beta"))}
 
     # -- technicals --

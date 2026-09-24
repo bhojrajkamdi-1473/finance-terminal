@@ -47,6 +47,10 @@ def build_context(
     legs["profile"] = adapter.get_fundamentals(symbol)
     legs["valuation"] = adapter.get_valuation(symbol)
     legs["technicals"] = adapter.get_technicals(symbol)
+    try:
+        legs["ratio_sheet"] = adapter.get_ratio_sheet(symbol)
+    except Exception:
+        legs["ratio_sheet"] = {"ok": False, "reason": "ERROR", "detail": "Ratio sheet failed."}
     if any(s in sections for s in ("fundamentals", "valuation", "bull", "bear", "risk", "conclusion")):
         legs["income_annual"] = adapter.get_financials(symbol, "income", "annual")
         legs["balance_annual"] = adapter.get_financials(symbol, "balance", "annual")
@@ -114,6 +118,15 @@ def _extract_facts(symbol: str, legs: dict) -> dict:
         facts[key] = _num(node.get("value"))
     overview = val_data.get("overview") or {}
     facts["company_name"] = overview.get("Name") or overview.get("name")
+    # Canonical ratio sheet: REPORTED display first, CALCULATED fill.
+    sheet = (legs.get("ratio_sheet", {}).get("data") or {}) if legs.get("ratio_sheet", {}).get("ok") else {}
+    facts["ratio_display"] = sheet.get("display") or {}
+    for key in ("roe", "roa", "roce", "debt_equity", "current_ratio", "net_margin"):
+        node = facts["ratio_display"].get(key) or {}
+        if node.get("value") is not None and facts.get(key) is None:
+            facts[key] = _num(node.get("value"))
+            facts[f"{key}_kind"] = node.get("kind")
+            facts[f"{key}_variant"] = node.get("variant")
     # Statements: latest two annual income reports for growth math.
     reps = _reports(legs.get("income_annual", {}))
     facts["income_reports"] = []
@@ -178,6 +191,11 @@ def _render_evidence(symbol: str, legs: dict, facts: dict) -> str:
         lines.append(f"COMPANY name={facts['company_name']}")
     for key in ("pe", "pb", "eps", "dividend_yield", "market_cap", "beta"):
         lines.append(f"VALUATION {key}={facts.get(key)} (unavailable means unknown — never estimate)")
+    for key in ("roe", "roa", "roce", "debt_equity", "current_ratio", "net_margin"):
+        if facts.get(key) is not None:
+            kind = facts.get(f"{key}_kind") or "REPORTED"
+            variant = f" [{facts[f'{key}_variant']}]" if facts.get(f"{key}_variant") else ""
+            lines.append(f"RATIO {key}={facts[key]} kind={kind}{variant}")
     for i, rep in enumerate(facts.get("income_reports") or []):
         lines.append(f"INCOME t-{i} period={rep.get('period')} revenue={rep.get('revenue')} net_income={rep.get('net_income')} eps={rep.get('eps')}")
     for key in ("revenue_yoy_pct", "net_income_yoy_pct", "eps_yoy_pct"):

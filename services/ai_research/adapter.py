@@ -146,3 +146,7 @@ class FinanceTerminalDataAdapter:
         except Exception:
             quote_env = None
         return _safe(self.manager.get_valuation, symbol, quote_env)
+
+    def get_ratio_sheet(self, symbol: str) -> dict:
+        """Canonical ratio sheet (REPORTED first, CALCULATED fill)."""
+        return _safe(self.manager.get_ratio_sheet, symbol)

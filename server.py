@@ -80,6 +80,19 @@ DEFAULT_SYMBOLS = [
 ]
 
 
+def _send_text(handler: BaseHTTPRequestHandler, text: str, ctype: str,
+               status: int = 200, filename: str | None = None) -> None:
+    body = text.encode("utf-8")
+    handler.send_response(status)
+    handler.send_header("Content-Type", ctype + "; charset=utf-8")
+    handler.send_header("Content-Length", str(len(body)))
+    if filename:
+        handler.send_header("Content-Disposition", f'attachment; filename="{filename}"')
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(body)
+
+
 def _send_json(handler: BaseHTTPRequestHandler, obj, status: int = 200) -> None:
     body = json.dumps(_redact(obj)).encode("utf-8")
     handler.send_response(status)
@@ -164,6 +177,9 @@ def _secret_values() -> list[str]:
         "OPENAI_API_KEY",
         "ANTHROPIC_API_KEY",
         "OPENROUTER_API_KEY",
+        "IPOGURU_API_KEY",
+        "FINNHUB_API_KEY",
+        "MARKETAUX_API_KEY",
     ):
         _secret_val = (os.environ.get(_secret_name) or "").strip()
         if len(_secret_val) >= 8:
@@ -229,6 +245,8 @@ class Handler(BaseHTTPRequestHandler):
             return _send_json(self, env, _envelope_status(env))
         if path == "/api/ratios":
             return self._handle_valuation(qs)
+        if path == "/api/ratiosheet":
+            return self._handle_ratio_sheet(qs)
         if path == "/api/news":
             try:
                 limit = int(qs.get("limit", ["20"])[0] or 20)
@@ -264,11 +282,9 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/api/research-links":
             return self._handle_research_links(qs)
         if path == "/api/ipo":
-            return self._handle_cached_domain(
-                "ipo:calendar",
-                refresh.IPO_TTL,
-                lambda: registry.fundamentals.get_ipo_calendar(),
-            )
+            return self._handle_ipo(qs)
+        if path == "/api/ipo/detail":
+            return self._handle_ipo_detail(qs)
         if path == "/api/earnings-calendar":
             return self._handle_cached_domain(
                 "earnings:calendar",
@@ -482,6 +498,19 @@ class Handler(BaseHTTPRequestHandler):
         out["valuation"] = metrics
         return _send_json(self, out, _envelope_status(out))
 
+    def _handle_ratio_sheet(self, qs):
+        """Canonical ratio sheet: REPORTED overview first, ratio-engine
+        CALCULATED fill second. Additive — /api/ratios untouched."""
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        if not symbol:
+            return _send_json(
+                self,
+                {"status": "error", "source": "terminal", "message": "symbol required"},
+                400,
+            )
+        env = registry.manager.get_ratio_sheet(symbol)
+        return _send_json(self, env, _envelope_status(env))
+
     def _handle_quality(self, qs):
         """Data Quality panel: per-provider connectivity, last response,
         capabilities, budgets — never key values."""
@@ -546,6 +575,62 @@ class Handler(BaseHTTPRequestHandler):
         return _send_json(
             self, {"ok": True, **_rl.destinations(symbol, name, exchange)}
         )
+
+    def _handle_ipo(self, qs):
+        """IPO dashboard: classified calendar buckets + GMP/subscription
+        states. GMP is never synthesised: without a verified source the
+        tab reports honest unavailable with the labelling rules."""
+        from providers import ipo as _ipo
+
+        def fetch():
+            return registry.fundamentals.get_ipo_calendar()
+
+        hit = _domain_cache.get("ipo:calendar")
+        if hit is not None:
+            env = dict(hit)
+            env["served_from"] = "cache"
+        else:
+            env = fetch()
+            if env.get("status") == "live":
+                _domain_cache.set("ipo:calendar", env, refresh.IPO_TTL)
+                env = dict(env)
+            env["served_from"] = env.get("served_from", "provider")
+        rows = ((env.get("data") or {}).get("rows")) or []
+        buckets = _ipo.classify(rows) if env.get("status") == "live" else {}
+        out = dict(env)
+        out["buckets"] = buckets
+        out["gmp"] = _ipo.gmp_unavailable()
+        out["subscription"] = _ipo.subscription_unavailable()
+        out["sources"] = [_ipo.ipoguru_status(),
+                          {"provider": "alpha-vantage",
+                           "state": "live" if env.get("status") == "live" else "unavailable",
+                           "detail": "IPO_CALENDAR feed (25 req/day free)."}]
+        return _send_json(self, out, _envelope_status(env))
+
+    def _handle_ipo_detail(self, qs):
+        """IPO detail: company-derived snapshot (profile, valuation,
+        statements, estimates) + honest GMP/subscription blocks. Never
+        BUY/SELL/APPLY output — structured analysis inputs only."""
+        from providers import ipo as _ipo
+
+        symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+        if not symbol:
+            return _send_json(self, {"ok": False, "error": "symbol required"}, 400)
+        quote_env = registry.market_data.get_quote(symbol)
+        profile = registry.manager.get_profile(symbol, quote_env)
+        valuation = registry.manager.get_valuation(symbol, quote_env)
+        statements = registry.manager.get_statements(symbol, "income", "annual")
+        estimates = registry.manager.get_estimates(symbol)
+        return _send_json(self, {
+            "ok": True,
+            "symbol": symbol,
+            "profile": profile,
+            "valuation": valuation,
+            "financials": statements,
+            "estimates": estimates,
+            "gmp": _ipo.gmp_unavailable(symbol),
+            "subscription": _ipo.subscription_unavailable(symbol),
+        })
 
     def _handle_cached_domain(self, cache_key: str, ttl: float, fetch):
         """Slow-domain wrapper: serve TTLCache unless refresh is allowed."""
@@ -1040,6 +1125,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 row["fundamental"] = fund
                 row["fundamental_kind"] = "REPORTED"
+            matched: list[dict] = []
             for metric, op, v1, v2 in rules:
                 _, get = self.SCREENER_METRICS[metric]
                 if metric.startswith("sma") and v1 == "__PRICE__":
@@ -1048,12 +1134,23 @@ class Handler(BaseHTTPRequestHandler):
                         get(q, tech["values"] if tech else None, fund),
                     )
                     ok = pv is not None and sv is not None and pv > sv
+                    if ok:
+                        matched.append(
+                            {"metric": metric, "op": "above",
+                             "value": pv, "threshold": sv}
+                        )
                 else:
                     val = get(q, tech["values"] if tech else None, fund)
                     ok = val is not None and _apply_op(val, op, v1, v2)
+                    if ok:
+                        matched.append(
+                            {"metric": metric, "op": op, "value": val,
+                             "threshold": v1 if v2 is None else [v1, v2]}
+                        )
                 if not ok:
                     row["pass"] = False
                     break
+            row["matched"] = matched
             if sort_by:
                 _, get = self.SCREENER_METRICS[sort_by]
                 row["_sort"] = get(q, tech["values"] if tech else None, fund)
@@ -1067,6 +1164,8 @@ class Handler(BaseHTTPRequestHandler):
                 ),
                 reverse=(sort_dir == "desc"),
             )
+        if (qs.get("format", [""])[0] or "").lower() == "csv":
+            return self._send_screener_csv(results)
         return _send_json(
             self,
             {
@@ -1083,6 +1182,30 @@ class Handler(BaseHTTPRequestHandler):
                 "Alpha Vantage free quota (25/day, cached 24 h).",
             },
         )
+
+    def _send_screener_csv(self, results: list[dict]):
+        """CSV export of screener matches incl. why each row passed."""
+        import csv
+        import io
+
+        buf = io.StringIO()
+        w = csv.writer(buf)
+        w.writerow(["symbol", "name", "price", "currency", "change_pct",
+                    "pe", "roe", "matched_filters"])
+        for x in results:
+            q = x.get("quote") or {}
+            fund = x.get("fundamental") or {}
+            matched = "; ".join(
+                f"{m.get('metric')} {m.get('op')} {m.get('threshold')} "
+                f"(value {m.get('value')})"
+                for m in (x.get("matched") or [])
+            )
+            w.writerow([
+                x.get("symbol"), (q.get("name") or ""),
+                q.get("price"), (q.get("currency") or ""), q.get("change_pct"),
+                fund.get("PERatio"), fund.get("ROE"), matched,
+            ])
+        return _send_text(self, buf.getvalue(), "text/csv", 200, "screen.csv")
 
     def _screener_technical(self, symbol: str) -> dict | None:
         from services import technicals as _t

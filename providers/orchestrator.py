@@ -851,6 +851,90 @@ class ProviderManager:
 
         return self._cached_or(key, VALUATION_TTL, compute)
 
+    def get_ratio_sheet(self, symbol: str) -> dict:
+        """ROE hierarchy + canonical ratio sheet.
+
+        Priority per metric: provider-REPORTED overview value first,
+        ratio-engine CALCULATED fill second, UNAVAILABLE only when all
+        paths are exhausted. Statement legs ride the 7-day cached
+        get_statements paths, so no extra quota beyond what the
+        Financials tab already spends.
+        """
+        symbol = (symbol or "").strip().upper()
+        key = f"oratio:{symbol}"
+
+        def compute() -> dict:
+            from providers.schema import num as _snum
+            from services.analytics import ratios as _ratios
+
+            val_env = self.get_valuation(symbol)
+            val_data = (val_env.get("data") or {}) if val_env.get("status") == "live" else {}
+            overview = val_data.get("overview") or {}
+            currency = overview.get("Currency") or overview.get("currency")
+            price = None
+            try:
+                q = self.get_quote(symbol)
+                price = _snum((q.get("data") or {}).get("price"))
+                currency = currency or (q.get("data") or {}).get("currency")
+            except Exception:
+                price = None
+            reps: dict[str, list] = {}
+            rep_source = "statements"
+            for stmt in ("income", "balance", "cashflow"):
+                try:
+                    env = self.get_statements(symbol, stmt, "annual")
+                except Exception:
+                    continue
+                if env.get("status") == "live" and (env.get("data") or {}).get("reports"):
+                    reps[stmt] = env["data"]["reports"]
+                    rep_source = env.get("source") or rep_source
+            market_cap = _snum(overview.get("MarketCapitalization"))
+            computed = _ratios.compute_all(
+                reps.get("income"), reps.get("balance"), reps.get("cashflow"),
+                price=price, market_cap=market_cap,
+                source=rep_source, currency=currency,
+            )
+            reported_roe = _snum(overview.get("ROE") or overview.get("ReturnOnEquityTTM"))
+            reported_roa = _snum(overview.get("ROA") or overview.get("ReturnOnAssetsTTM"))
+            display: dict[str, dict] = {}
+            if reported_roe is not None:
+                display["roe"] = {"value": reported_roe, "unit": "%", "kind": "REPORTED",
+                                  "source": val_env.get("source"), "label": "ROE"}
+            elif "roe" in computed:
+                display["roe"] = computed["roe"]
+            if reported_roa is not None:
+                display["roa"] = {"value": reported_roa, "unit": "%", "kind": "REPORTED",
+                                  "source": val_env.get("source"), "label": "ROA"}
+            elif "roa" in computed:
+                display["roa"] = computed["roa"]
+            for k in ("roce", "gross_margin", "op_margin", "net_margin", "current_ratio",
+                      "quick_ratio", "debt_equity", "net_debt_ebitda", "interest_coverage",
+                      "asset_turnover", "revenue_cagr", "ebitda_cagr", "pat_cagr", "eps_cagr",
+                      "fcf", "fcf_margin", "cfo_pat", "div_yield_calc", "payout_ratio",
+                      "pe_calc", "pe_from_mcap"):
+                if k in computed:
+                    display[k] = computed[k]
+            gaps = [k for k in _ratios.core_keys() if k not in display]
+            live = bool(display) or val_env.get("status") == "live"
+            return {
+                "status": "live" if live else "unavailable",
+                "source": "orchestrator+ratio-engine",
+                "as_of": val_env.get("as_of"),
+                "timeliness": val_env.get("timeliness") or "DELAYED",
+                "data": {
+                    "symbol": symbol,
+                    "currency": currency,
+                    "display": display,
+                    "computed": computed,
+                    "gaps": gaps,
+                    "statements_used": sorted(reps),
+                } if live else None,
+                "message": None if live else "No reported overview and no computable statements.",
+                "providers_queried": val_env.get("providers_queried"),
+            }
+
+        return self._cached_or(key, VALUATION_TTL, compute)
+
     def get_earnings(self, symbol: str) -> dict:
         """AV earnings + TD earnings rows, reported-EPS cross-check."""
         symbol = (symbol or "").strip().upper()
@@ -1031,7 +1115,9 @@ class ProviderManager:
                     }
                 )
             results = self._fanout(key + ":fan", NEWS_TTL, calls)
-            seen: set[str] = set()
+            aliases = _entity_aliases(symbol)
+            seen_urls: set[str] = set()
+            seen_heads: list[set[str]] = []
             items: list[dict] = []
             for name in ("yahoo-rss", "alphavantage", "indian-api"):
                 env = results.get(name, {})
@@ -1039,10 +1125,21 @@ class ProviderManager:
                     continue
                 for it in (env.get("data") or {}).get("items") or []:
                     url = str(it.get("url") or "")
-                    if not url or url in seen:
+                    if not url or url in seen_urls:
                         continue
-                    seen.add(url)
-                    items.append({**it, "via": name})
+                    head = _headline_tokens(str(it.get("title") or ""))
+                    if head and any(_same_story(head, prev) for prev in seen_heads):
+                        continue  # same story, different publisher
+                    seen_urls.add(url)
+                    if head:
+                        seen_heads.append(head)
+                    items.append({**it, "via": name,
+                                  "relevance": _relevance(str(it.get("title") or ""),
+                                                          str(it.get("summary") or ""),
+                                                          aliases)})
+            # Company-linked ranking: entity-matching items first. Items
+            # that match no alias are kept (market context) but demoted.
+            items.sort(key=lambda i: (i.get("relevance") or 0), reverse=True)
             if not items:
                 first = next(
                     (
@@ -1066,6 +1163,10 @@ class ProviderManager:
                 "providers_queried": _queried(results),
                 "reconciliation": {"skipped": skipped},
                 "message": None,
+                "dedup": "URL + headline-similarity (same-story); entity-ranked.",
+                "filings_note": "Press/news only. Official NSE/BSE filings and "
+                "exchange-reported dividends/splits live under Corporate "
+                "Actions, never mixed into news.",
             }
 
         return self._cached_or(key, NEWS_TTL, compute)
@@ -1334,6 +1435,66 @@ def _ok(env: dict) -> bool:
         and env.get("status") in ("live", "delayed")
         and env.get("data") is not None
     )
+
+
+_STOPWORDS = frozenset(
+    "the a an and or of for to in on with stock stocks market markets "
+    "ltd limited inc corp corporation company group holdings new".split()
+)
+
+
+def _headline_tokens(title: str) -> set[str]:
+    import re as _re
+
+    toks = set(_re.findall(r"[a-z0-9]{3,}", (title or "").lower()))
+    return {t for t in toks if t not in _STOPWORDS}
+
+
+def _jaccard(a: set[str], b: set[str]) -> float:
+    if not a or not b:
+        return 0.0
+    return len(a & b) / len(a | b)
+
+
+def _same_story(a: set[str], b: set[str]) -> bool:
+    """Duplicate detector for short headlines: Jaccard OR overlap.
+
+    Pure Jaccard punishes short headlines (one extra word tanks the
+    score), so near-identical publisher rewrites also match on overlap
+    (|intersection| / min length).
+    """
+    if not a or not b:
+        return False
+    inter = len(a & b)
+    if inter / len(a | b) >= 0.6:
+        return True
+    return inter / min(len(a), len(b)) >= 0.8
+
+
+def _entity_aliases(symbol: str | None) -> list[str]:
+    """Never search just a ticker: TCS + TCS.NS + NSE:TCS + company tokens."""
+    sym = (symbol or "").strip().upper()
+    if not sym:
+        return []
+    out = [sym]
+    base = sym.removesuffix(".NS").removesuffix(".BO")
+    if base != sym:
+        out.append(base)
+        out.append("NSE:" + base)
+        out.append("BSE:" + base)
+    return out
+
+
+def _relevance(title: str, summary: str, aliases: list[str]) -> int:
+    """Entity-match score; company-linked items rank above market noise."""
+    text = f"{title} {summary}".upper()
+    score = 0
+    for alias in aliases:
+        if not alias:
+            continue
+        if alias in text:
+            score += 3 if "." in alias or ":" in alias else 2
+    return score
 
 
 def _queried(results: dict[str, dict]) -> list[str]:

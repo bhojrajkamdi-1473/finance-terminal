@@ -344,7 +344,8 @@
         var res = b.results || [];
         var skipped = b.skipped || [];
         var excl = skipped.filter(function (x) { return x.excluded_reason; });
-        el("s-cov").innerHTML = "Coverage: <b>" + F.esc(b.universe || "") + "</b> · screened " + (b.coverage || 0) + " · matched " + res.length;
+        el("s-cov").innerHTML = "Coverage: <b>" + F.esc(b.universe || "") + "</b> · screened " + (b.coverage || 0) + " · matched " + res.length +
+          (res.length ? ' · <a id="s-csv" href="/api/screener?' + qs + '&format=csv" download="screen.csv">Export CSV</a>' : "");
         function th(label, metric) {
           var arrow = sortBy === metric ? (sortDir === "asc" ? " ▲" : " ▼") : "";
           return "<th scope='col' class='num'><a href='#' data-sort='" + metric + "' style='color:inherit'>" + label + arrow + "</a></th>";
@@ -358,7 +359,13 @@
               var t = x.technical || {}, f = x.fundamental || {};
               function fund(k) { return f[k] === undefined || f[k] === null || f[k] === "None" ? "—" : F.esc(String(f[k])); }
               return "<tr data-sym='" + F.esc(x.symbol) + "' style='cursor:pointer'><td class='txt'>" +
-                secCell(x.symbol, x.quote && x.quote.name, x.quote && x.quote.exchange) + "</td><td class='num'><b>" +
+                secCell(x.symbol, x.quote && x.quote.name, x.quote && x.quote.exchange) +
+                ((x.matched && x.matched.length) ? "<br><span class='src' title='Why this row passed'>" +
+                  F.esc(x.matched.map(function (m) {
+                    var th = (m.threshold && m.threshold.length !== undefined && typeof m.threshold !== "number")
+                      ? m.threshold.join("…") : m.threshold;
+                    return m.metric + " " + m.op + " " + th;
+                  }).join(" · ")) + "</span>" : "") + "</td><td class='num'><b>" +
                 F.fmtNum(x.quote.price) + " " + F.esc(x.quote.currency || "") + "</b></td><td class='num " + F.dirClass(x.quote.change_pct) + "'>" + F.fmtPct(x.quote.change_pct) +
                 "</td><td class='num'>" + (t.rsi14 === undefined || t.rsi14 === null ? "—" : F.fmtNum(t.rsi14) + " <span class='pill pill-calc'>CALC</span>") +
                 "</td><td class='num'>" + fund("PERatio") + "</td><td class='num'>" + fund("ROE") +
@@ -1098,7 +1105,7 @@
     var smas = [20, 50];
     b.innerHTML = "<div class='row'><div class='row' role='group' aria-label='Chart source'>" +
       "<button class='btn sm primary' id='ch-t1'>Terminal chart</button>" +
-      "<button class='btn sm' id='ch-t2'>TradingView widget</button></div>" +
+      "<button class='btn sm' id='ch-t2'>TradingView chart</button></div>" +
       "<span id='ch-ranges' class='row' role='group' aria-label='Timeframe'>" +
       ["1D", "5D", "1M", "3M", "6M", "1Y", "5Y", "MAX"].map(function (x) {
         return "<button class='btn sm" + (x === range ? " primary" : "") + "' data-r='" + x + "'>" + x + "</button>";
@@ -1108,7 +1115,7 @@
         return "<label><input type='checkbox' data-sma='" + p[0] + "'" + (p[1] ? " checked" : "") + "> SMA" + p[0] + "</label>";
       }).join("") + "</span></div>" +
       "<div class='card sect' id='ch-tvnote' style='display:none'>" +
-      "<h3>External chart — TradingView widget " + F.statusPill("delayed") + "</h3>" +
+      "<h3>TRADINGVIEW CHART " + F.statusPill("delayed") + "</h3>" +
       "<div class='src'>Official TradingView embed. Its data is TradingView's own feed — not ours, not scraped, not re-labeled. " +
       "Free widget data is delayed; NSE real-time requires an authorized feed.</div>" +
       "<div id='ch-tvw' style='height:420px;margin-top:8px'></div></div>" +

@@ -17,7 +17,8 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 
-MANDATORY = ["TCS.NS", "INFY.NS", "RELIANCE.NS", "META", "MSFT", "AAPL"]
+MANDATORY = ["TCS.NS", "INFY.NS", "RELIANCE.NS", "SBIN.NS",
+             "META", "MSFT", "AAPL", "GOOG"]
 
 
 class FakeAdapter:
