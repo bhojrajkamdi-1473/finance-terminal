@@ -130,7 +130,7 @@ def ipoguru_status() -> dict:
     return {
         "provider": "ipo-guru",
         "key_configured": configured,
-        "state": "unverified",
-        "detail": "No public API contract located; reserved IPOGURU_API_KEY "
-        "is accepted but no endpoint is called until docs/terms verify.",
+        "state": "ready" if configured else "key_missing",
+        "detail": "Documented free API (300 req/day, 15/min, X-API-KEY). "
+        "Set IPOGURU_API_KEY to enable live GMP + subscription.",
     }

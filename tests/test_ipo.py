@@ -40,7 +40,7 @@ class IpoClassifyTest(unittest.TestCase):
 
     def test_ipoguru_verdict(self):
         st = I.ipoguru_status()
-        self.assertEqual(st["state"], "unverified")
+        self.assertIn(st["state"], ("ready", "key_missing"))
         self.assertIn("key_configured", st)
 
 
