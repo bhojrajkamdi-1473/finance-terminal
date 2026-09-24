@@ -266,6 +266,47 @@ class OrchestratorTest(unittest.TestCase):
             else:
                 os.environ["AI_PROVIDER"] = old_provider
 
+    def test_user_facing_cleanliness(self):
+        """No raw internals leak into user-facing report content."""
+        import re
+
+        from services.ai_research import orchestrator as o
+
+        out = o.run_research("TCS.NS", "standard", adapter=FakeAdapter(), force=True)
+
+        def _strings(node):
+            if isinstance(node, str):
+                return [node]
+            if isinstance(node, dict):
+                if node.get("domain") in ("quote", "profile", "valuation", "technicals",
+                                          "income_annual", "news"):
+                    pass
+                out_list = []
+                for key, val in node.items():
+                    if key in ("source", "retrieved_at", "kind", "status", "reason",
+                               "detail", "domain", "category", "provider", "as_of"):
+                        continue  # provenance metadata, rendered separately
+                    out_list.extend(_strings(val))
+                return out_list
+            if isinstance(node, list):
+                return [s for item in node for s in _strings(item)]
+            return []
+
+        visible = " ".join(_strings(out["report"]))
+        banned = ["extractive draft", "no LLM configured", "source=", "as_of=",
+                  "Evidence pack", "EVIDENCE", "NOT_REQUESTED", "KEY_REQUIRED",
+                  "error_kind", "chain-of-thought"]
+        for token in banned:
+            self.assertNotIn(token, visible, msg=token)
+        for pat in (r"\bNone\b", r"\bnull\b", r"\bundefined\b", r"\bNaN\b"):
+            self.assertIsNone(re.search(pat, visible), msg=pat)
+        rep = out["report"]
+        self.assertTrue(rep["executive_snapshot"].get("summary"))
+        self.assertTrue(rep["fundamentals"].get("observations"))
+        for ob in rep["fundamentals"]["observations"]:
+            self.assertIn("statement", ob)
+            self.assertIn("source", ob)
+
     def test_cached_second_call(self):
         from services.ai_research import orchestrator as o
 

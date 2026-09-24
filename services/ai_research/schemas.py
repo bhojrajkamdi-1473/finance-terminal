@@ -47,6 +47,8 @@ def normalize_sections(sections: object | None, depth: str) -> list[str]:
     if sections is None:
         if depth == "deep":
             return list(ALL_SECTIONS)
+        if depth == "quick":
+            return ["fundamentals", "valuation", "technical", "news"]
         return list(STANDARD_SECTIONS)
     if not isinstance(sections, list):
         raise ValueError("sections must be a list")  # noqa: TRY004 — API contract uses ValueError
@@ -78,9 +80,10 @@ def validate_report(report: dict) -> list[str]:
             node = report.get(field)
             texts: list[str] = []
             if isinstance(node, dict):
-                t = node.get("text") or node.get("summary")
-                if isinstance(t, str):
-                    texts.append(t)
+                for key in ("text", "summary"):
+                    t = node.get(key)
+                    if isinstance(t, str):
+                        texts.append(t)
                 for item in node.get("points") or []:
                     if isinstance(item, dict) and isinstance(item.get("text"), str):
                         texts.append(item["text"])

@@ -19,7 +19,7 @@ from . import schemas as _schemas
 
 _TICKER = re.compile(r"^[A-Z0-9][A-Z0-9.\-^=]{0,24}$")
 
-RESEARCH_TTL_NOTE = "standard 4h · deep 2h · key: ticker|date|depth|context-hash|model"
+RESEARCH_TTL_NOTE = "quick/standard 4h · deep 2h · key: ticker|date|depth|context-hash|model"
 
 
 def validate_ticker(raw: object) -> str:
@@ -37,14 +37,34 @@ def _bullets(text: str, limit: int = 6) -> list[str]:
     return lines
 
 
-def _section(role_text: str, legs: dict, section: str, grounding: dict) -> dict:
-    return {
-        "text": role_text,
-        "points": _bullets(role_text),
+def _section(
+    role_text: str,
+    legs: dict,
+    section: str,
+    grounding: dict,
+    *,
+    observations: list | None = None,
+    metrics: list | None = None,
+    include_text: bool = True,
+) -> dict:
+    node: dict = {
+        "points": ([o["statement"] for o in (observations or [])][:6]
+                   if not include_text
+                   else _bullets(role_text)),
         "citations": _cite.section_citations(section, legs),
         "grounding": grounding.get("verdict", "unverified"),
         "grounding_note": grounding.get("note"),
+        "observations": observations or [],
+        "metrics": metrics or [],
     }
+    if include_text and role_text:
+        node["text"] = role_text
+    if not include_text and not node["observations"]:
+        node["observations"] = [
+            {"statement": "Insufficient verified evidence for this section right now",
+             "source": "Terminal", "period": None}
+        ]
+    return node
 
 
 def run_research(
@@ -59,8 +79,8 @@ def run_research(
 ) -> dict:
     symbol = validate_ticker(ticker)
     depth = (depth or "standard").strip().lower()
-    if depth not in ("standard", "deep"):
-        raise ValueError("depth must be 'standard' or 'deep'")
+    if depth not in ("quick", "standard", "deep"):
+        raise ValueError("depth must be 'quick', 'standard' or 'deep'")
     wanted = _schemas.normalize_sections(sections, depth)
 
     llm_status = _cfg.status()
@@ -73,7 +93,7 @@ def run_research(
     legs = bundle["legs"]
     evidence_text = bundle["evidence_text"]
 
-    key = _cache.cache_key(symbol, depth, wanted, bundle["context_hash"], model if use_llm else "extractive", bundle["date_utc"])
+    key = _cache.cache_key(symbol, depth, wanted, bundle["context_hash"], model if use_llm else "evidence", bundle["date_utc"])
     if not force:
         hit = _cache.get(key)
         if hit is not None:
@@ -97,42 +117,69 @@ def run_research(
 
     grounding = _ground.ground_all(agent_results, evidence_text, legs)
 
+    from . import synthesis as _syn
+
+    fb: dict = {}
+    if not use_llm:
+        # No raw agent text leaves this path: structured facts only.
+        fb = _syn.build_fallback_report(symbol, legs, bundle["facts"], wanted)
+
     def txt(role: str) -> str:
         res = agent_results.get(role) or {}
         if res.get("ok") and res.get("text"):
-            return res["text"]
-        return f"{role} analysis unavailable ({res.get('error_kind') or 'no data'}). Evidence pack retained in Sources."
+            return _syn.sanitize_text(res["text"])
+        return ""
+
+    def _fb(section: str) -> dict:
+        return (fb.get("sections") or {}).get(section) or {}
+
+    def _sec(role: str, section: str, gkey: str) -> dict:
+        return _section(
+            txt(role), legs, section, grounding.get(gkey, {}),
+            observations=_fb(section).get("observations"),
+            metrics=_fb(section).get("metrics"),
+            include_text=use_llm,
+        )
 
     report = {
         "ticker": symbol,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "data_timestamp": bundle["built_at"],
-        "model": model if use_llm else "extractive (no LLM configured)",
+        "model": model if use_llm else "Terminal evidence synthesis",
         "provider": provider if use_llm else "none",
         "depth": depth,
         "sections": wanted,
         "llm_backed": use_llm,
-        "executive_snapshot": {"text": txt("manager"), "citations": _cite.section_citations("manager", legs)},
-        "fundamentals": _section(txt("fundamental"), legs, "fundamental", grounding.get("fundamental", {})),
-        "valuation": _section(txt("fundamental"), legs, "fundamental", grounding.get("fundamental", {})),
-        "technical": _section(txt("market"), legs, "market", grounding.get("market", {})),
+        "executive_snapshot": {
+            "citations": _cite.section_citations("manager", legs),
+            **({"text": txt("manager")} if use_llm and txt("manager") else {}),
+            **({} if use_llm else {"summary": fb.get("snapshot", "")}),
+        },
+        "fundamentals": _sec("fundamental", "fundamentals", "fundamental"),
+        "valuation": _sec("fundamental", "valuation", "fundamental"),
+        "technical": _sec("market", "technical", "market"),
         "news_sentiment": {
-            "text": txt("news"),
+            **({"text": txt("news")} if use_llm and txt("news") else {}),
+            "observations": _fb("news").get("observations", []),
             "items": _cite.news_sources(legs),
             "citations": _cite.section_citations("news", legs),
             "grounding": grounding.get("news", {}).get("verdict", "unverified"),
         },
-        "bull_case": _section(txt("bull"), legs, "bull", grounding.get("bull", {})),
-        "bear_case": _section(txt("bear"), legs, "bear", grounding.get("bear", {})),
-        "risks": _section(txt("risk"), legs, "risk", grounding.get("risk", {})),
-        "catalysts": {"points": _bullets(txt("news") + "\n" + txt("bull")), "citations": _cite.section_citations("news", legs)},
+        "bull_case": _sec("bull", "bull", "bull"),
+        "bear_case": _sec("bear", "bear", "bear"),
+        "risks": _sec("risk", "risk", "risk"),
+        "catalysts": {"points": _bullets(txt("news") + "\n" + txt("bull")) if use_llm else [o["statement"] for o in _fb("news").get("observations", [])[:4]], "citations": _cite.section_citations("news", legs)},
         "unknowns": {
-            "points": _bullets(txt("manager")),
+            "points": _bullets(txt("manager")) if use_llm else [],
             "citations": _cite.section_citations("manager", legs),
         },
         "data_gaps": _data_gaps(legs),
-        "conclusion": {"text": txt("manager"), "citations": _cite.section_citations("manager", legs)},
-        "sources": _cite.sources_panel(legs, model if use_llm else "extractive", provider if use_llm else "none"),
+        "conclusion": {
+            "citations": _cite.section_citations("manager", legs),
+            **({"text": txt("manager")} if use_llm and txt("manager") else {}),
+            **({} if use_llm else {"summary": fb.get("conclusion", "")}),
+        },
+        "sources": _cite.sources_panel(legs, model if use_llm else "Terminal evidence synthesis", provider if use_llm else "none"),
         "context_hash": bundle["context_hash"],
         "provider_count": bundle["provider_count"],
         "grounding": {k: (v or {}).get("verdict") for k, v in grounding.items()},
