@@ -976,6 +976,8 @@ class ProviderManager:
                         rows.append(tagged)
             if not rows:
                 out = _honest_unavailable("IPO calendar", results, skipped)
+                out["buckets"] = {"upcoming": [], "open": [], "closed": [],
+                                  "listed": [], "unclassified": []}
                 out["gmp"] = _ipo.gmp_unavailable()
                 out["subscription"] = _ipo.subscription_unavailable()
                 return out
