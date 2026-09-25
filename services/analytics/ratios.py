@@ -202,6 +202,8 @@ def compute_all(
     capex, _, _ = _pick(cf0, "capex")
     dps, _, _ = _pick(cur, "dps")
     divp, _, _ = _pick(cf0, "dividends_paid")
+    if divp is not None:
+        divp = abs(divp)  # Yahoo signs cash outflows negative; payout uses magnitude
     _ccy = f" ({currency})" if currency else ""
 
     def put(res: dict | None) -> None:

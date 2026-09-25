@@ -192,8 +192,9 @@ class YahooMarketDataProvider(MarketDataProvider, CompanyProvider):
             }
             if prev:
                 quote["change"] = price - prev
-                if quote["change_pct"] is None:
-                    quote["change_pct"] = (price - prev) / prev * 100.0
+                # Consistent pair: recompute pct from the same base instead
+                # of trusting meta's change field (Yahoo mixes session bases).
+                quote["change_pct"] = (price - prev) / prev * 100.0
             env = live_envelope("yahoo", quote, delayed=True)
             # Yahoo's public feed is exchange-delayed. Never REAL-TIME.
             env["timeliness"] = "DELAYED"

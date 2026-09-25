@@ -83,7 +83,7 @@
     }
     function mfRow(x, i) {
       var F = window.FT_FMT;
-      return '<div class="sr" role="option" data-i="m' + i + '"><span><span class="nm">' + F.esc(x.name || "?") + "</span> " +
+      return '<div class="sr" role="option" data-i="m' + i + '"><span><span class="nm">' + F.esc(x.name || x.symbol) + "</span> " +
         "<span class='tk'>MF · " + F.esc(String(x.code || "")) + "</span> <span class='cx-q cx-q-rep'>India</span></span><span class='px'>→</span></div>";
     }
     inp.addEventListener("focus", function () {
@@ -148,13 +148,13 @@
               "<span class='tk'>feature</span></span><span class='px'>→</span></div>";
           }
           function ipoRow(x, i) {
-            return '<div class="sr" role="option" data-i="p' + i + '"><span><span class="nm">' + F.esc(x.company_name || x.name || "?") + "</span> " +
+            return '<div class="sr" role="option" data-i="p' + i + '"><span><span class="nm">' + F.esc(x.company_name || x.name || x.symbol || "IPO") + "</span> " +
               "<span class='tk'>IPO · " + F.esc(x._bucket || x.status || "") + "</span></span><span class='px'>→</span></div>";
           }
           function render() {
             var html = "";
             if (fxMatches.length) {
-              html += "<div class='src' style='padding:6px 12px'>FEATURES</div>" +
+              html += "<div class='src' style='padding:6px 12px'>Features</div>" +
                 fxMatches.map(function (x, i) { return fxRow(x, i); }).join("");
             }
             if (ipoMatches.length) {
@@ -162,11 +162,11 @@
                 ipoMatches.map(function (x, i) { return ipoRow(x, i); }).join("");
             }
             if (mfMatches.length) {
-              html += "<div class='src' style='padding:6px 12px'>MUTUAL FUNDS</div>" +
+              html += "<div class='src' style='padding:6px 12px'>Mutual funds</div>" +
                 mfMatches.map(function (x, i) { return mfRow(x, i); }).join("");
             }
             if (wlMatches.length) {
-              html += "<div class='src' style='padding:6px 12px'>IN WATCHLIST</div>" +
+              html += "<div class='src' style='padding:6px 12px'>In watchlist</div>" +
                 wlMatches.map(function (x, i) { return row(x, "w" + i); }).join("");
             }
             html += items.map(function (x, i) { return row(x, i); }).join("");

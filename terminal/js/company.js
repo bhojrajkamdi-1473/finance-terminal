@@ -250,7 +250,7 @@
       '<div class="cx-kv"><span class="k">Formula</span><span class="w">' + esc(info.formula || "") + "</span></div>" +
       (info.inputs || []).map(function (i) {
         return '<div class="cx-kv"><span class="k">' + esc(i.label || "") + (i.period ? " (" + esc(i.period) + ")" : "") +
-          '</span><span class="w">' + esc(i.value === null || i.value === undefined ? "—" : String(i.value)) + " · " + esc(i.source || "") + "</span></div>";
+          '</span><span class="w">' + esc(i.value === null || i.value === undefined ? "" : String(i.value)) + " · " + esc(i.source || "") + "</span></div>";
       }).join("") +
       (info.variant ? '<div class="cx-note">Variant: ' + esc(info.variant) + "</div>" : "") +
       '<div class="cx-note">Calculated ' + esc(info.calculated_at || "") + ' · <button class="cx-btn2" id="cx-insp-x">Close</button></div></div>';
@@ -376,8 +376,8 @@
       var dg = E("cx-dg");
       if (dg) {
         dg.innerHTML = rows.map(function (p) {
-          return '<div class="cx-kv"><span class="k">' + esc(p.label) + " (" + esc(p.state || "?") + ")" + '</span><span class="w mut">' +
-            esc(String(p.last_latency_ms === null || p.last_latency_ms === undefined ? (p.last_error ? String(p.last_error).slice(0, 60) : "—") : p.last_latency_ms + " ms")) + "</span></div>";
+          return '<div class="cx-kv"><span class="k">' + esc(p.label) + (p.state ? " (" + esc(p.state) + ")" : "") + '</span><span class="w mut">' +
+            esc(String(p.last_latency_ms === null || p.last_latency_ms === undefined ? (p.last_error ? String(p.last_error).slice(0, 60) : "") : p.last_latency_ms + " ms")) + "</span></div>";
         }).join("") +
           (q.providers_queried ? '<div class="cx-note">Queried: ' + esc(q.providers_queried.join(", ")) + "</div>" : "") +
           (q.leg_errors ? '<div class="cx-note">' + esc(Object.keys(q.leg_errors).map(function (k) { return k + ": " + q.leg_errors[k]; }).join(" · ").slice(0, 300)) + "</div>" : "");
@@ -676,8 +676,8 @@
         '<td class="num ' + dir(rc.yoy) + '">' + (rc.yoy === null ? "" : F.fmtPct(rc.yoy)) + "</td></tr>";
     }
     var head = '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Particulars (' + esc(unit) + ')</th>' +
-      reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "?") + "</th>"; }).join("") +
-      '<th scope="col" class="num">YoY</th></tr></thead><tbody>';
+      reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "") + "</th>"; }).join("") +
+        '<th scope="col" class="num">YoY</th></tr></thead><tbody>';
     var used = {}, pri = "";
     STMT_PRIORITY.forEach(function (p, ix) {
       var k = stmtKey(reps[0], p[1].map(function (a) { return a.toLowerCase(); }));
@@ -691,7 +691,7 @@
     if (restHtml) {
       h += "<details style='margin-top:8px'><summary class='cx-note'>All line items (" + rest.length + ")</summary>" +
         '<div class="cx-scroll" style="margin-top:6px"><table class="cx-t"><thead><tr><th scope="col">Particulars (' + esc(unit) + ')</th>' +
-        reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "?") + "</th>"; }).join("") +
+      reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "") + "</th>"; }).join("") +
         '<th scope="col" class="num">YoY</th></tr></thead><tbody>' + restHtml + "</tbody></table></div></details>";
     }
     /* growth chart for income statements */
@@ -701,7 +701,7 @@
         "<div class='cx-prov'>Actual reported periods only — never interpolated.</div></div>";
     }
     var out = sec(title, h +
-      '<div class="cx-prov">Currency <b>' + esc(ccy || "?") + "</b> · figures in <b>" + esc(unit) + "</b> · YoY shown only when mathematically valid.</div>" + prov(env));
+      '<div class="cx-prov">' + (ccy ? "Currency <b>" + esc(ccy) + "</b> · " : "") + 'figures in <b>' + esc(unit) + "</b> · YoY shown only when mathematically valid.</div>" + prov(env));
     if (title === "Income statement") {
       setTimeout(function () {
         var cv = document.getElementById(chartId);
@@ -847,7 +847,7 @@
               "</b><div class='cx-kv'><span class='k'>Formula</span><span class='w'>" + esc(n.formula || "") + "</span></div>" +
               (n.inputs || []).map(function (i) {
                 return "<div class='cx-kv'><span class='k'>" + esc(i.label || "") + (i.period ? " (" + esc(i.period) + ")" : "") +
-                  "</span><span class='w'>" + esc(i.value === null || i.value === undefined ? "—" : String(i.value)) + " · " + esc(i.source || "") + "</span></div>";
+                  "</span><span class='w'>" + esc(i.value === null || i.value === undefined ? "" : String(i.value)) + " · " + esc(i.source || "") + "</span></div>";
               }).join("") + '<div class="cx-note">Calculated ' + esc(n.calculated_at || "") + "</div></div>";
           };
         });
@@ -1105,8 +1105,9 @@
           '</dl><p class="cx-note">Technical reference levels — not investment advice.</p>')
         : sec("Risk / reward", empty("Risk / reward", "Needs price, ATR and a real resistance level."));
       E("cx-tq").innerHTML = trend + rel + patt + risk +
-        sec("Method", '<p class="cx-note">Calculated locally from verified backend history (' +
-          esc(d.history_source || "?") + ") · " + esc(d.history_range || "") + " · descriptive only.</p>" + prov(r.body));
+        sec("Method", '<p class="cx-note">Calculated locally from verified backend history' +
+          (d.history_source ? " (" + esc(d.history_source) + ")" : "") +
+          (d.history_range ? " · " + esc(d.history_range) : "") + " · descriptive only.</p>" + prov(r.body));
     }).catch(function () { if (E("cx-tq")) E("cx-tq").innerHTML = sec("Technicals", err()); });
   }
   /* ---------------- research tab (new) ---------------- */

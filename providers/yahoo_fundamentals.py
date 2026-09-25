@@ -139,8 +139,8 @@ _TS_MAP: dict[str, dict[str, str]] = {
         "operatingExpense": "operatingExpenses",
         "researchAndDevelopment": "researchAndDevelopment",
         "sellingGeneralAndAdministration": "sellingGeneralAndAdministrative",
-        "ebitda": "ebitda",
-        "ebit": "ebit",
+        "EBITDA": "ebitda",
+        "EBIT": "ebit",
         "operatingIncome": "operatingIncome",
         "interestExpense": "interestExpense",
         "incomeBeforeTax": "incomeBeforeTax",
@@ -152,25 +152,24 @@ _TS_MAP: dict[str, dict[str, str]] = {
     },
     "balance": {
         "totalAssets": "totalAssets",
-        "totalCurrentAssets": "totalCurrentAssets",
+        "currentAssets": "totalCurrentAssets",
         "cashAndCashEquivalents": "cashAndCashEquivalentsAtCarryingValue",
         "inventory": "inventory",
-        "netReceivables": "currentNetReceivables",
-        "totalCurrentLiabilities": "totalCurrentLiabilities",
+        "accountsReceivable": "currentNetReceivables",
+        "currentLiabilities": "totalCurrentLiabilities",
         "accountsPayable": "accountspayable",
-        "totalLiab": "totalLiabilities",
         "totalLiabilitiesNetMinorityInterest": "totalLiabilities",
         "totalDebt": "totalDebt",
-        "longTermDebt": "longTermDebt",
-        "shortTermDebt": "shortTermDebt",
-        "totalStockholderEquity": "totalShareholderEquity",
+        "stockholdersEquity": "totalShareholderEquity",
         "retainedEarnings": "retainedEarnings",
         "commonStockSharesOutstanding": "commonStockSharesOutstanding",
+        "minorityInterest": "minorityInterest",
     },
     "cashflow": {
-        "operatingCashflow": "operatingCashflow",
+        "operatingCashFlow": "operatingCashflow",
         "capitalExpenditure": "capitalExpenditures",
         "freeCashFlow": "freeCashFlow",
+        "cashDividendsPaid": "dividendPayout",
         "dividendsPaid": "dividendPayout",
         "netIncome": "netIncome",
     },
@@ -213,48 +212,61 @@ class YahooFundamentalsProvider:
         prefix = "annual" if period == "annual" else "quarterly"
         keys = list(_TS_MAP[statement])
         now = int(time.time())
-        url = (
-            _TS_BASE
-            + urllib.parse.quote(symbol)
-            + "?type="
-            + urllib.parse.quote(_ts_types(prefix, keys))
-            + f"&period1={now - 6 * 365 * 24 * 3600}&period2={now}"
-        )
-        try:
-            payload = _http_json(url)
-        except RateLimitedError as exc:
-            return rate_limited(SOURCE, f"Statements throttled for {symbol}: {exc}")
-        except PermissionError as exc:
-            return error_envelope(SOURCE, f"Request refused for {symbol}: {exc}")
-        except Exception as exc:
-            return error_envelope(SOURCE, f"Statements request failed for {symbol}: {exc}")
-        try:
-            results = ((payload.get("timeseries") or {}).get("result")) or []
-            by_date: dict[str, dict] = {}
-            amap = _TS_MAP[statement]
-            for entry in results:
-                stamps = entry.get("timestamp") or []
-                data_keys = [k for k in entry.keys() if k not in ("meta", "timestamp")]
-                if not data_keys:
+        # Yahoo truncates multi-type calls: fetch in small batches and
+        # merge by date so no line item is silently dropped.
+        by_date: dict[str, dict] = {}
+        amap = _TS_MAP[statement]
+        for chunk in [keys[i:i + 8] for i in range(0, len(keys), 8)]:
+            url = (
+                _TS_BASE
+                + urllib.parse.quote(symbol)
+                + "?type="
+                + urllib.parse.quote(_ts_types(prefix, chunk))
+                + f"&period1={now - 6 * 365 * 24 * 3600}&period2={now}"
+            )
+            try:
+                payload = _http_json(url)
+            except RateLimitedError as exc:
+                return rate_limited(SOURCE, f"Statements throttled for {symbol}: {exc}")
+            except PermissionError as exc:
+                return error_envelope(SOURCE, f"Request refused for {symbol}: {exc}")
+            except Exception as exc:
+                # A 404 means Yahoo has no such type key: skip the chunk
+                # rather than failing the whole statement.
+                if "HTTP 404" in str(exc):
                     continue
-                data_key = data_keys[0]
-                short = data_key[len(prefix):]
-                short = short[0].lower() + short[1:] if short else short
-                av_key = amap.get(short)
-                if not av_key:
-                    continue
-                for i, ts in enumerate(stamps):
-                    try:
-                        point = (entry.get(data_key) or [])[i] or {}
-                    except IndexError:
+                return error_envelope(SOURCE, f"Statements request failed for {symbol}: {exc}")
+            try:
+                results = ((payload.get("timeseries") or {}).get("result")) or []
+                amap_norm = {k.lower(): v for k, v in amap.items()}
+                for entry in results:
+                    stamps = entry.get("timestamp") or []
+                    data_keys = [k for k in entry.keys() if k not in ("meta", "timestamp")]
+                    if not data_keys:
                         continue
-                    asof = str(point.get("asOfDate") or "")[:10]
-                    if not asof:
+                    data_key = data_keys[0]
+                    short = data_key[len(prefix):]
+                    short = short[0].lower() + short[1:] if short else short
+                    av_key = amap_norm.get(short.lower())
+                    if not av_key:
                         continue
-                    val = _raw((point.get("reportedValue") or {}).get("raw", point.get("reportedValue")))
-                    if val is None:
-                        continue
-                    by_date.setdefault(asof, {})[av_key] = val
+                    for i, ts in enumerate(stamps):
+                        try:
+                            point = (entry.get(data_key) or [])[i] or {}
+                        except IndexError:
+                            continue
+                        asof = str(point.get("asOfDate") or "")[:10]
+                        if not asof:
+                            continue
+                        val = _raw((point.get("reportedValue") or {}).get("raw", point.get("reportedValue")))
+                        if val is None:
+                            continue
+                        by_date.setdefault(asof, {})[av_key] = val
+            except RateLimitedError:
+                raise
+            except Exception as exc:
+                return error_envelope(SOURCE, f"Could not parse statements for {symbol}: {exc}")
+        try:
             reports = [
                 {"fiscalDateEnding": d, **vals}
                 for d, vals in sorted(by_date.items(), reverse=True)[:12]

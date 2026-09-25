@@ -104,6 +104,12 @@ class RatioEngineTest(unittest.TestCase):
         out = R.compute_all([av_income()], [av_balance(eq=0.0)], [])
         self.assertNotIn("roe", out)
 
+    def test_dividends_paid_sign_convention(self):
+        # Yahoo signs cash outflows negative; payout uses magnitude.
+        cf = [dict(av_cash(), dividendPayout="-20.0")]
+        out = R.compute_all([av_income()], [av_balance()], cf, source="t")
+        self.assertAlmostEqual(out["payout_ratio"]["value"], 20.0, places=2)
+
     def test_new_ratios(self):
         inc = [dict(av_income(), costOfRevenue="600")]
         bal = [dict(av_balance(), inventory="150",
