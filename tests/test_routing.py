@@ -44,12 +44,13 @@ class Stub:
 
 
 def _manager(yahoo=None, indian=None, td=None, av=None, rss=None, acts=None,
-             yf=None):
+             yf=None, upstox=None):
     return ProviderManager(
         yahoo=yahoo,
         indian=indian,
         twelvedata=td,
         alphavantage=av,
+        upstox=upstox,
         news_rss=rss,
         actions_yahoo=acts,
         yahoo_fund=yf,
@@ -61,6 +62,7 @@ class _EnvGuard(unittest.TestCase):
         "ALPHA_VANTAGE_API_KEY",
         "TWELVE_DATA_API_KEY",
         "INDIAN_STOCK_MARKET_API_KEY",
+        "UPSTOX_ANALYTICS_TOKEN",
     )
 
     def setUp(self):
@@ -95,6 +97,15 @@ class TestCapabilitiesRegistry(_EnvGuard):
         self.assertFalse(CAPABILITIES["indian-api"]["history"])
         self.assertFalse(CAPABILITIES["stooq"]["quote"])
         self.assertTrue(CAPABILITIES["stooq"]["history"])
+        self.assertTrue(CAPABILITIES["upstox"]["quote"])
+        self.assertTrue(CAPABILITIES["upstox"]["history"])
+        self.assertTrue(CAPABILITIES["upstox"]["statements"])
+        self.assertTrue(CAPABILITIES["upstox"]["valuation"])
+        self.assertTrue(CAPABILITIES["upstox"]["actions"])
+        self.assertTrue(CAPABILITIES["upstox"]["holdings"])
+        self.assertTrue(CAPABILITIES["upstox"]["news"])
+        self.assertFalse(CAPABILITIES["upstox"]["estimates"])
+        self.assertFalse(CAPABILITIES["upstox"]["ipo"])
 
 
 class TestYahooOnlyTCS(_EnvGuard):
@@ -114,7 +125,8 @@ class TestYahooOnlyTCS(_EnvGuard):
         by_provider = {p["provider"]: p for p in env.get("provider_status", [])}
         self.assertEqual(
             set(by_provider),
-            {"alphavantage", "twelvedata", "indian-api", "yahoo-fundamentals"},
+            {"alphavantage", "twelvedata", "indian-api", "yahoo-fundamentals",
+             "upstox"},
         )
         for p in by_provider.values():
             self.assertEqual(p["state"], "KEY_REQUIRED")

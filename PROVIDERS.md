@@ -8,7 +8,28 @@ vanilla JS SPA (`terminal/`), SQLite storage, Render deployment
 
 | Provider | Capabilities | Tier | Auth | Cache TTL | Rate limit | Delay | Limitations |
 |---|---|---|---|---|---|---|---|
-| Upstox | quote V3, historical-candle V3, ISIN-keyed fundamentals (profile, ratios, statements, holdings, actions), batch quotes | key-gated analytics | `UPSTOX_ANALYTICS_TOKEN` (Bearer, server-side only) | quote 30s, history 4h, domains 24h | upstream limits respected; pass-through when unmapped | delayed | ISIN-mapped Indian names + NSE_INDEX keys only; no trading/orders; missing key → pass-through unavailable |
+| Upstox | quote V3, historical-candle V3, /v2/fundamentals/:isin suite (profile, statements, key-ratios, holdings, actions), /v2/news (7-day), batch quotes | key-gated analytics | `UPSTOX_ANALYTICS_TOKEN` (Bearer, server-side only) | quote 30s, news 10m, history 4h, domains 24h | 50/s + 500/min documented; TTLs + batching keep usage far below | delayed | ISIN-mapped Indian names + NSE_INDEX keys only; no trading/orders; missing key → pass-through unavailable |
+
+### Upstox — verified endpoint inventory (official docs, Sep 2026)
+
+Analytics Token: 1-year, read-only, GET-only, Developer Apps > Analytics,
+no OAuth redirect, no static IP for market-data categories.
+
+| Capability | Endpoint | Version | Token | Routed |
+|---|---|---|---|---|
+| Full market quotes (≤500 keys) | `GET /v3/market-quote/quotes?instrument_key=` | v3 | yes | quote fan-out first leg; batch API |
+| Historical candles | `GET /v3/historical-candle/{key}/{unit}/{interval}/{to}/{from}` | v3 | yes | history fan-out first leg (1d/1wk/1mo) |
+| Company profile | `GET /v2/fundamentals/:isin/profile` | v2 | yes | profile sector/description fallback |
+| Key ratios | `GET /v2/fundamentals/:isin/key-ratios` | v2 | yes | valuation fallback (P/E,P/B,ROE,ROA,ROCE,EV/EBITDA) |
+| Income / balance / cash-flow | `GET /v2/fundamentals/:isin/{income-statement,balance-sheet,cash-flow}` | v2 | yes | statements fan-out (canonical INR reports) |
+| Shareholding | `GET /v2/fundamentals/:isin/share-holdings` | v2 | yes | holdings primary (canonical ownership) |
+| Corporate actions | `GET /v2/fundamentals/:isin/corporate-actions` | v2 | yes | actions merge (canonical div/split rows) |
+| News (past 7 days, ≤30 keys) | `GET /v2/news?category=instrument_keys` | v2 | yes | news merge (same dedup pipeline) |
+| Option chain / WebSocket / IPO apply / competitors / market-information | — | — | — | NOT integrated (no terminal need / account-bound) |
+
+V3 quote nodes are keyed by `EXCHANGE:SYMBOL` (resolved via
+`instrument_token`); statement money is INR-crore (x1e7, EPS unscaled);
+errors map 401/403→AUTH, 429→rate_limited, 400/404/UDAPI1206→unavailable.
 | Yahoo Finance | quote, history, search, profile, RSS news, dividends/splits | free, no key | none | quote 30s, intraday 15m, daily 4h, search 10m | 429 backoff + 5m cooldown | delayed (~15m) | crumb-gated endpoints (options, holders, SEC) not used |
 | Alpha Vantage | overview, statements, earnings, estimates, news, IPO, macro, dividends, splits, shares, quote, daily history | free, key-gated | `ALPHA_VANTAGE_API_KEY` | quotes 6h, overview 24h, statements/IPO/macro 7d, earnings/news 24h/10m | 25 req/day shared; premium notices → honest unavailable | delayed | NSE coverage discovered per symbol via SYMBOL_SEARCH; never assumed |
 | Twelve Data | quote, history, search, statistics, earnings, dividends, splits, statements | free Basic, key-gated | `TWELVE_DATA_API_KEY` | quotes 30s, history 4h, statements 7d | 8 credits/min + 800/day token bucket | US real-time per plan claim, else delayed | NSE/BSE uncovered on free; statements cost ~100 credits |

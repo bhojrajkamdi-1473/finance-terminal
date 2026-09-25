@@ -136,8 +136,9 @@ CAPABILITIES: dict[str, dict[str, bool]] = {
         "estimates": False,
         "earnings": False,
         "actions": True,  # ISIN-keyed corporate actions
-        "news": False,  # Yahoo RSS + AV remain superior for news
+        "news": True,  # 7-day instrument window; same dedup pipeline
         "holdings": True,  # ISIN-keyed shareholding patterns
+        "ipo": False,  # IPO lifecycle read endpoints not verified for use
     },
 }
 
@@ -229,6 +230,24 @@ class ProviderManager:
             return False, "Indian Stock Market API unavailable."
         if not _indian_key():
             return False, "INDIAN_STOCK_MARKET_API_KEY not configured."
+        return True, ""
+
+    def _upstox_ready(self, symbol: str) -> tuple[bool, str]:
+        """Upstox leg readiness: wired + token configured + resolvable key.
+
+        Unmapped symbols (no ISIN/index key) skip the leg without any
+        network call; the provider itself enforces the same guards.
+        """
+        if self.upstox is None:
+            return False, "Upstox leg not wired."
+        try:
+            from providers.upstox import instrument_key, token_configured
+        except Exception:
+            return False, "Upstox leg unavailable."
+        if not token_configured():
+            return False, "UPSTOX_ANALYTICS_TOKEN not configured."
+        if not instrument_key(symbol):
+            return False, "No Upstox instrument key for this symbol."
         return True, ""
 
     def _indian_basic(self, symbol: str) -> tuple[bool, str]:
@@ -496,15 +515,28 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "yahoo-fundamentals", "reason": "Leg not wired."}
                 )
+            # Upstox ISIN profile contributes sector + description (no
+            # company name in its schema — identity stays with the chain).
+            ux_ok, ux_reason = self._upstox_ready(symbol)
+            if ux_ok and self.upstox is not None:
+                calls.append(
+                    ("upstox", lambda: self.upstox.get_company_profile(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "upstox", "reason": ux_reason or "Leg not wired."}
+                )
             results = self._fanout(key + ":fan", PROFILE_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
             inapi = results.get("indian-api", {})
             yf = results.get("yahoo-fundamentals", {})
+            uxp = results.get("upstox", {})
             av_d = av.get("data") if _ok(av) else {}
             td_d = td.get("data") if _ok(td) else {}
             in_d = inapi.get("data") if _ok(inapi) else {}
             y_d = yf.get("data") if _ok(yf) else {}
+            ux_d = uxp.get("data") if _ok(uxp) else {}
             q = (
                 (quote_env.get("data") or {})
                 if quote_env and quote_env.get("data")
@@ -562,17 +594,18 @@ class ProviderManager:
                 or q.get("currency"),
                 "instrument_type": q.get("instrument_type"),
                 "timezone": q.get("timezone"),
-                "sector": (pri_d or {}).get("Sector") or (pri_d or {}).get("sector") or (y_d or {}).get("sector"),
+                "sector": (pri_d or {}).get("Sector") or (pri_d or {}).get("sector") or (y_d or {}).get("sector") or (ux_d or {}).get("sector"),
                 "industry": (pri_d or {}).get("Industry")
                 or (pri_d or {}).get("industry")
                 or (y_d or {}).get("industry"),
                 "description": (pri_d or {}).get("Description")
                 or (pri_d or {}).get("description")
-                or (y_d or {}).get("description"),
+                or (y_d or {}).get("description")
+                or (ux_d or {}).get("description"),
                 "profile_note": (
                     "Identity from quote chain; sector/industry/description "
                     "from the configured fundamental feeds (Alpha Vantage, "
-                    "Yahoo fundamentals and/or Indian Stock Market API)."
+                    "Yahoo fundamentals, Indian Stock Market API and/or Upstox)."
                 ),
             }
             comparisons = []
@@ -696,16 +729,35 @@ class ProviderManager:
                         "reason": in_reason or "Leg not wired.",
                     }
                 )
+            # Upstox ISIN statements (canonical AV-style reports in
+            # absolute INR) join the merge; primary order below prefers
+            # AV, then free legs, then Upstox, then Twelve Data.
+            ux_ok, ux_reason = self._upstox_ready(symbol)
+            if ux_ok and self.upstox is not None:
+                calls.append(
+                    (
+                        "upstox",
+                        lambda: self.upstox.get_financial_statements(
+                            symbol, statement, period
+                        ),
+                    )
+                )
+            else:
+                skipped.append(
+                    {"provider": "upstox", "reason": ux_reason or "Leg not wired."}
+                )
             results = self._fanout(key + ":fan", STATEMENTS_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
             inapi = results.get("indian-api", {})
             yf = results.get("yahoo-fundamentals", {})
+            ux = results.get("upstox", {})
             av_live = _ok(av) and av.get("data")
             td_live = _ok(td) and td.get("data")
             in_live = _ok(inapi) and inapi.get("data")
             y_live = _ok(yf) and yf.get("data")
-            if not av_live and not td_live and not in_live and not y_live:
+            ux_live = _ok(ux) and ux.get("data")
+            if not av_live and not td_live and not in_live and not y_live and not ux_live:
                 return _honest_unavailable("financial statement", results, skipped)
             if av_live:
                 primary = av
@@ -713,6 +765,8 @@ class ProviderManager:
                 primary = yf
             elif in_live:
                 primary = inapi
+            elif ux_live:
+                primary = ux
             else:
                 primary = td
             in_data = (inapi.get("data") or {}) if in_live else None
@@ -758,6 +812,19 @@ class ProviderManager:
                         "period": period,
                         "currency": (in_data or {}).get("currency") or "INR",
                         "reports": (in_data or {}).get("reports"),
+                    }
+                )
+            elif ux_live and not av_live:
+                ux_data = ux.get("data") or {}
+                data.update(
+                    {
+                        "symbol": symbol,
+                        "statement": statement,
+                        "period": ux_data.get("period") or period,
+                        "scope": ux_data.get("scope"),
+                        "currency": ux_data.get("currency") or "INR",
+                        "reports": ux_data.get("reports"),
+                        "identity_check": ux_data.get("identity_check"),
                     }
                 )
             elif td_live:
@@ -859,11 +926,16 @@ class ProviderManager:
                 return miss
             from providers.schema import field as _f
 
-            pri_d = av_d or y_d or in_d or {}
+            # Field-level routing: AV overview authority first, then the
+            # free Yahoo/Indian legs, then Upstox ISIN key-ratios (P/E,
+            # P/B, ROE, ROA, ROCE, EV/EBITDA with documented definitions).
+            pri_d = av_d or y_d or in_d or ux_d or {}
             if pri_d is in_d:
                 prim_src, prim_asof = "indian-api", inapi.get("as_of")
             elif pri_d is y_d:
                 prim_src, prim_asof = "yahoo-fundamentals", yf.get("as_of")
+            elif pri_d is ux_d:
+                prim_src, prim_asof = "upstox", ux.get("as_of")
             else:
                 prim_src, prim_asof = "alphavantage", av.get("as_of")
             metrics: dict[str, dict] = {}
@@ -1324,12 +1396,24 @@ class ProviderManager:
                         else (in_reason or "Leg not wired."),
                     }
                 )
+            # Upstox 7-day instrument news joins the same dedup pipeline
+            # (URL + headline-similarity, entity-ranked). Unmapped symbols
+            # and missing token skip without network calls.
+            ux_ok, ux_reason = self._upstox_ready(symbol or "")
+            if ux_ok and self.upstox is not None and symbol is not None:
+                calls.append(
+                    ("upstox", lambda: self.upstox.get_news(symbol, topic, limit))
+                )
+            else:
+                skipped.append(
+                    {"provider": "upstox", "reason": ux_reason or "Leg not wired."}
+                )
             results = self._fanout(key + ":fan", NEWS_TTL, calls)
             aliases = _entity_aliases(symbol)
             seen_urls: set[str] = set()
             seen_heads: list[set[str]] = []
             items: list[dict] = []
-            for name in ("yahoo-rss", "alphavantage", "indian-api"):
+            for name in ("yahoo-rss", "alphavantage", "indian-api", "upstox"):
                 env = results.get(name, {})
                 if env.get("status") != "live":
                     continue
@@ -1439,6 +1523,17 @@ class ProviderManager:
                         "reason": in_reason or "Leg not wired.",
                     }
                 )
+            # Upstox ISIN-linked corporate actions (canonical
+            # dividends/splits shape) join the merge below.
+            ux_ok, ux_reason = self._upstox_ready(symbol)
+            if ux_ok and self.upstox is not None:
+                calls.append(
+                    ("upstox", lambda: self.upstox.get_corporate_actions(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "upstox", "reason": ux_reason or "Leg not wired."}
+                )
             results = self._fanout(key + ":fan", ACTIONS_TTL, calls)
             dividends: list[dict] = []
             splits: list[dict] = []
@@ -1473,6 +1568,17 @@ class ProviderManager:
                 ]
                 splits += [
                     {**s, "source": "indian-api"} for s in iae["data"].get("splits", [])
+                ]
+            # Upstox ISIN-linked events merge into the same date+amount /
+            # date+ratio dedup below; source tags preserved per row.
+            uxe = results.get("upstox", {})
+            if self.upstox is not None and _ok(uxe):
+                dividends += [
+                    {**d, "source": "upstox"}
+                    for d in uxe["data"].get("dividends", [])
+                ]
+                splits += [
+                    {**s, "source": "upstox"} for s in uxe["data"].get("splits", [])
                 ]
             if not dividends and not splits:
                 return {

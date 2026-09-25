@@ -258,10 +258,11 @@ def providers_status() -> dict:
                 "id": "upstox",
                 "label": "Upstox",
                 "state": "connected" if _upstox_status_ok() else "key_missing",
-                "detail": "Official Upstox Developer APIs (server-side "
+                "detail": "Verified Upstox Developer APIs (server-side "
                 "UPSTOX_ANALYTICS_TOKEN): market-quote V3, "
-                "historical-candle V3, ISIN-keyed company fundamentals "
-                "(profile, ratios, statements, holdings, actions). "
+                "historical-candle V3, /v2/fundamentals/:isin suite "
+                "(profile, ratios, statements, holdings, actions), "
+                "/v2/news (7-day). "
                 "Analytics only; no trading. Missing key → pass-through.",
                 "key_required": True,
                 "key_configured": _upstox_key(),
