@@ -207,7 +207,15 @@ class FallbackMarketData(MarketDataProvider, CompanyProvider):
             for n, leg in self.legs
             if hasattr(leg, "get_quote")
         ]
-        return self._fetch_through_chain(key, QUOTE_TTL, bound, "quote")
+        env = self._fetch_through_chain(key, QUOTE_TTL, bound, "quote")
+        if isinstance(env, dict) and isinstance(env.get("data"), dict):
+            try:
+                from providers.orchestrator import _classify_market
+
+                env["market"] = _classify_market(symbol, env.get("data") or {})
+            except Exception:
+                pass
+        return env
 
     def get_historical_prices(
         self, symbol: str, range_: str = "1M", interval: str = "1d"

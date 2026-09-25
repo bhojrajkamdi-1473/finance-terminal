@@ -43,7 +43,8 @@ class Stub:
         return fn
 
 
-def _manager(yahoo=None, indian=None, td=None, av=None, rss=None, acts=None):
+def _manager(yahoo=None, indian=None, td=None, av=None, rss=None, acts=None,
+             yf=None):
     return ProviderManager(
         yahoo=yahoo,
         indian=indian,
@@ -51,6 +52,7 @@ def _manager(yahoo=None, indian=None, td=None, av=None, rss=None, acts=None):
         alphavantage=av,
         news_rss=rss,
         actions_yahoo=acts,
+        yahoo_fund=yf,
     )
 
 
@@ -111,7 +113,8 @@ class TestYahooOnlyTCS(_EnvGuard):
         self.assertEqual(indian.calls, [])
         by_provider = {p["provider"]: p for p in env.get("provider_status", [])}
         self.assertEqual(
-            set(by_provider), {"alphavantage", "twelvedata", "indian-api"}
+            set(by_provider),
+            {"alphavantage", "twelvedata", "indian-api", "yahoo-fundamentals"},
         )
         for p in by_provider.values():
             self.assertEqual(p["state"], "KEY_REQUIRED")
@@ -119,6 +122,17 @@ class TestYahooOnlyTCS(_EnvGuard):
         self.assertIn("ALPHA_VANTAGE_API_KEY", env["message"])
         self.assertIn("TWELVE_DATA_API_KEY", env["message"])
         self.assertIn("INDIAN_STOCK_MARKET_API_KEY", env["message"])
+
+    def test_statements_yahoo_fund_free_leg_answers(self):
+        # Free Yahoo leg wired: statements resolve with no keys at all.
+        yf = Stub(
+            get_financial_statements=lambda *a: _stmt("yahoo-fundamentals")
+        )
+        m = _manager(yf=yf)
+        env = m.get_statements("TCS.NS", "income", "annual")
+        self.assertEqual(env["status"], "live")
+        self.assertEqual(env["source"], "yahoo-fundamentals")
+        self.assertEqual(yf.calls, ["get_financial_statements"])
 
     def test_valuation_earnings_estimates_honest_miss(self):
         m = _manager()

@@ -39,6 +39,27 @@
     return fn(Number(v));
   }
   function dir(v) { return window.FT_FMT.dirClass(v); }
+  /* Market bucket mirrored from the server classifier (quote.market):
+     India / US / Global shown as separate categories, never mixed. */
+  function marketOf(sym, exch, ccy) {
+    var s = String(sym || "").toUpperCase();
+    var e = String(exch || "").toUpperCase();
+    var c = String(ccy || "").toUpperCase();
+    if (s.indexOf("=") >= 0 || /-USD$/.test(s)) return { id: "GLOBAL", label: "Global" };
+    if (/\.NS$|\.BO$/.test(s) || /NSE|BSE|KOLKATA|MUMBAI/.test(e) || c === "INR" ||
+        s === "^NSEI" || s === "^NSEBANK" || s === "^BSESN" || s.indexOf("^CNX") === 0) {
+      return { id: "IN", label: "India" };
+    }
+    if (/NASDAQ|NYSE|AMEX|ARCA|BATS|IEX/.test(e) ||
+        (c === "USD" && s.indexOf(".") < 0 && s.charAt(0) !== "^")) {
+      return { id: "US", label: "US" };
+    }
+    return { id: "GLOBAL", label: "Global" };
+  }
+  function marketPill(mkt) {
+    var cls = mkt.id === "IN" ? "cx-q-rep" : (mkt.id === "US" ? "cx-q-calc" : "cx-q-na");
+    return "<span class='cx-q " + cls + "' title='Market bucket'>" + esc(mkt.label || "Global") + "</span>";
+  }
   function badge(st) {
     var s = String(st || "").toUpperCase();
     var cls = "cx-b-na", lbl = s || "—";
@@ -276,11 +297,13 @@
       var q = qenv.data || {}, p = prof.data || {};
       var nm = q.name || p.name || sym;
       var exch = q.exchange || p.exchange || "";
-      var country = /\.NS$|\.BO$/.test(sym) ? "India" : (/NASDAQ|NYSE|NMS/i.test(exch) ? "USA" : "");
+      var mkt = qenv.market || marketOf(sym, exch, q.currency);
+      var country = mkt.id === "IN" ? "India" : (mkt.id === "US" ? "USA" : "");
       E("cx-head").innerHTML =
         '<div class="cx-idrow">' + F.logo(sym, nm, 40) +
         '<div><h1 class="cx-name">' + esc(nm) + "</h1>" +
         '<div class="cx-sub">' + esc(sym.replace(/\.(NS|BO)$/, "")) + (exch ? " · " + esc(exch) : "") + (country ? " · " + esc(country) : "") +
+        " " + marketPill(mkt) +
         (secType(sym) === "INDEX" ? " · Index" : "") +
         ((p.sector || p.industry) ? " · " + esc([p.sector, p.industry].filter(Boolean).join(" — ")) : "") + "</div></div></div>" +
         '<div class="cx-pxrow"><div><div class="cx-px" id="cx-px">' + F.fmtNum(q.price) + " <small>" + esc(q.currency || "") + "</small></div>" +

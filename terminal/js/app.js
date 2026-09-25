@@ -21,6 +21,7 @@
     window.scrollTo(0, 0);
     document.getElementById("view").scrollTop = 0;
     if (parts[0] === "company" && parts[1]) P.pCompany(parts[1], parts[2] || "Overview");
+    else if (parts[0] === "mf" && parts[1] && P.pMF) P.pMF(parts[1]);
     else if (parts[0] === "markets") P.pMarkets();
     else if (parts[0] === "screener") P.pScreener();
     else if (parts[0] === "companies") P.pCompanies();
@@ -65,9 +66,25 @@
       var F = window.FT_FMT;
       return '<div class="sr" role="option" data-i="' + i + '"><span style="display:flex;gap:10px;align-items:center">' +
         F.logo(x.symbol, x.name, 30) + '<span><span class="nm">' + F.esc(x.name || x.symbol) + "</span> " +
-        "<span class='tk'>" + F.esc(x.symbol) + "</span> " + F.typeBadge(x.type) +
+        "<span class='tk'>" + F.esc(x.symbol) + "</span> " + F.typeBadge(x.type) + " " + mktTag(x.symbol, x.exchange) +
         "<br><span class='tk'>" + F.esc([x.exchange, x.sector || x.type].filter(Boolean).join(" · ") || "—") +
         "</span></span></span><span class='px' data-qpx='" + F.esc(x.symbol) + "'>…</span></div>";
+    }
+    /* India vs US vs Global bucket, mirrored from the server classifier:
+       separate categories, never mixed in one bucket. */
+    function mktTag(symbol, exchange) {
+      var s = String(symbol || "").toUpperCase(), e = String(exchange || "").toUpperCase();
+      var id = "Global", label = "Global";
+      if (s.indexOf("=") >= 0 || /-USD$/.test(s)) { id = "Global"; label = "Global"; }
+      else if (/\.NS$|\.BO$/.test(s) || /NSE|BSE/.test(e) || s === "^NSEI" || s === "^NSEBANK" || s === "^BSESN" || s.indexOf("^CNX") === 0) { id = "IN"; label = "India"; }
+      else if (/NASDAQ|NYSE|AMEX|ARCA|BATS/.test(e)) { id = "US"; label = "US"; }
+      var cls = id === "IN" ? "cx-q-rep" : (id === "US" ? "cx-q-calc" : "cx-q-na");
+      return "<span class='cx-q " + cls + "'>" + label + "</span>";
+    }
+    function mfRow(x, i) {
+      var F = window.FT_FMT;
+      return '<div class="sr" role="option" data-i="m' + i + '"><span><span class="nm">' + F.esc(x.name || "?") + "</span> " +
+        "<span class='tk'>MF · " + F.esc(String(x.code || "")) + "</span> <span class='cx-q cx-q-rep'>India</span></span><span class='px'>→</span></div>";
     }
     inp.addEventListener("focus", function () {
       if (inp.value.trim() || box.children.length) return;
@@ -120,7 +137,12 @@
             ["Markets", "#/markets"], ["Research notes", "#/research"], ["Settings", "#/settings"]];
           var fxMatches = FX.filter(function (f) { return f[0].toUpperCase().indexOf(ql) >= 0; }).slice(0, 2);
           var ipoMatches = [], ipoAt = 0, ipoCache = null;
-          try { ipoCache = JSON.parse(sessionStorage.getItem("ft-ipo") || "null"); } catch (e) { ipoCache = null; }
+          var mfMatches = [];
+          var mfCache = null;
+          try {
+            ipoCache = JSON.parse(sessionStorage.getItem("ft-ipo") || "null");
+            mfCache = JSON.parse(sessionStorage.getItem("ft-mf") || "null");
+          } catch (e) { ipoCache = null; mfCache = null; }
           function fxRow(f, i) {
             return '<div class="sr" role="option" data-i="f' + i + '"><span><span class="nm">' + F.esc(f[0]) + "</span> " +
               "<span class='tk'>feature</span></span><span class='px'>→</span></div>";
@@ -139,6 +161,10 @@
               html += "<div class='src' style='padding:6px 12px'>IPOS</div>" +
                 ipoMatches.map(function (x, i) { return ipoRow(x, i); }).join("");
             }
+            if (mfMatches.length) {
+              html += "<div class='src' style='padding:6px 12px'>MUTUAL FUNDS</div>" +
+                mfMatches.map(function (x, i) { return mfRow(x, i); }).join("");
+            }
             if (wlMatches.length) {
               html += "<div class='src' style='padding:6px 12px'>IN WATCHLIST</div>" +
                 wlMatches.map(function (x, i) { return row(x, "w" + i); }).join("");
@@ -146,9 +172,20 @@
             html += items.map(function (x, i) { return row(x, i); }).join("");
             box.innerHTML = html || '<div class="sr"><span>No matches</span></div>';
             box.classList.remove("hidden");
-            // merge watchlist rows into clickable items
-            var all = fxMatches.concat(ipoMatches, wlMatches, items);
-            box.querySelectorAll(".sr").forEach(function (d) {
+            // unified keyboard + click model across every section
+            var keyNav = [];
+            fxMatches.forEach(function (f) {
+              keyNav.push({ el: null, run: function () { hide(); inp.value = ""; location.hash = f[1]; } });
+            });
+            ipoMatches.forEach(function () {
+              keyNav.push({ el: null, run: function () { hide(); inp.value = ""; location.hash = "#/ipos"; } });
+            });
+            mfMatches.forEach(function (m) {
+              keyNav.push({ el: null, run: function () { hide(); inp.value = ""; location.hash = "#/mf/" + encodeURIComponent(m.code); } });
+            });
+            var all = fxMatches.concat(ipoMatches, mfMatches, wlMatches, items);
+            box.querySelectorAll(".sr").forEach(function (d, di) {
+              if (keyNav[di]) keyNav[di].el = d;
               d.onclick = function () {
                 var k = String(d.getAttribute("data-i"));
                 if (k.charAt(0) === "f") {
@@ -156,12 +193,24 @@
                   hide(); inp.value = ""; location.hash = f[1]; return;
                 }
                 if (k.charAt(0) === "p") { hide(); inp.value = ""; location.hash = "#/ipos"; return; }
+                if (k.charAt(0) === "m") {
+                  var m = mfMatches[Number(k.slice(1))];
+                  hide(); inp.value = ""; location.hash = "#/mf/" + encodeURIComponent(m.code); return;
+                }
                 var it;
-                if (k.charAt(0) === "w") it = all[fxMatches.length + ipoMatches.length + Number(k.slice(1))];
-                else it = all[fxMatches.length + ipoMatches.length + wlMatches.length + Number(k)];
+                if (k.charAt(0) === "w") it = all[fxMatches.length + ipoMatches.length + mfMatches.length + Number(k.slice(1))];
+                else it = all[fxMatches.length + ipoMatches.length + mfMatches.length + wlMatches.length + Number(k)];
                 go(it.symbol, it.name);
               };
             });
+            keyNav = keyNav.concat(wlMatches.concat(items).map(function (it) {
+              return { el: null, run: function () { go(it.symbol, it.name); } };
+            }));
+            box.querySelectorAll(".sr").forEach(function (d, di) {
+              if (keyNav[di]) keyNav[di].el = d;
+            });
+            active = -1;
+            box._keyNav = keyNav;
             var allItems = wlMatches.concat(items);
             allItems.forEach(function (x) {
               window.FT_API.get("quote", { symbol: x.symbol }).then(function (r) {
@@ -203,6 +252,20 @@
               ipoFilter(rows);
             }).catch(function () { /* search works without IPO leg */ });
           }
+          /* Mutual fund matches (session-cached 10 min, free mfapi.in). */
+          function mfFilter(rows) {
+            mfMatches = (rows || []).slice(0, 3);
+            if (mfMatches.length && !box.classList.contains("hidden")) render();
+          }
+          if (mfCache && Date.now() - (mfCache.at || 0) < 600000 && mfCache.q === ql) {
+            mfFilter(mfCache.rows);
+          } else {
+            window.FT_API.get("mf/search", { q: q }).then(function (mr) {
+              var rows = (((mr.body || {}).data || {}).results) || [];
+              try { sessionStorage.setItem("ft-mf", JSON.stringify({ at: Date.now(), q: ql, rows: rows.slice(0, 10) })); } catch (e) { /* ignore */ }
+              mfFilter(rows);
+            }).catch(function () { /* search works without MF leg */ });
+          }
         });
       }, 220);
     });
@@ -215,9 +278,13 @@
         active = e.key === "ArrowDown" ? Math.min(active + 1, rows.length - 1) : Math.max(active - 1, 0);
         rows.forEach(function (r, i) { r.classList.toggle("active", i === active); });
       }
-      if (e.key === "Enter" && active >= 0 && items[active]) {
-        var it = items[active];
-        go(it.symbol, it.name);
+      if (e.key === "Enter" && active >= 0) {
+        var nav = box._keyNav || [];
+        if (nav[active]) { nav[active].run(); return; }
+        if (items[active]) {
+          var it = items[active];
+          go(it.symbol, it.name);
+        }
       }
     });
     document.addEventListener("click", function (e) {

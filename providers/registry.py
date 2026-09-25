@@ -7,9 +7,10 @@ QUOTE (Indian first):
 QUOTE (global): yahoo first (indian leg passes non-Indian symbols through)
 HISTORY:
     yahoo -> stooq -> twelvedata -> alphavantage -> UNAVAILABLE
-FUNDAMENTALS / STATEMENTS:
-    alphavantage -> twelvedata (indian-api: quote + market
-    fundamentals only, no statements)
+FUNDAMENTALS / STATEMENTS (free first):
+    yahoo-fundamentals -> alphavantage -> twelvedata (+ indian-api keyed)
+    Yahoo timeseries statements + trailing ratios need no key and cover
+    NSE/BSE + global symbols; AV/TD add depth where configured.
 EARNINGS:  alphavantage + twelvedata
 ESTIMATES: alphavantage only. Never synthesised EPS forecasts.
 NEWS:    yahoo-rss -> alphavantage
@@ -29,6 +30,7 @@ from . import base as _base
 from .fallback import FallbackMarketData
 from .fundamentals import AlphaVantageFundamentalsProvider
 from .indianapi import IndianApiProvider
+from .mutualfunds import MutualFundProvider
 from .news import YahooCorporateActionsProvider, YahooRssNewsProvider
 from .orchestrator import ProviderManager
 from .stooq import StooqProvider
@@ -36,8 +38,11 @@ from .tradingview import TradingViewProvider
 from .tradingview import authorization_scope as _tradingview_scope
 from .twelvedata import TwelveDataProvider, budget_snapshot
 from .yahoo import YahooMarketDataProvider
+from .yahoo_fundamentals import YahooFundamentalsProvider
 
 _yahoo = YahooMarketDataProvider()
+_yahoo_fund = YahooFundamentalsProvider()
+mutualfunds = MutualFundProvider()
 _indianapi = IndianApiProvider()
 _twelvedata = TwelveDataProvider()
 _alphavantage = AlphaVantageFundamentalsProvider()
@@ -100,6 +105,7 @@ manager = ProviderManager(
     alphavantage=_alphavantage,
     news_rss=news,
     actions_yahoo=corporate_actions,
+    yahoo_fund=_yahoo_fund,
 )
 # Estimates: Alpha Vantage EARNINGS_ESTIMATES (key configured) for
 # non-Indian symbols; the indian-api analyst-rating distribution for
@@ -127,7 +133,7 @@ def providers_status() -> dict:
             "quote": ["indian-api", "yahoo", "twelvedata", "alphavantage"],
             "history": ["yahoo", "stooq", "twelvedata", "alphavantage"],
             "news": ["yahoo-rss", "alphavantage", "indian-api"],
-            "fundamentals": ["alphavantage", "twelvedata", "indian-api"],
+            "fundamentals": ["yahoo-fundamentals", "alphavantage", "twelvedata", "indian-api"],
         },
         "providers": [
             {
@@ -142,6 +148,32 @@ def providers_status() -> dict:
                 "key_configured": True,
                 "capabilities": _base.describe(_yahoo),
                 "health": health.get("yahoo", {}),
+            },
+            {
+                "id": "yahoo-fundamentals",
+                "label": "Yahoo Fundamentals",
+                "state": "connected"
+                if health.get("yahoo", {}).get("state") != "cooling"
+                else "cooling",
+                "detail": "Free, no key. Timeseries statements (income, "
+                "balance, cash flow — annual + quarterly), trailing ratios, "
+                "earnings chart, sector/industry profile. Covers NSE/BSE "
+                "and global symbols; exchange-delayed.",
+                "key_required": False,
+                "key_configured": True,
+                "capabilities": _base.describe(_yahoo_fund),
+                "health": health.get("yahoo", {}),
+            },
+            {
+                "id": "mfapi",
+                "label": "MFAPI (AMFI NAV)",
+                "state": "connected",
+                "detail": "Free, no key. Indian mutual fund scheme search + "
+                "date-stamped NAV history (AMFI-published, not live prices).",
+                "key_required": False,
+                "key_configured": True,
+                "capabilities": _base.describe(mutualfunds),
+                "health": {},
             },
             {
                 "id": "indian-api",

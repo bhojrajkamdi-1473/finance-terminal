@@ -314,6 +314,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_research_list(qs)
         if path == "/api/market-overview":
             return self._handle_market_overview()
+        if path == "/api/indicators":
+            return self._handle_indicators()
+        if path == "/api/mf/search":
+            env = registry.mutualfunds.search_schemes(qs.get("q", [""])[0], limit=10)
+            return _send_json(self, env, _envelope_status(env))
+        if path == "/api/mf/scheme":
+            try:
+                limit = int(qs.get("points", ["365"])[0] or 365)
+            except (ValueError, TypeError):
+                limit = 365
+            env = registry.mutualfunds.get_nav_history(
+                qs.get("code", [""])[0], max_points=max(30, min(limit, 730))
+            )
+            return _send_json(self, env, _envelope_status(env))
         if path == "/api/providers":
             return _send_json(self, {"ok": True, **registry.providers_status()})
         if path == "/api/ai/status":
@@ -470,6 +484,43 @@ class Handler(BaseHTTPRequestHandler):
 
         with ThreadPoolExecutor(max_workers=8) as pool:
             out = list(pool.map(one, DEFAULT_SYMBOLS))
+        return _send_json(self, {"ok": True, "items": out})
+
+    # Heavy indicators (metals, energy, FX, volatility, crypto, rates).
+    # All served by the existing quote chain (Yahoo covers these
+    # symbols) — no new provider, no key, delayed like everything else.
+    INDICATORS = [
+        ("GC=F", "Gold", "metal"),
+        ("SI=F", "Silver", "metal"),
+        ("CL=F", "Crude WTI", "energy"),
+        ("BZ=F", "Brent", "energy"),
+        ("INR=X", "USD/INR", "fx"),
+        ("^INDIAVIX", "India VIX", "volatility"),
+        ("BTC-USD", "Bitcoin", "crypto"),
+        ("^TNX", "US 10Y", "rates"),
+    ]
+
+    def _handle_indicators(self):
+        from concurrent.futures import ThreadPoolExecutor
+
+        def one(spec):
+            sym, label, kind = spec
+            env = registry.market_data.get_quote(sym)
+            q = env.get("data") or {}
+            return {
+                "symbol": sym,
+                "label": label,
+                "kind": kind,
+                "status": env.get("status"),
+                "price": q.get("price"),
+                "change_pct": q.get("change_pct"),
+                "currency": q.get("currency"),
+                "as_of": env.get("as_of"),
+                "market": env.get("market") or {"id": "GLOBAL", "label": "Global"},
+            }
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            out = list(pool.map(one, self.INDICATORS))
         return _send_json(self, {"ok": True, "items": out})
 
     def _handle_company(self, qs):

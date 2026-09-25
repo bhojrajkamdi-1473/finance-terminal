@@ -293,6 +293,11 @@
       "<section aria-label='Market pulse'><h2>Market pulse</h2><div class='pulse' id='d-pulse'>" +
       SPARK_IDX.map(function () { return "<div class='pcell'><div class='cx-skel'></div></div>"; }).join("") +
       "</div><div id='d-pulsesrc'></div></section>" +
+      "<section aria-label='Market indicators' style='margin-top:12px'><h2>Market indicators</h2>" +
+      "<div class='pulse' id='d-ind'>" +
+      ["Gold", "Silver", "Crude", "USD/INR", "Volatility", "Crypto"].map(function () {
+        return "<div class='pcell'><div class='cx-skel'></div></div>";
+      }).join("") + "</div><div id='d-indsrc'></div></section>" +
       "<div class='an-grid' style='margin-top:12px'>" +
       "<div class='an-8'><section aria-label='Market performance'><h2>Market performance</h2>" +
       "<div class='card'><div id='d-perf'></div><div id='d-perfnote'></div></div></section></div>" +
@@ -326,9 +331,9 @@
     API.get("market-overview").then(function (r) {
       var items = ((r.body || {}).items) || [];
       items.forEach(function (i) { quotes[i.symbol] = i; });
-      paintPulse();
+            paintPulse();
       paintMovers();
-      var needed = SPARK_IDX.map(function (p) { return p[0]; });
+      paintIndicators();      var needed = SPARK_IDX.map(function (p) { return p[0]; });
       var done = 0;
       needed.forEach(function (s) {
         API.get("history", { symbol: s, range: "1Y", interval: "1d" }).then(function (h) {
@@ -339,6 +344,26 @@
         }).catch(function () { if (++done === needed.length) paintHist(); });
       });
     });
+    /* Heavy indicators: gold, silver, crude, FX, VIX, crypto, rates.
+       One backend call; each tile omitted if its quote is missing. */
+    function paintIndicators() {
+      var host = $("d-ind");
+      if (!host) return;
+      API.get("indicators").then(function (r) {
+        if (!$("d-ind")) return;
+        var items = ((r.body || {}).items) || [];
+        var cells = [];
+        items.forEach(function (it) {
+          if (!V.hasV(it.price)) return;
+          cells.push("<div class='pcell'><div class='pnm'>" + esc2(it.label) + "</div>" +
+            "<div class='pvl'>" + F.fmtNum(it.price) + " <small>" + esc2(it.currency || "") + "</small></div>" +
+            "<div class='" + F.dirClass(it.change_pct) + "' style='font-weight:650'>" + F.fmtPct(it.change_pct) + "</div></div>");
+        });
+        host.innerHTML = cells.join("");
+        var src = items.filter(function (it) { return V.hasV(it.price); })[0] || {};
+        $("d-indsrc").innerHTML = V.srcLine({ label: "Market data", source: "yahoo", timeliness: "delayed", asOf: src.as_of });
+      }).catch(function () { if ($("d-ind")) $("d-ind").innerHTML = ""; });
+    }
     function paintPulse() {
       var host = $("d-pulse");
       if (!host) return;
@@ -679,6 +704,75 @@
     go();
   }
   if (window.FT_PAGES) window.FT_PAGES.pCompare = pCompare;
+  /* ---------- mutual fund page (AMFI NAV via mfapi.in, free) ---------- */
+  function pMF(code) {
+    var API = window.FT_API, F = window.FT_FMT;
+    code = String(code || "").replace(/^MF:/i, "");
+    $("view").innerHTML = "<h1 class='h-page'>Mutual fund</h1>" +
+      "<div class='sub'>AMFI-published NAV history · not a live tradable price</div>" +
+      "<div class='card' id='mf-out'><div class='cx-skel'></div><div class='cx-skel'></div></div>";
+    API.get("mf/scheme", { code: code, points: 365 }).then(function (r) {
+      if (!$("mf-out")) return;
+      var b = r.body || {}, d = b.data || {};
+      if (!d.bars || !d.bars.length) {
+        $("mf-out").innerHTML = "<div class='cx-empty'><b>Mutual fund</b><p>No verified data available.</p>" +
+          "<p class='why'>" + F.esc(b.message || "Scheme not found.") + "</p></div>";
+        return;
+      }
+      var bars = d.bars.map(function (p, i) {
+        return { t: i, c: p.nav, o: p.nav, h: p.nav, l: p.nav, v: null };
+      });
+      var first = d.bars[0].nav, last = d.bars[d.bars.length - 1].nav;
+      var chg = first ? (last - first) / first * 100 : null;
+      $("mf-out").innerHTML = "<h3>" + F.esc(d.scheme_name || ("Scheme " + code)) + "</h3>" +
+        "<div class='kstrip big'><div class='kpi'><div class='k-l'>Latest NAV</div>" +
+        "<div class='k-v'>" + F.fmtNum(d.latest_nav) + "</div>" +
+        "<div class='k-s'>" + F.esc(d.latest_date || "") + "</div></div>" +
+        (chg !== null ? "<div class='kpi'><div class='k-l'>Change (" + d.bars.length + " sessions)</div>" +
+          "<div class='k-v " + F.dirClass(chg) + "'>" + F.fmtPct(chg) + "</div></div>" : "") +
+        "</div><div class='cx-note'>" + F.esc(d.fund_house || "") +
+        (d.scheme_category ? " · " + F.esc(d.scheme_category) : "") + "</div>" +
+        "<div class='chart-box' style='margin-top:10px'><canvas class='chart' id='mf-c' style='height:230px' role='img' aria-label='NAV history'></canvas><div class='chart-tip'></div></div>" +
+        "<div class='cx-prov'>Data · mfapi.in (AMFI) · end-of-day</div>";
+      if ($("mf-c")) window.FT_CHART.drawPriceChart($("mf-c"), bars, { sma: [] });
+    });
+  }
+  if (window.FT_PAGES) window.FT_PAGES.pMF = pMF;
+  /* ---------- markets: indicators strip injected above sections ---------- */
+  function marketsStrip() {
+    try {
+      var host = document.getElementById("m-sects");
+      if (!host || document.getElementById("ind-strip")) return;
+      var box = document.createElement("div");
+      box.className = "card";
+      box.id = "ind-strip";
+      box.innerHTML = "<h3>Market indicators</h3><div class='pulse' id='ind-cells'></div>";
+      host.parentNode.insertBefore(box, host);
+      window.FT_API.get("indicators").then(function (r) {
+        var el = document.getElementById("ind-cells");
+        if (!el) return;
+        var items = ((r.body || {}).items) || [];
+        var groups = { metal: [], energy: [], fx: [], volatility: [], crypto: [], rates: [] };
+        items.forEach(function (it) {
+          if (it.price === null || it.price === undefined) return;
+          (groups[it.kind] || (groups[it.kind] = [])).push(it);
+        });
+        var F = window.FT_FMT;
+        function cell(it) {
+          return "<div class='pcell'><div class='pnm'>" + F.esc(it.label) + "</div>" +
+            "<div class='pvl'>" + F.fmtNum(it.price) + " <small>" + F.esc(it.currency || "") + "</small></div>" +
+            "<div class='" + F.dirClass(it.change_pct) + "' style='font-weight:650'>" + F.fmtPct(it.change_pct) + "</div></div>";
+        }
+        var order = [["metal", "Metals"], ["energy", "Energy"], ["fx", "Currency"], ["volatility", "Volatility"], ["crypto", "Crypto"], ["rates", "Rates"]];
+        el.innerHTML = order.map(function (g) {
+          if (!(groups[g[0]] || []).length) return "";
+          return "<div style='min-width:100%'><div class='lbl' style='margin:6px 0 4px'>" + g[1] + " — " +
+            (g[0] === "metal" || g[0] === "energy" ? "India" : "Global") + "</div><div class='pulse'>" +
+            groups[g[0]].map(cell).join("") + "</div></div>";
+        }).join("") + "<div class='cx-prov'>Data · Yahoo Finance · delayed · India and Global shown in separate groups</div>";
+      }).catch(function () { /* strip stays empty */ });
+    } catch (e) { /* never break markets */ }
+  }
   function theme() {
     try {
       var q = (location.search || "").match(/theme=(light|dark)/);
@@ -686,7 +780,7 @@
       document.body.dataset.theme = (t === "dark") ? "dark" : "light";
     } catch (e) { document.body.dataset.theme = "light"; }
   }
-  function boot() { theme(); sectionize(); strip(); }
+  function boot() { theme(); sectionize(); strip(); marketsStrip(); }
   document.addEventListener("DOMContentLoaded", function () { setTimeout(boot, 400); });
   setInterval(boot, 2500);
   window.FT_SHELL = { boot: boot };

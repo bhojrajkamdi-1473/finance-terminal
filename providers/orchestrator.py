@@ -146,6 +146,7 @@ class ProviderManager:
         alphavantage=None,
         news_rss=None,
         actions_yahoo=None,
+        yahoo_fund=None,
         max_workers: int = 6,
     ):
         self.yahoo = yahoo
@@ -155,6 +156,7 @@ class ProviderManager:
         self.alphavantage = alphavantage
         self.news_rss = news_rss
         self.actions_yahoo = actions_yahoo
+        self.yahoo_fund = yahoo_fund
         self._pool = ThreadPoolExecutor(max_workers=max_workers)
         self._cache = TTLCache()
         self._inflight: dict[str, Any] = {}
@@ -400,6 +402,9 @@ class ProviderManager:
             env = dict(primary_env)
             env["source"] = primary_env.get("source")
             env["providers_queried"] = _queried(results)
+            env["market"] = _classify_market(
+                symbol, (primary_env.get("data") or {})
+            )
             env["reconciliation"] = {
                 "comparisons": comparisons,
                 "summary": summary,
@@ -458,13 +463,23 @@ class ProviderManager:
                         else "Non-Indian symbol.",
                     }
                 )
+            if self.yahoo_fund is not None:
+                calls.append(
+                    ("yahoo-fundamentals", lambda: self.yahoo_fund.get_company_profile(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "yahoo-fundamentals", "reason": "Leg not wired."}
+                )
             results = self._fanout(key + ":fan", PROFILE_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
             inapi = results.get("indian-api", {})
+            yf = results.get("yahoo-fundamentals", {})
             av_d = av.get("data") if _ok(av) else {}
             td_d = td.get("data") if _ok(td) else {}
             in_d = inapi.get("data") if _ok(inapi) else {}
+            y_d = yf.get("data") if _ok(yf) else {}
             q = (
                 (quote_env.get("data") or {})
                 if quote_env and quote_env.get("data")
@@ -477,15 +492,21 @@ class ProviderManager:
                     inapi.get("as_of")
                     if _ok(inapi)
                     else (
-                        td.get("as_of") if _ok(td) else (quote_env or {}).get("as_of")
+                        yf.get("as_of")
+                        if _ok(yf)
+                        else (
+                            td.get("as_of") if _ok(td) else (quote_env or {}).get("as_of")
+                        )
                     )
                 )
             )
             from providers.schema import field as _f
 
-            pri_d = av_d or in_d or {}
+            pri_d = av_d or in_d or y_d or {}
             if pri_d is in_d:
                 prim_src, prim_asof = "indian-api", inapi.get("as_of")
+            elif pri_d is y_d:
+                prim_src, prim_asof = "yahoo-fundamentals", yf.get("as_of")
             else:
                 prim_src, prim_asof = "alphavantage", av.get("as_of")
 
@@ -516,15 +537,17 @@ class ProviderManager:
                 or q.get("currency"),
                 "instrument_type": q.get("instrument_type"),
                 "timezone": q.get("timezone"),
-                "sector": (pri_d or {}).get("Sector") or (pri_d or {}).get("sector"),
+                "sector": (pri_d or {}).get("Sector") or (pri_d or {}).get("sector") or (y_d or {}).get("sector"),
                 "industry": (pri_d or {}).get("Industry")
-                or (pri_d or {}).get("industry"),
+                or (pri_d or {}).get("industry")
+                or (y_d or {}).get("industry"),
                 "description": (pri_d or {}).get("Description")
-                or (pri_d or {}).get("description"),
+                or (pri_d or {}).get("description")
+                or (y_d or {}).get("description"),
                 "profile_note": (
                     "Identity from quote chain; sector/industry/description "
-                    "from the configured fundamental feeds (Alpha Vantage "
-                    "and/or Indian Stock Market API)."
+                    "from the configured fundamental feeds (Alpha Vantage, "
+                    "Yahoo fundamentals and/or Indian Stock Market API)."
                 ),
             }
             comparisons = []
@@ -550,7 +573,7 @@ class ProviderManager:
                 )
                 comparisons.append(_rec.compare(fname, a, others))
             summary = _rec.summarize(comparisons)
-            has_any = bool(av_d or td_d or in_d or q)
+            has_any = bool(av_d or td_d or in_d or y_d or q)
             status = "live" if has_any else "unavailable"
             return {
                 "status": status,
@@ -613,6 +636,21 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
+            # Free Yahoo fundamentals leg (timeseries statements, no key):
+            # always attempted so keyless users get real financials.
+            if self.yahoo_fund is not None:
+                calls.append(
+                    (
+                        "yahoo-fundamentals",
+                        lambda: self.yahoo_fund.get_financial_statements(
+                            symbol, statement, period
+                        ),
+                    )
+                )
+            else:
+                skipped.append(
+                    {"provider": "yahoo-fundamentals", "reason": "Leg not wired."}
+                )
             # Capability routing: keyed Indian leg (/stock, /statement,
             # /historical_stats) joins AV/TD; keyless it stays out.
             leg = self._indian_leg()
@@ -637,13 +675,17 @@ class ProviderManager:
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
             inapi = results.get("indian-api", {})
+            yf = results.get("yahoo-fundamentals", {})
             av_live = _ok(av) and av.get("data")
             td_live = _ok(td) and td.get("data")
             in_live = _ok(inapi) and inapi.get("data")
-            if not av_live and not td_live and not in_live:
+            y_live = _ok(yf) and yf.get("data")
+            if not av_live and not td_live and not in_live and not y_live:
                 return _honest_unavailable("financial statement", results, skipped)
             if av_live:
                 primary = av
+            elif y_live:
+                primary = yf
             elif in_live:
                 primary = inapi
             else:
@@ -672,6 +714,17 @@ class ProviderManager:
             }
             if td_live and av_live:
                 env["td_reports"] = (td.get("data") or {}).get("reports")
+            elif y_live and not av_live:
+                yf_data = yf.get("data") or {}
+                data.update(
+                    {
+                        "symbol": symbol,
+                        "statement": statement,
+                        "period": period,
+                        "currency": yf_data.get("currency"),
+                        "reports": yf_data.get("reports"),
+                    }
+                )
             elif in_live and not av_live:
                 data.update(
                     {
@@ -725,6 +778,14 @@ class ProviderManager:
                 skipped.append(
                     {"provider": "twelvedata", "reason": td_reason or "Leg not wired."}
                 )
+            if self.yahoo_fund is not None:
+                calls.append(
+                    ("yahoo-fundamentals", lambda: self.yahoo_fund.get_ratios(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "yahoo-fundamentals", "reason": "Leg not wired."}
+                )
             leg = self._indian_leg()
             in_ok, in_reason = self._indian_basic(symbol)
             if in_ok and leg is not None and is_indian(symbol):
@@ -740,10 +801,12 @@ class ProviderManager:
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
             inapi = results.get("indian-api", {})
+            yf = results.get("yahoo-fundamentals", {})
             av_d = av.get("data") if _ok(av) else {}
             td_d = td.get("data") if _ok(td) else {}
             in_d = inapi.get("data") if _ok(inapi) else {}
-            if not av_d and not td_d and not in_d:
+            y_d = yf.get("data") if _ok(yf) else {}
+            if not av_d and not td_d and not in_d and not y_d:
                 miss = _honest_unavailable("valuation", results, skipped)
                 miss["message"] = (
                     "Valuation could not be answered by any provider "
@@ -753,17 +816,20 @@ class ProviderManager:
                     + "; ".join(_leg_detail(results))
                     + " Set "
                     "ALPHA_VANTAGE_API_KEY and/or TWELVE_DATA_API_KEY to "
-                    "enable further coverage. The free no-auth Indian leg "
-                    "was checked automatically for NSE/BSE symbols. "
+                    "enable further coverage. The free Yahoo fundamentals "
+                    "and no-auth Indian legs "
+                    "were checked automatically for applicable symbols. "
                     "(Common causes: Alpha Vantage free quota spent "
                     "(25/day), Twelve Data budget/coverage limits.)"
                 )
                 return miss
             from providers.schema import field as _f
 
-            pri_d = av_d or in_d or {}
+            pri_d = av_d or y_d or in_d or {}
             if pri_d is in_d:
                 prim_src, prim_asof = "indian-api", inapi.get("as_of")
+            elif pri_d is y_d:
+                prim_src, prim_asof = "yahoo-fundamentals", yf.get("as_of")
             else:
                 prim_src, prim_asof = "alphavantage", av.get("as_of")
             metrics: dict[str, dict] = {}
@@ -829,11 +895,11 @@ class ProviderManager:
                     },
                     "status": "CALCULATED",
                 }
-            overview = av_d or in_d or {}
+            overview = av_d or y_d or in_d or {}
             return {
                 "status": "live",
                 "source": "orchestrator",
-                "as_of": av.get("as_of") or inapi.get("as_of") or td.get("as_of"),
+                "as_of": av.get("as_of") or yf.get("as_of") or inapi.get("as_of") or td.get("as_of"),
                 "timeliness": "DELAYED",
                 "data": {
                     "symbol": symbol,
@@ -1069,14 +1135,24 @@ class ProviderManager:
                         "reason": in_reason or "Leg not wired.",
                     }
                 )
+            if self.yahoo_fund is not None:
+                calls.append(
+                    ("yahoo-fundamentals", lambda: self.yahoo_fund.get_earnings(symbol))
+                )
+            else:
+                skipped.append(
+                    {"provider": "yahoo-fundamentals", "reason": "Leg not wired."}
+                )
             results = self._fanout(key + ":fan", EARNINGS_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
             inapi = results.get("indian-api", {})
+            yf = results.get("yahoo-fundamentals", {})
             av_d = av.get("data") if _ok(av) else {}
             td_rows = ((td.get("data") or {}).get("rows") if _ok(td) else []) or []
             in_d = inapi.get("data") if _ok(inapi) else {}
-            if not av_d and not td_rows and not in_d:
+            y_d = yf.get("data") if _ok(yf) else {}
+            if not av_d and not td_rows and not in_d and not y_d:
                 return _honest_unavailable("earnings data", results, skipped)
             from providers.schema import field as _f
 
@@ -1112,6 +1188,14 @@ class ProviderManager:
             if av_d:
                 data = dict(av_d)
                 prim_src = "alphavantage"
+            elif y_d:
+                data = {
+                    "symbol": symbol,
+                    "annual": [],
+                    "quarterly": y_d.get("quarterly") or [],
+                    "note": "Quarterly reported vs estimated EPS (Yahoo Finance).",
+                }
+                prim_src = "yahoo-fundamentals"
             elif in_d:
                 data = {
                     "symbol": symbol,
@@ -1134,7 +1218,7 @@ class ProviderManager:
             return {
                 "status": "live",
                 "source": prim_src,
-                "as_of": av.get("as_of") or inapi.get("as_of") or td.get("as_of"),
+                "as_of": av.get("as_of") or yf.get("as_of") or inapi.get("as_of") or td.get("as_of"),
                 "timeliness": "END-OF-DAY",
                 "data": data,
                 "providers_queried": _queried(results),
@@ -1527,6 +1611,42 @@ def _ok(env: dict) -> bool:
         and env.get("status") in ("live", "delayed")
         and env.get("data") is not None
     )
+
+
+def _classify_market(symbol: str, quote: dict) -> dict:
+    """India vs US vs Global bucket from symbol + quote metadata.
+
+    Rules (no guessing): .NS/.BO suffix, NSE/BSE exchange text or INR
+    currency -> India. .NS-style Indian indices (^NSEI, ^BSESN, ^NSEBANK,
+    ^CNX*) -> India. US exchange text (NASDAQ/NYSE/AMEX/ARCA/BATS) or a
+    suffix-less symbol with USD currency -> US. Everything else
+    (FX `=X`, crypto `-USD`, futures, other exchanges) -> Global.
+    """
+    sym = (symbol or "").strip().upper()
+    q = quote or {}
+    exch = f"{q.get('exchange') or ''} {q.get('timezone') or ''}".upper()
+    ccy = str(q.get("currency") or "").upper()
+    if "=" in sym or sym.endswith("-USD"):
+        # Futures (GC=F), FX (INR=X), crypto (BTC-USD): global bucket.
+        return {"id": "GLOBAL", "label": "Global"}
+    if (
+        sym.endswith((".NS", ".BO"))
+        or "NSE" in exch
+        or "BSE" in exch
+        or "KOLKATA" in exch
+        or "MUMBAI" in exch
+        or ccy == "INR"
+        or sym in ("^NSEI", "^NSEBANK", "^BSESN")
+        or sym.startswith("^CNX")
+        or sym == "NIFTY_FIN_SERVICE.NS"
+    ):
+        return {"id": "IN", "label": "India"}
+    if (
+        any(k in exch for k in ("NASDAQ", "NYSE", "AMEX", "ARCA", "BATS", "IEX"))
+        or (ccy == "USD" and "." not in sym and not sym.startswith("^"))
+    ):
+        return {"id": "US", "label": "US"}
+    return {"id": "GLOBAL", "label": "Global"}
 
 
 _STOPWORDS = frozenset(
