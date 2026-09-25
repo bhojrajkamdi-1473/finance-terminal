@@ -8,6 +8,7 @@ vanilla JS SPA (`terminal/`), SQLite storage, Render deployment
 
 | Provider | Capabilities | Tier | Auth | Cache TTL | Rate limit | Delay | Limitations |
 |---|---|---|---|---|---|---|---|
+| Upstox | quote V3, historical-candle V3, ISIN-keyed fundamentals (profile, ratios, statements, holdings, actions), batch quotes | key-gated analytics | `UPSTOX_ANALYTICS_TOKEN` (Bearer, server-side only) | quote 30s, history 4h, domains 24h | upstream limits respected; pass-through when unmapped | delayed | ISIN-mapped Indian names + NSE_INDEX keys only; no trading/orders; missing key → pass-through unavailable |
 | Yahoo Finance | quote, history, search, profile, RSS news, dividends/splits | free, no key | none | quote 30s, intraday 15m, daily 4h, search 10m | 429 backoff + 5m cooldown | delayed (~15m) | crumb-gated endpoints (options, holders, SEC) not used |
 | Alpha Vantage | overview, statements, earnings, estimates, news, IPO, macro, dividends, splits, shares, quote, daily history | free, key-gated | `ALPHA_VANTAGE_API_KEY` | quotes 6h, overview 24h, statements/IPO/macro 7d, earnings/news 24h/10m | 25 req/day shared; premium notices → honest unavailable | delayed | NSE coverage discovered per symbol via SYMBOL_SEARCH; never assumed |
 | Twelve Data | quote, history, search, statistics, earnings, dividends, splits, statements | free Basic, key-gated | `TWELVE_DATA_API_KEY` | quotes 30s, history 4h, statements 7d | 8 credits/min + 800/day token bucket | US real-time per plan claim, else delayed | NSE/BSE uncovered on free; statements cost ~100 credits |
@@ -17,8 +18,8 @@ vanilla JS SPA (`terminal/`), SQLite storage, Render deployment
 | Moneycontrol | none (research landing link) | n/a | none | n/a | n/a | n/a | site bot-gated; navigation only, never scraped |
 | Google Finance | none (reference quote link) | n/a | none | n/a | n/a | n/a | navigation only for verified venue mappings |
 
-Fallback chains — quote: indian-api → yahoo → twelvedata → alphavantage;
-history: yahoo → stooq → twelvedata → alphavantage. Definitive
+Fallback chains — quote: upstox → indian-api → yahoo → twelvedata → alphavantage;
+history: upstox → yahoo → stooq → twelvedata → alphavantage. Definitive
 `unavailable` answers never trigger cooldown; transport errors cool a
 leg for 5 minutes. Company domains fan out in parallel via
 `ProviderManager`, normalize into `providers/schema.py` fields, and
@@ -57,6 +58,32 @@ no-auth quote + market fundamentals subset),
 unless `1` with documented scope), `TERMINAL_DB`, `TERMINAL_HOST`, `PORT`.
 `.env` and `*.db` are git-ignored; every JSON response passes deep secret
 redaction.
+
+## Data quality matrix (field-level superior provider)
+
+Served live at `GET /api/data-matrix` (same table as `services/kpi.py: FIELD_PROVIDERS`).
+
+| Data type | Best provider | Secondary | Why | Fallback | Status |
+|---|---|---|---|---|---|
+| Indian quotes | Upstox | Indian API | Exchange-native snapshot + ISIN identity; Yahoo cross-check | Yahoo | Upstox key-gated, else Indian-API/Yahoo |
+| Global quotes | Yahoo | Twelve Data | Free global breadth; TD US real-time per plan | Alpha Vantage | live |
+| Indian history | Upstox | Yahoo | Candle-V3 depth (2000+); Yahoo breadth cross-check | Indian-API historical_data | Upstox key-gated |
+| Global history | Yahoo | Stooq | Range/interval breadth; US EOD fallback | Twelve Data / Alpha Vantage | live |
+| Indices | Yahoo | Upstox | Verified index symbols; NSE_INDEX cross-check | none | live |
+| Fundamentals | Yahoo fundamentals | Alpha Vantage | No-key timeseries, NSE+global; AV depth when keyed | Twelve Data | live |
+| Ratios | Alpha Vantage | Upstox | Overview authority; ISIN key-ratios for Indian names | Yahoo fundamentals / Indian-API | mixed key-gated |
+| Statements | Yahoo fundamentals | Alpha Vantage | Free annual+quarterly; audited depth when keyed | Upstox / Indian-API (ISIN) | live |
+| Shareholding | Upstox | Indian API | ISIN-linked patterns; keyed Indian fallback | none | key-gated |
+| Corporate actions | Upstox | Yahoo events | ISIN-linked actions; free chart-event fallback | Alpha Vantage / Twelve Data | mixed |
+| News | Yahoo RSS | Alpha Vantage | Freshness + entity match; sentiment depth | Indian-API (keyed) | live |
+| IPO | IPO Guru | Alpha Vantage | Lifecycle/subscription; calendar cross-check (GMP separate) | none | key-gated |
+| GMP | IPO Guru | none | Dedicated GMP feed only; never synthesised | none | key-gated |
+| Technical inputs | terminal-calc | none | Local calc from verified history; never provider-reported | none | live |
+
+Centralized KPI engine (`services/kpi.py` + `GET /api/kpi`): one
+normalized bundle per symbol backs the stock page, compare, screener
+and research — values match everywhere. Missing metrics are omitted
+(no key), never placeholder cards.
 
 ## Known limitations
 

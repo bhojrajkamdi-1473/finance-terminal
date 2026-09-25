@@ -15,3 +15,5 @@ services:
         sync: false
       - key: INDIAN_STOCK_MARKET_API_KEY
         sync: false
+      - key: UPSTOX_ANALYTICS_TOKEN
+        sync: false

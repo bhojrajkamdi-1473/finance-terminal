@@ -549,3 +549,9 @@ textarea:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--acc);out
 .an-4{grid-column:span 4}.an-3{grid-column:span 3}.an-2{grid-column:span 2}
 @media(max-width:1100px){.an-8,.an-6,.an-4,.an-3{grid-column:span 12}.an-2{grid-column:span 6}}
 @media(max-width:640px){.an-2{grid-column:span 12}.kstrip.big .k-v{font-size:26px}}
+/* workstation hierarchy: pulse leads, numbers scan cleanly */
+.card.sect.pulse{border:1px solid var(--line-2);border-left:3px solid var(--acc)}
+.card.sect.pulse h3{letter-spacing:.06em;text-transform:uppercase;font-size:11.5px;color:var(--acc-ink)}
+.kpis .k-v,.kpi .k-v,.cx-m .v,.htile span,.idx-card .vl{font-variant-numeric:tabular-nums;font-feature-settings:"tnum"}
+table.t td.num,table.cx-t td.num{text-align:right;white-space:nowrap}
+table.t td.txt,table.cx-t td.txt{max-width:280px;overflow:hidden;text-overflow:ellipsis}

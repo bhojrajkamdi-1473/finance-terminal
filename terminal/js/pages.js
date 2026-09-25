@@ -94,11 +94,19 @@
   }
   function unaCell() { return '<span class="mut">—</span>'; }
 
-  /* ---------- dashboard: analyst command center ---------- */
+  /* ---------- dashboard: financial data visualization workstation ----------
+     Hierarchy (visual weight in order): MARKET PULSE > PERFORMANCE >
+     SECTOR HEATMAP > GAINERS/LOSERS > VOLUME > NEWS > ANALYTICS.
+     Every figure is real backend data; missing metrics are omitted. */
+  var SECTOR_IDX = ["^CNXIT", "^CNXAUTO", "^CNXFMCG", "^CNXPHARMA",
+    "NIFTY_FIN_SERVICE.NS", "^NSEBANK"];
+  var PULSE_IDX = ["^NSEI", "^BSESN", "^NSEBANK"];
   function pDashboard() {
     view().innerHTML = "<h1 class='h-page'>Dashboard</h1>" +
-      "<div class='sub'>Free-automatic mode · auto-refresh 60s · backend serves cache unless refresh is allowed</div>" +
-      "<div class='card sect'><h3>Market overview</h3><div id='d-idx' class='kpis'>" + skel(4) + "</div><div id='d-src'></div></div>" +
+      "<div class='sub'>Market pulse first · auto-refresh 60s · server cache unless refresh is allowed</div>" +
+      "<div class='card sect pulse'><h3>Market pulse</h3><div id='d-pulse' class='kpis'>" + skel(4) + "</div><div id='d-pulsemeta'></div></div>" +
+      "<div class='card sect'><h3>Market performance</h3><div id='d-idx' class='kpis'>" + skel(4) + "</div><div id='d-src'></div></div>" +
+      "<div class='card sect'><h3>Sector heatmap</h3><div id='d-heat'>" + skel(3) + "</div><div class='prov'>Sector moves from real sector-index quotes — never hardcoded.</div></div>" +
       "<div class='lay-8-4'><div>" +
       "<div class='card sect'><h3>Movers — tracked universe</h3><div id='d-mov' class='twrap'>" + skel(5) + "</div><div id='d-breadth'></div></div>" +
       "<div class='card sect'><h3>Watchlist snapshot</h3><div id='d-wl'>" + skel(3) + "</div></div>" +
@@ -110,23 +118,55 @@
       "<a class='btn sm' href='#/earnings'>Earnings calendar</a><a class='btn sm' href='#/macro'>Macro</a>" +
       "<a class='btn sm' href='#/research'>Research notes</a></div></div>" +
       "</div></div>";
+    function heatCell(lbl, pct) {
+      if (pct === null || pct === undefined || isNaN(Number(pct))) return "";
+      var v = Number(pct);
+      var mag = Math.min(Math.abs(v) / 2, 1);
+      var bg = v >= 0 ? "rgba(24,121,78," + (0.08 + mag * 0.5).toFixed(2) + ")"
+        : "rgba(192,53,53," + (0.08 + mag * 0.5).toFixed(2) + ")";
+      return "<div class='htile' style='background:" + bg + "' title='" + F.esc(lbl) + ": " + F.fmtPct(v) + "' tabindex='0'>" +
+        "<b>" + F.esc(lbl) + "</b><span>" + F.fmtPct(v) + "</span></div>";
+    }
     function load() {
       if (!el("d-idx")) return;
       API.get("market-overview").then(function (r) {
         if (!el("d-idx")) return;
         var items = (r.body && r.body.items) || [];
+        var bySym = {};
+        items.forEach(function (i) { bySym[i.symbol] = i; });
         var idx = items.filter(function (i) { return isIndex(i.symbol); });
         var eq = items.filter(function (i) { return !isIndex(i.symbol); });
-        el("d-idx").innerHTML = idx.map(function (i) {
-          var q = i.quote || {};
-          var lbl = IDX_LABELS[i.symbol] || q.name || i.symbol;
-          return kpi(lbl, q.price !== undefined && q.price !== null ?
-            F.fmtNum(q.price) + " <span class='" + F.dirClass(q.change_pct) + "' style='font-size:11px'>" + F.fmtPct(q.change_pct) + "</span>" : "—",
-            F.esc(i.symbol));
-        }).join("") || unavail("Index quotes unavailable.");
+        // LEVEL 1 — market pulse: headline indices + breadth summary.
         var tradable = eq.filter(function (i) { return i.quote && i.quote.change_pct !== null && i.quote.change_pct !== undefined; });
         var adv = tradable.filter(function (i) { return i.quote.change_pct > 0; }).length;
         var dec = tradable.filter(function (i) { return i.quote.change_pct < 0; }).length;
+        var pulse = PULSE_IDX.map(function (s) { return bySym[s]; }).filter(function (i) { return i && i.quote && i.quote.price !== null && i.quote.price !== undefined; });
+        el("d-pulse").innerHTML = (pulse.map(function (i) {
+          var q = i.quote || {};
+          var lbl = IDX_LABELS[i.symbol] || q.name || i.symbol;
+          return kpi(lbl, F.fmtNum(q.price) + " <span class='" + F.dirClass(q.change_pct) + "' style='font-size:11px'>" + F.fmtPct(q.change_pct) + "</span>",
+            F.esc(i.symbol));
+        }).join("") + (tradable.length ?
+          kpi("Advances", String(adv), "tracked") +
+          kpi("Declines", String(dec), "tracked") +
+          kpi("A/D ratio", dec ? (adv / dec).toFixed(2) + "x" : "—", "adv ÷ dec") : "")) ||
+          unavail("Market pulse unavailable.");
+        el("d-pulsemeta").innerHTML = '<div class="prov">Source market-overview · exchange snapshot · advances/declines over the tracked universe</div>';
+        el("d-idx").innerHTML = idx.map(function (i) {
+          var q = i.quote || {};
+          if (q.price === undefined || q.price === null) return "";
+          var lbl = IDX_LABELS[i.symbol] || q.name || i.symbol;
+          return kpi(lbl,
+            F.fmtNum(q.price) + " <span class='" + F.dirClass(q.change_pct) + "' style='font-size:11px'>" + F.fmtPct(q.change_pct) + "</span>",
+            F.esc(i.symbol));
+        }).join("") || unavail("Index quotes unavailable.");
+        // LEVEL 3 — sector heatmap from real sector-index quotes.
+        var heat = SECTOR_IDX.map(function (s) { return bySym[s]; })
+          .filter(function (i) { return i && i.quote && i.quote.change_pct !== null && i.quote.change_pct !== undefined; })
+          .map(function (i) { return heatCell(IDX_LABELS[i.symbol] || i.symbol, i.quote.change_pct); })
+          .join("");
+        el("d-heat").innerHTML = heat ? "<div class='hmap'>" + heat + "</div>"
+          : unavail("Sector heatmap needs sector-index quotes.");
         var ranked = tradable.sort(function (a, b) { return Math.abs(b.quote.change_pct) - Math.abs(a.quote.change_pct); }).slice(0, 10);
         el("d-mov").innerHTML = '<table class="t"><thead><tr><th scope="col">Security</th><th scope="col" class="num">Price</th>' +
           '<th scope="col" class="num">Change</th><th scope="col" class="num">Volume</th></tr></thead><tbody>' +
@@ -139,8 +179,15 @@
           }).join("") + "</tbody></table>";
         el("d-breadth").innerHTML = '<div class="prov">Breadth (tracked, CALCULATED): <b class="up">' + adv +
           " advancing</b> · <b class='dn'>" + dec + " declining</b></div>";
-        el("d-src").innerHTML = '<div class="prov">market-overview · fallback chain · quotes cached 30s server-side</div>';
+        el("d-src").innerHTML = '<div class="prov">Source market-overview · exchange snapshot · quotes cached 30s server-side</div>';
       });
+      // LEVEL 7 — analytics: regime/breadth engine feeds the pulse meta.
+      API.get("breadth").then(function (r) {
+        if (!el("d-breadth") || !r.body || !r.body.data) return;
+        var b = r.body.data;
+        el("d-breadth").innerHTML += '<div class="prov">Regime breadth: ' + F.esc(b.advancers || 0) + " up / " +
+          F.esc(b.decliners || 0) + " down · coverage " + F.esc(b.coverage_pct || 0) + "% (" + F.esc(b.coverage_note || "") + ")</div>";
+      }).catch(function () { /* breadth is additive */ });
     }
     function loadWl() {
       if (!el("d-wl")) return;

@@ -137,15 +137,17 @@ def c_providers(ctx):
     code, body = http_json(ctx["base"], "/api/providers")
     assert code == 200 and body.get("ok"), body
     ids = [p["id"] for p in body.get("providers", [])]
-    for want in ("yahoo", "alphavantage", "twelvedata", "nse", "tradingview"):
+    for want in ("yahoo", "alphavantage", "twelvedata", "nse", "tradingview", "upstox"):
         assert want in ids, body
     assert body.get("chain", {}).get("quote") == [
+        "upstox",
         "indian-api",
         "yahoo",
         "twelvedata",
         "alphavantage",
     ], body
     assert body.get("chain", {}).get("history") == [
+        "upstox",
         "yahoo",
         "stooq",
         "twelvedata",
@@ -279,7 +281,9 @@ def main(argv):
             fn(ctx)
             print(f"PASS  {name}")
         except Exception as e:  # noqa: BLE001
-            print(f"FAIL  {name}: {e}")
+            # Console-safe: bodies may carry non-ASCII (e.g. arrows in
+            # provider detail text) on cp1252 Windows consoles.
+            print(f"FAIL  {name}: {str(e).encode('ascii', 'replace').decode()}"[:2000])
             failures.append(name)
     if httpd:
         httpd.shutdown()

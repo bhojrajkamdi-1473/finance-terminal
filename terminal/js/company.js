@@ -223,24 +223,26 @@
       el.onkeydown = function (ev) { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); open(); } };
     });
   }
-  /* Index metric strip: level context only — never stock multiples. */
+  /* Index metric strip: level context only — never stock multiples.
+     Missing index fields are omitted (no placeholder cells). */
   function paintIndexStrip(sym, q, env) {
     if (!E("cx-strip")) return;
     var hi = q.fifty_two_week_high, lo = q.fifty_two_week_low, px = q.price;
     var dist = (hi !== null && hi !== undefined && px !== null && px !== undefined && hi) ?
       ((px - hi) / hi * 100) : null;
     function cell(l, v, s) {
-      return '<div class="cx-m"><div class="l">' + l + '</div><div class="v">' + (v === null ? "—" : v) +
+      if (v === null || v === undefined) return "";
+      return '<div class="cx-m"><div class="l">' + l + '</div><div class="v">' + v +
         '</div><div class="s">' + esc(s || "") + "</div></div>";
     }
-    E("cx-strip").innerHTML =
+    var html =
       cell("Day high", (q.day_high === null || q.day_high === undefined) ? null : F.fmtNum(q.day_high), "index level") +
       cell("Day low", (q.day_low === null || q.day_low === undefined) ? null : F.fmtNum(q.day_low), "index level") +
       cell("52-week high", (hi === null || hi === undefined) ? null : F.fmtNum(hi), "index level") +
       cell("52-week low", (lo === null || lo === undefined) ? null : F.fmtNum(lo), "index level") +
       cell("Distance from high", dist === null ? null : F.fmtPct(dist), "calculated") +
-      cell("Prev close", (q.previous_close === null || q.previous_close === undefined) ? null : F.fmtNum(q.previous_close), "index level") +
-      '<div id="cx-insp"></div>';
+      cell("Prev close", (q.previous_close === null || q.previous_close === undefined) ? null : F.fmtNum(q.previous_close), "index level");
+    E("cx-strip").innerHTML = html + '<div id="cx-insp"></div>';
   }
   function showInspector(info) {
     var host = E("cx-insp");
@@ -322,18 +324,39 @@
       E("cx-cmp").onclick = function () { location.hash = "#/compare"; try { sessionStorage.setItem("ft-cmp", sym); } catch (e) { /* ignore */ } };
       E("cx-pf").onclick = function () { openHoldingModal(sym, q); };
       if (secType(sym) === "INDEX") { paintIndexStrip(sym, q, qenv); return; }
-      API.get("ratios", { symbol: sym }).then(function (r) {
+      /* Centralized KPI engine first (single source of truth for every
+         surface); ratios/ratiosheet remain the fallback drill-down. */
+      API.get("kpi", { symbol: sym }).then(function (rk) {
         if (!E("cx-strip")) return;
-        var d = (r.body && r.body.data) || {};
-        paintStrip(sym, d, q, null);
-        /* Ratio sheet (REPORTED first, CALCULATED fill) upgrades the strip
-           when it arrives; reported cells never flicker to calculated. */
-        API.get("ratiosheet", { symbol: sym }).then(function (rs) {
+        var bundle = (rk.body && rk.body.data && rk.body.data.kpis) || null;
+        if (bundle) {
+          var d = {
+            MarketCapitalization: bundle.market_cap && bundle.market_cap.value,
+            PERatio: (bundle.pe && bundle.pe.value) || (bundle.pe_calc && bundle.pe_calc.value),
+            EPS: bundle.eps && bundle.eps.value,
+            ROE: bundle.roe && bundle.roe.value,
+            BookValue: bundle.book_value && bundle.book_value.value,
+            DividendYield: bundle.div_yield && bundle.div_yield.value,
+          };
+          var sheet = { display: {} };
+          ["roe", "roce", "roa", "op_margin", "net_margin", "debt_equity", "fcf"].forEach(function (kk) {
+            if (bundle[kk]) sheet.display[kk === "div_yield" ? "div_yield_calc" : kk] = bundle[kk];
+          });
+          if (bundle.pe_calc) sheet.display.pe_calc = bundle.pe_calc;
+          paintStrip(sym, d, q, sheet);
+          return;
+        }
+        return API.get("ratios", { symbol: sym }).then(function (r) {
           if (!E("cx-strip")) return;
-          var sheet = (rs.body && rs.body.data) || null;
-          if (sheet) paintStrip(sym, d, q, sheet);
-        }).catch(function () { /* strip already painted */ });
-      });
+          var d2 = (r.body && r.body.data) || {};
+          paintStrip(sym, d2, q, null);
+          API.get("ratiosheet", { symbol: sym }).then(function (rs) {
+            if (!E("cx-strip")) return;
+            var sh = (rs.body && rs.body.data) || null;
+            if (sh) paintStrip(sym, d2, q, sh);
+          }).catch(function () { /* strip already painted */ });
+        });
+      }).catch(function () { /* strip stays empty; section loaders continue */ });
     });
   }
   /* ---------------- right rail ---------------- */

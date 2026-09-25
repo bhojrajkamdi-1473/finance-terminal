@@ -37,6 +37,7 @@ from .stooq import StooqProvider
 from .tradingview import TradingViewProvider
 from .tradingview import authorization_scope as _tradingview_scope
 from .twelvedata import TwelveDataProvider, budget_snapshot
+from .upstox import UpstoxProvider
 from .yahoo import YahooMarketDataProvider
 from .yahoo_fundamentals import YahooFundamentalsProvider
 
@@ -48,12 +49,16 @@ _twelvedata = TwelveDataProvider()
 _alphavantage = AlphaVantageFundamentalsProvider()
 _stooq = StooqProvider()
 _tradingview = TradingViewProvider()
+_upstox = UpstoxProvider()
 
-# QUOTE chain: Indian leg first (passes non-Indian symbols through),
-# then Yahoo -> Twelve Data -> Alpha Vantage (scarce, 6 h cache).
-# The Indian leg answers keyed, else free no-auth quote/fundamentals.
+# QUOTE chain (field-level routing: Upstox first for ISIN-mapped
+# Indian names, else pass-through to Yahoo):
+#   upstox -> indian-api -> yahoo -> twelvedata -> alphavantage
+# Upstox legs return pass-through `unavailable` (never cooldown) when
+# the token is missing or the ISIN is unmapped, so chains are unaffected.
 market_data = FallbackMarketData(
     legs=[
+        ("upstox", _upstox),
         ("indian-api", _indianapi),
         ("yahoo", _yahoo),
         ("twelvedata", _twelvedata),
@@ -79,9 +84,11 @@ class _AvHistoryAdapter:
         return _alphavantage.get_daily_history(symbol)
 
 
-# HISTORY chain: Yahoo -> Stooq -> Twelve Data -> Alpha Vantage.
+# HISTORY chain: Upstox (ISIN-mapped depth) -> Yahoo -> Stooq ->
+# Twelve Data -> Alpha Vantage.
 history = FallbackMarketData(
     legs=[
+        ("upstox", _upstox),
         ("yahoo", _yahoo),
         ("stooq", _stooq),
         ("twelvedata", _twelvedata),
@@ -103,6 +110,7 @@ manager = ProviderManager(
     indianapi=_indianapi,
     twelvedata=_twelvedata,
     alphavantage=_alphavantage,
+    upstox=_upstox,
     news_rss=news,
     actions_yahoo=corporate_actions,
     yahoo_fund=_yahoo_fund,
@@ -118,6 +126,20 @@ def _configured(env_name: str) -> bool:
     return bool((os.environ.get(env_name) or "").strip())
 
 
+def _upstox_key() -> bool:
+    return bool((os.environ.get("UPSTOX_ANALYTICS_TOKEN") or "").strip())
+
+
+def _upstox_status_ok() -> bool:
+    try:
+        h = market_data.health().get("upstox", {}) if hasattr(market_data, "health") else {}
+    except Exception:
+        h = {}
+    if h.get("state") == "cooling":
+        return False
+    return _upstox_key()
+
+
 def providers_status() -> dict:
     """Settings -> Data Sources payload. Never exposes key values."""
     health = market_data.health() if hasattr(market_data, "health") else {}
@@ -130,10 +152,10 @@ def providers_status() -> dict:
     td_key = _configured("TWELVE_DATA_API_KEY")
     return {
         "chain": {
-            "quote": ["indian-api", "yahoo", "twelvedata", "alphavantage"],
-            "history": ["yahoo", "stooq", "twelvedata", "alphavantage"],
+            "quote": ["upstox", "indian-api", "yahoo", "twelvedata", "alphavantage"],
+            "history": ["upstox", "yahoo", "stooq", "twelvedata", "alphavantage"],
             "news": ["yahoo-rss", "alphavantage", "indian-api"],
-            "fundamentals": ["yahoo-fundamentals", "alphavantage", "twelvedata", "indian-api"],
+            "fundamentals": ["yahoo-fundamentals", "alphavantage", "twelvedata", "indian-api", "upstox"],
         },
         "providers": [
             {
@@ -231,6 +253,20 @@ def providers_status() -> dict:
                 "key_configured": True,
                 "capabilities": _base.describe(_stooq),
                 "health": hist_health.get("stooq", {}),
+            },
+            {
+                "id": "upstox",
+                "label": "Upstox",
+                "state": "connected" if _upstox_status_ok() else "key_missing",
+                "detail": "Official Upstox Developer APIs (server-side "
+                "UPSTOX_ANALYTICS_TOKEN): market-quote V3, "
+                "historical-candle V3, ISIN-keyed company fundamentals "
+                "(profile, ratios, statements, holdings, actions). "
+                "Analytics only; no trading. Missing key → pass-through.",
+                "key_required": True,
+                "key_configured": _upstox_key(),
+                "capabilities": _base.describe(_upstox),
+                "health": health.get("upstox", {}),
             },
             {
                 "id": "nse",

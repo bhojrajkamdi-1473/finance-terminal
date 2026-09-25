@@ -9,11 +9,12 @@ Run:
   python server.py [--port 8000]
 
 Env:
-  TERMINAL_DB            sqlite path (default ./terminal-data/terminal.db)
-  ALPHA_VANTAGE_API_KEY  optional fundamentals feed (never sent to client)
-  FUNDAMENTALS_API_KEY   alias for the above
-  TWELVE_DATA_API_KEY    optional quote/history feed (never sent to client)
-  INDIAN_STOCK_MARKET_API_KEY  optional: unlocks keyed NSE/BSE domains
+   TERMINAL_DB            sqlite path (default ./terminal-data/terminal.db)
+   UPSTOX_ANALYTICS_TOKEN server-side only Upstox analytics token (never sent to client)
+   ALPHA_VANTAGE_API_KEY  optional fundamentals feed (never sent to client)
+   FUNDAMENTALS_API_KEY   alias for the above
+   TWELVE_DATA_API_KEY    optional quote/history feed (never sent to client)
+   INDIAN_STOCK_MARKET_API_KEY  optional: unlocks keyed NSE/BSE domains
                                (statements, ownership, forecasts, news,
                                actions, history); without it the Indian leg
                                serves free quote + market fundamentals
@@ -168,6 +169,7 @@ def _secret_values() -> list[str]:
     # INDIAN_STOCK_MARKET_API_KEY is legacy (Indian leg is no-auth now)
     # but stays redacted in case a stale value lingers in the environment.
     for _secret_name in (
+        "UPSTOX_ANALYTICS_TOKEN",
         "ALPHA_VANTAGE_API_KEY",
         "FUNDAMENTALS_API_KEY",
         "TWELVE_DATA_API_KEY",
@@ -247,6 +249,20 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_valuation(qs)
         if path == "/api/ratiosheet":
             return self._handle_ratio_sheet(qs)
+        if path == "/api/kpi":
+            symbol = (qs.get("symbol", [""])[0] or "").strip().upper()
+            if not symbol:
+                return _send_json(
+                    self,
+                    {"status": "error", "source": "terminal", "message": "symbol required"},
+                    400,
+                )
+            env = registry.manager.get_kpi_bundle(symbol)
+            return _send_json(self, env, _envelope_status(env))
+        if path == "/api/data-matrix":
+            from services import kpi as _kpi
+
+            return _send_json(self, {"ok": True, "matrix": _kpi.FIELD_PROVIDERS})
         if path == "/api/news":
             try:
                 limit = int(qs.get("limit", ["20"])[0] or 20)

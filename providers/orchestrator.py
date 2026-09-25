@@ -126,6 +126,19 @@ CAPABILITIES: dict[str, dict[str, bool]] = {
         "news": False,
         "holdings": False,
     },
+    "upstox": {
+        "quote": True,  # ISIN-mapped Indian names + NSE_INDEX keys
+        "history": True,  # historical-candle V3 (daily/weekly/monthly)
+        "search": False,  # terminal symbol map; no Upstox lookup
+        "profile": True,  # ISIN-keyed company profile
+        "statements": True,  # ISIN-keyed income/balance/cashflow
+        "valuation": True,  # ISIN-keyed key ratios
+        "estimates": False,
+        "earnings": False,
+        "actions": True,  # ISIN-keyed corporate actions
+        "news": False,  # Yahoo RSS + AV remain superior for news
+        "holdings": True,  # ISIN-keyed shareholding patterns
+    },
 }
 
 
@@ -144,6 +157,7 @@ class ProviderManager:
         indianapi=None,
         twelvedata=None,
         alphavantage=None,
+        upstox=None,
         news_rss=None,
         actions_yahoo=None,
         yahoo_fund=None,
@@ -154,6 +168,7 @@ class ProviderManager:
         self.indianapi = indianapi
         self.twelvedata = twelvedata
         self.alphavantage = alphavantage
+        self.upstox = upstox
         self.news_rss = news_rss
         self.actions_yahoo = actions_yahoo
         self.yahoo_fund = yahoo_fund
@@ -331,8 +346,11 @@ class ProviderManager:
 
     # -- domains --------------------------------------------------------------
     def get_quote(self, symbol: str) -> dict:
-        """Multi-source quote: Yahoo + Indian (Indian symbols) + Twelve
-        Data (key + budget). Primary by Yahoo > indian > twelvedata."""
+        """Multi-source quote (field-level routing): Upstox first for
+        ISIN-mapped Indian names (exchange-native), then Indian leg,
+        Yahoo (global breadth), Twelve Data (budget-guarded).
+        Primary = first live leg with a price; reconciliation compares
+        price/change_pct/volume across all live legs. Never averaged."""
         from providers.indian import is_indian
 
         symbol = (symbol or "").strip().upper()
@@ -341,6 +359,13 @@ class ProviderManager:
         def compute() -> dict:
             calls: list[tuple[str, Callable[[], dict]]] = []
             skipped: list[dict] = []
+            # Field-level routing: Upstox first (ISIN-mapped Indian
+            # snapshot is exchange-native and superior where available;
+            # pass-through unavailable otherwise — never blocks).
+            if self.upstox is not None:
+                calls.append(("upstox", lambda: self.upstox.get_quote(symbol)))
+            else:
+                skipped.append({"provider": "upstox", "reason": "Leg not wired."})
             if self.yahoo is not None:
                 calls.append(("yahoo", lambda: self.yahoo.get_quote(symbol)))
             else:
@@ -365,7 +390,7 @@ class ProviderManager:
                     {"provider": "twelvedata", "reason": reason or "Leg not wired."}
                 )
             results = self._fanout(key + ":fan", QUOTE_TTL, calls)
-            order = ["yahoo", "indian-api", "twelvedata", "alphavantage"]
+            order = ["upstox", "yahoo", "indian-api", "twelvedata", "alphavantage"]
             live = [
                 (n, e)
                 for n in order
@@ -797,16 +822,25 @@ class ProviderManager:
                         "reason": in_reason or "Leg not wired.",
                     }
                 )
+            # Upstox ISIN-keyed ratios join valuation fan-out (field-level
+            # routing: superior for Indian names when the token is set;
+            # pass-through otherwise).
+            if self.upstox is not None:
+                calls.append(("upstox", lambda: self.upstox.get_ratios(symbol)))
+            else:
+                skipped.append({"provider": "upstox", "reason": "Leg not wired."})
             results = self._fanout(key + ":fan", VALUATION_TTL, calls)
             av = results.get("alphavantage", {})
             td = results.get("twelvedata", {})
             inapi = results.get("indian-api", {})
             yf = results.get("yahoo-fundamentals", {})
+            ux = results.get("upstox", {})
             av_d = av.get("data") if _ok(av) else {}
             td_d = td.get("data") if _ok(td) else {}
             in_d = inapi.get("data") if _ok(inapi) else {}
             y_d = yf.get("data") if _ok(yf) else {}
-            if not av_d and not td_d and not in_d and not y_d:
+            ux_d = ux.get("data") if _ok(ux) else {}
+            if not av_d and not td_d and not in_d and not y_d and not ux_d:
                 miss = _honest_unavailable("valuation", results, skipped)
                 miss["message"] = (
                     "Valuation could not be answered by any provider "
@@ -1599,9 +1633,68 @@ class ProviderManager:
                     f"symbols; '{symbol}' was skipped (never guessed).",
                     "providers_queried": ["indian-api:skipped"],
                 }
+            # Upstox ISIN-keyed holdings win where available (superior
+            # source for Indian ownership); fall back to Indian leg.
+            if self.upstox is not None:
+                try:
+                    ux = self.upstox.get_shareholding(symbol)
+                    if _ok(ux):
+                        return ux
+                except Exception:
+                    pass
             return leg.get_shareholding(symbol)
 
         return self._cached_or(key, ACTIONS_TTL, compute)
+
+    def get_kpi_bundle(self, symbol: str) -> dict:
+        """Centralized KPI engine: ONE normalized bundle for a symbol.
+
+        Merges quote + valuation overview + ratio-engine computed
+        values via services/kpi.py. The same bundle backs the stock
+        page, compare, screener and research — values MUST match
+        everywhere. Missing metrics are OMITTED (no key), never None.
+        """
+        from services import kpi as _kpi
+
+        symbol = (symbol or "").strip().upper()
+        key = f"okpi:{symbol}"
+
+        def compute() -> dict:
+            quote_env = self.get_quote(symbol)
+            q = (quote_env.get("data") or {}) if quote_env.get("data") else {}
+            val_env = self.get_valuation(symbol, quote_env)
+            overview = ((val_env.get("data") or {}).get("overview") or {}) if val_env.get("status") == "live" else {}
+            computed: dict = {}
+            try:
+                ratio_env = self.get_ratio_sheet(symbol)
+                if ratio_env.get("status") == "live":
+                    computed = ((ratio_env.get("data") or {}).get("computed") or {})
+                    display = ((ratio_env.get("data") or {}).get("display") or {})
+                    for kk, vv in display.items():
+                        computed.setdefault(kk, vv)
+            except Exception:
+                computed = {}
+            bundle = _kpi.build_kpi_bundle(
+                symbol=symbol, quote=q, overview=overview,
+                computed=computed,
+                currency=overview.get("Currency") or overview.get("currency") or q.get("currency"),
+            )
+            live = bool(bundle.get("kpis"))
+            return {
+                "status": "live" if live else "unavailable",
+                "source": "terminal-kpi-engine",
+                "as_of": val_env.get("as_of") or quote_env.get("as_of"),
+                "timeliness": quote_env.get("timeliness") or "DELAYED",
+                "data": bundle if live else None,
+                "message": None if live else "No KPI provider answered for this symbol.",
+                "providers_queried": list(dict.fromkeys(
+                    (quote_env.get("providers_queried") or [])
+                    + (val_env.get("providers_queried") or []))),
+                "quote_status": quote_env.get("status"),
+                "valuation_status": val_env.get("status"),
+            }
+
+        return self._cached_or(key, VALUATION_TTL, compute)
 
 
 def _ok(env: dict) -> bool:
