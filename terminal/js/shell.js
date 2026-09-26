@@ -91,7 +91,8 @@
     var buckets = null, gmp = null, sub = null, calStatus = null, calMsg = null;
     API.get("ipo").then(function (r) {
       var b = r.body || {};
-      buckets = b.buckets || null; gmp = b.gmp || null; sub = b.subscription || null;
+      var D = b.data || b; // live envelope nests rows/buckets/gmp under data
+      buckets = D.buckets || null; gmp = D.gmp || null; sub = D.subscription || null;
       calStatus = b.status; calMsg = b.message;
       paint("Upcoming");
     });
@@ -155,7 +156,11 @@
       var rows = tab === "Calendar"
         ? Object.keys(buckets).reduce(function (a, k) { return a.concat(buckets[k]); }, [])
         : (buckets[tab.toLowerCase()] || []);
-      rows = rows.filter(function (w) { return (w.name || w.company || w.symbol || w.ticker); });
+      /* Drop parser-junk rows (e.g. single-char AV calendar artifacts). */
+      rows = rows.filter(function (w) {
+        var nm = w.name || w.company || w.symbol || w.ticker || "";
+        return String(nm).length >= 2;
+      });
       if (!rows.length) {
         host.innerHTML = "<div class='cx-note'>No " + esc(tab.toLowerCase()) + " IPOs right now.</div>";
         return;
@@ -538,9 +543,10 @@
         if (sec) sec.style.display = "none";
         else host.innerHTML = "";
       }
-      var b = (r.body || {}).buckets || null;
-      if (!b) { hideIPO(); return; }
-      function n(k) { return (b[k] || []).length; }
+      var b = ((r.body || {}).data) || r.body || {};
+      var bk = b.buckets || null;
+      if (!bk) { hideIPO(); return; }
+      function n(k) { return (bk[k] || []).length; }
       var cells = [];
       if (n("open")) cells.push({ label: "Open", value: n("open") });
       if (n("upcoming")) cells.push({ label: "Upcoming", value: n("upcoming") });
