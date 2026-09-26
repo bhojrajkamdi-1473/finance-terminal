@@ -67,9 +67,9 @@
             var it = by[p[0]], q = (it && it.quote) || {};
             if (q.price === null || q.price === undefined) return "";
             var cls = (window.FT_FMT ? window.FT_FMT.dirClass(q.change_pct) : "");
-            var pct = (window.FT_FMT ? window.FT_FMT.fmtPct(q.change_pct) : "");
-            return '<span class="ms"><b>' + p[1] + "</b> " + esc(String(q.price)) +
-              ' <span class="' + cls + '">' + pct + "</span></span>";
+            var pct = (q.change_pct === null || q.change_pct === undefined) ? ""
+              : ' <span class="' + cls + '">' + (window.FT_FMT ? window.FT_FMT.fmtPct(q.change_pct) : "") + "</span>";
+            return '<span class="ms"><b>' + p[1] + "</b> " + esc(String(q.price)) + pct + "</span>";
           }).join("");
         }).catch(function () { /* strip stays empty; never blocks */ });
       }
@@ -362,7 +362,9 @@
         });
         host.innerHTML = cells.join("");
         var src = items.filter(function (it) { return V.hasV(it.price); })[0] || {};
-        $("d-indsrc").innerHTML = V.srcLine({ label: "Market data", source: "yahoo", timeliness: "delayed", asOf: src.as_of });
+        $("d-indsrc").innerHTML = src.as_of
+          ? "<div class='src'>Same Yahoo feed · " + esc2(String(src.as_of).slice(0, 10)) + "</div>"
+          : "";
       }).catch(function () { if ($("d-ind")) $("d-ind").innerHTML = ""; });
     }
     function paintPulse() {
@@ -371,13 +373,20 @@
       var cells = [];
       SPARK_IDX.forEach(function (p, ix) {
         var v = q(p[0]);
-        if (!V.hasV(v.price)) return;
+        if (!V.hasV(v.price) && !(hists[p[0]] || []).length) return;
+        /* Fallback: quote leg often ships price without change_pct for
+           indices — derive 1D return from verified history instead of
+           printing a dash. */
+        var pct = V.hasV(v.change_pct) ? v.change_pct : ret(hists[p[0]] || [], 1);
+        var pctHtml = (pct === null || pct === undefined)
+          ? ""
+          : "<div class='" + F.dirClass(pct) + "' style='font-weight:650'>" + F.fmtPct(pct) + "</div>";
         cells.push("<div class='pcell'><div class='pnm'>" + p[1] + "</div>" +
-          "<div class='pvl'>" + F.fmtNum(v.price) + "</div>" +
-          "<div class='" + F.dirClass(v.change_pct) + "' style='font-weight:650'>" + F.fmtPct(v.change_pct) + "</div>" +
+          "<div class='pvl'>" + F.fmtNum(v.price !== undefined && v.price !== null ? v.price : (hists[p[0]] || []).slice(-1)[0]) + "</div>" +
+          pctHtml +
           "<canvas class='spark' id='sp-" + ix + "' aria-hidden='true'></canvas></div>");
       });
-      host.innerHTML = cells.join("");
+      host.innerHTML = cells.join("") || "<div class='cx-note'>Index quotes unavailable.</div>";
       var first = q("^NSEI");
       $("d-pulsesrc").innerHTML = V.srcLine({ label: "Market data", source: "yahoo", timeliness: "delayed", asOf: first.as_of });
       paintPulseSparks();
@@ -390,7 +399,7 @@
       });
     }
     function paintHist() {
-      paintPulseSparks();
+      paintPulse();
       var host = $("d-perf");
       if (host) {
         var rows = [];
@@ -442,11 +451,19 @@
         var nq = q("^NSEI");
         var hi = nq.fifty_two_week_high, lo = nq.fifty_two_week_low, px = nq.price;
         var pos = (hi && lo && px && hi !== lo) ? Math.round((px - lo) / (hi - lo) * 100) : null;
-        st.innerHTML = V.kpiStrip([
-          { label: "52-week high", value: V.hasV(hi) ? F.fmtNum(hi) : null },
-          { label: "52-week low", value: V.hasV(lo) ? F.fmtNum(lo) : null },
-          { label: "Position in range", value: pos === null ? null : pos + "%" },
-        ]) + (pos !== null ? "<p class='interp'>Nifty 50 sits " + pos + "% up its 52-week range.</p>" : "");
+        if (pos === null) {
+          /* No 52W band from the feed — hide the section instead of
+             rendering an empty card. */
+          var sec = st.closest ? st.closest("section") : null;
+          if (sec) sec.style.display = "none";
+          else st.innerHTML = "";
+        } else {
+          st.innerHTML = V.kpiStrip([
+            { label: "52-week high", value: F.fmtNum(hi) },
+            { label: "52-week low", value: F.fmtNum(lo) },
+            { label: "Position in range", value: pos + "%" },
+          ]) + "<p class='interp'>Nifty 50 sits " + pos + "% up its 52-week range.</p>";
+        }
       }
     }
     function moverRows(list) {
@@ -460,14 +477,22 @@
     function paintMovers() {
       var eq = Object.keys(quotes).map(function (s) { return quotes[s]; })
         .filter(function (i) { return i.quote && V.hasV(i.quote.price) && i.symbol.charAt(0) !== "^" && !/NIFTY_FIN/.test(i.symbol); });
+      /* India-first: NSE/BSE names lead every list, US/global fill below.
+         The old single sort buried India under META/MSFT/TSLA. */
+      function isIN(i) { return /\.NS$|\.BO$/.test(i.symbol); }
+      function inFirst(a, b, cmp) {
+        var r = cmp(a, b);
+        if (isIN(a) !== isIN(b)) return isIN(a) ? -1 : 1;
+        return r;
+      }
       function put(id, list, note) {
         var host = $(id);
         if (!host) return;
         host.innerHTML = list.length ? "<ul class='ranklist'>" + moverRows(list.slice(0, 6)) + "</ul>" + (note || "") : "";
       }
-      var gains = eq.slice().sort(function (a, b) { return (b.quote.change_pct || -1e9) - (a.quote.change_pct || -1e9); });
-      var losers = eq.slice().sort(function (a, b) { return (a.quote.change_pct || 1e9) - (b.quote.change_pct || 1e9); });
-      var vols = eq.slice().sort(function (a, b) { return (b.quote.volume || 0) - (a.quote.volume || 0); });
+      var gains = eq.slice().sort(function (a, b) { return inFirst(a, b, function (x, y) { return (y.quote.change_pct || -1e9) - (x.quote.change_pct || -1e9); }); });
+      var losers = eq.slice().sort(function (a, b) { return inFirst(a, b, function (x, y) { return (x.quote.change_pct || 1e9) - (y.quote.change_pct || 1e9); }); });
+      var vols = eq.slice().sort(function (a, b) { return inFirst(a, b, function (x, y) { return (y.quote.volume || 0) - (x.quote.volume || 0); }); });
       put("d-gain", gains.filter(function (i) { return (i.quote.change_pct || 0) > 0; }));
       put("d-lose", losers.filter(function (i) { return (i.quote.change_pct || 0) < 0; }));
       put("d-vol", vols, "<div class='cx-note'>By reported volume.</div>");
@@ -488,10 +513,16 @@
             " Tracked universe — a participation proxy, not full market breadth.") + "</p>";
       }
     }
-    API.get("news", { limit: 6 }).then(function (r) {
+    API.get("news", { limit: 20 }).then(function (r) {
       var host = $("d-news");
       if (!host) return;
       var items = (((r.body || {}).data) || {}).items || [];
+      /* India-first: the RSS feed skews US. NSE/RBI/SEBI stories lead. */
+      function isIN(n) {
+        return /nifty|sensex|nse\b|bse\b|rbi|sebi|rupee|india|adani|reliance|hdfc|infosys|tata/i.test(
+          (n.title || "") + " " + (n.summary || ""));
+      }
+      items = items.slice().sort(function (a, b) { return (isIN(b) ? 1 : 0) - (isIN(a) ? 1 : 0); });
       host.innerHTML = items.length ? items.slice(0, 6).map(function (n) {
         var t = n.url ? "<a href='" + esc2(n.url) + "' target='_blank' rel='noopener'>" + esc2(n.title || "") + "</a>" : esc2(n.title || "");
         var sum = n.summary ? esc2(String(n.summary).slice(0, 130)) : "";
@@ -502,13 +533,19 @@
     API.get("ipo").then(function (r) {
       var host = $("d-ipo");
       if (!host) return;
+      function hideIPO() {
+        var sec = host.closest ? host.closest("section") : null;
+        if (sec) sec.style.display = "none";
+        else host.innerHTML = "";
+      }
       var b = (r.body || {}).buckets || null;
-      if (!b) { host.innerHTML = ""; return; }
+      if (!b) { hideIPO(); return; }
       function n(k) { return (b[k] || []).length; }
       var cells = [];
       if (n("open")) cells.push({ label: "Open", value: n("open") });
       if (n("upcoming")) cells.push({ label: "Upcoming", value: n("upcoming") });
       if (n("listed")) cells.push({ label: "Listed", value: n("listed") });
+      if (!cells.length) { hideIPO(); return; }
       host.innerHTML = V.kpiStrip(cells) + "<p class='interp'><a href='#/ipos'>Open IPO dashboard →</a></p>";
     });
   }
