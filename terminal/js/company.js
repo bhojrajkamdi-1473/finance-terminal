@@ -9,12 +9,12 @@
   /* 11 tabs restored — collapsing hid Charts/News/Earnings/Actions/
      Ownership/Estimates from nav with no in-tab replacement. Overflow
      scrolls horizontally (CSS) instead. */
-  var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings",
-    "News", "Actions", "Ownership", "Charts", "Technicals", "Research"];
+  var CTABS = ["Overview", "Financials", "Key Ratios", "Peers", "Charts", "Technicals",
+    "Research", "News", "Actions", "Ownership", "Valuation", "Estimates", "Earnings"];
   /* Indexes get their own tab set and metric model — never P/E, EPS,
      ROE cards. Every renderer below branches on secType(). */
   var INDEX_TABS = ["Overview", "News", "Charts", "Technicals", "Research"];
-  var STOCK_ONLY = { Financials: 1, Valuation: 1, Estimates: 1, Earnings: 1, Ownership: 1, Actions: 1 };
+  var STOCK_ONLY = { Financials: 1, "Key Ratios": 1, Peers: 1, Valuation: 1, Estimates: 1, Earnings: 1, Ownership: 1, Actions: 1 };
   function secType(sym, quote) { return window.FT_FMT.secType(sym, quote); }
   var timers = [];
   function later(ms, fn) { var id = setInterval(function () { fn(); }, ms); timers.push(id); }
@@ -149,7 +149,8 @@
     }
   }
   function paintPrice(q, env) {
-    E("cx-px").innerHTML = F.fmtNum(q.price) + " <small>" + esc(q.currency || "") + "</small>";
+    E("cx-px").innerHTML = F.fmtNum(q.price) + " <small>" + esc(q.currency || "") + "</small>" +
+      F.mark("stale", { source: env.source, status: env.timeliness || env.status, asOf: env.as_of });
     var c = E("cx-chg");
     if (c) c.innerHTML = '<span class="' + dir(q.change_pct) + '">' + F.fmtPct(q.change_pct) + "</span> " +
       '<span class="mut">(' + F.fmtNum(q.change) + " " + esc(q.currency || "") + ")</span>";
@@ -158,8 +159,6 @@
       var bits = [];
       var src = env.source ? F.srcName(env.source) : "";
       if (src && src !== "?") bits.push(src);
-      var st = env.timeliness || env.status || "";
-      if (/delay/i.test(st)) bits.push("delayed");
       var asof = String(env.as_of || "").slice(0, 10);
       if (/^\d{4}-\d{2}-\d{2}/.test(asof)) bits.push(asof);
       s.innerHTML = bits.length ? bits.map(esc).join(" · ") : "";
@@ -217,10 +216,11 @@
       STRIP_INFO[key] = n.info;
       var clickable = n.info ? " data-insp='" + key + "' role='button' tabindex='0' title='Open formula inspector: " +
         esc(n.info.formula || "") + "' style='cursor:pointer'" : "";
-      var sub = n.kind === "CALCULATED" ? "calculated" + ((n.info && n.info.variant) ? " · " + esc(n.info.variant) : "") : "";
-      return '<div class="cx-m"' + clickable + '><div class="l">' + c[0] + qBadge(n.kind) + '</div><div class="v">' + n.v +
+      var mk = n.kind === "CALCULATED" ? F.mark("calc", n.info) : F.mark("stale", n.info);
+      var sub = n.kind === "CALCULATED" ? ((n.info && n.info.variant) ? esc(n.info.variant) : "") : "";
+      return '<div class="cx-m"' + clickable + '><div class="l">' + c[0] + '</div><div class="v">' + n.v + mk +
         "</div>" + (sub ? "<div class='s'>" + sub + "</div>" : "") + "</div>";
-    }).join("") + '<div id="cx-insp"></div>';
+    }).join("") + '<div id="cx-insp"></div>' + F.legend({ stale: true, calc: true });
     Array.prototype.forEach.call(E("cx-strip").querySelectorAll("[data-insp]"), function (el) {
       function open() { showInspector(STRIP_INFO[el.getAttribute("data-insp")]); }
       el.onclick = open;
@@ -234,19 +234,20 @@
     var hi = q.fifty_two_week_high, lo = q.fifty_two_week_low, px = q.price;
     var dist = (hi !== null && hi !== undefined && px !== null && px !== undefined && hi) ?
       ((px - hi) / hi * 100) : null;
-    function cell(l, v, s) {
+    function cell(l, v, s, mkind) {
       if (v === null || v === undefined) return "";
       return '<div class="cx-m"><div class="l">' + l + '</div><div class="v">' + v +
+        (mkind ? F.mark(mkind, null) : "") +
         '</div><div class="s">' + esc(s || "") + "</div></div>";
     }
     var html =
-      cell("Day high", (q.day_high === null || q.day_high === undefined) ? null : F.fmtNum(q.day_high), "index level") +
-      cell("Day low", (q.day_low === null || q.day_low === undefined) ? null : F.fmtNum(q.day_low), "index level") +
-      cell("52-week high", (hi === null || hi === undefined) ? null : F.fmtNum(hi), "index level") +
-      cell("52-week low", (lo === null || lo === undefined) ? null : F.fmtNum(lo), "index level") +
-      cell("Distance from high", dist === null ? null : F.fmtPct(dist), "calculated") +
-      cell("Prev close", (q.previous_close === null || q.previous_close === undefined) ? null : F.fmtNum(q.previous_close), "index level");
-    E("cx-strip").innerHTML = html + '<div id="cx-insp"></div>';
+      cell("Day high", (q.day_high === null || q.day_high === undefined) ? null : F.fmtNum(q.day_high), "index level", "stale") +
+      cell("Day low", (q.day_low === null || q.day_low === undefined) ? null : F.fmtNum(q.day_low), "index level", "stale") +
+      cell("52-week high", (hi === null || hi === undefined) ? null : F.fmtNum(hi), "index level", "stale") +
+      cell("52-week low", (lo === null || lo === undefined) ? null : F.fmtNum(lo), "index level", "stale") +
+      cell("Distance from high", dist === null ? null : F.fmtPct(dist), "calculated", "calc") +
+      cell("Prev close", (q.previous_close === null || q.previous_close === undefined) ? null : F.fmtNum(q.previous_close), "index level", "stale");
+    E("cx-strip").innerHTML = html + '<div id="cx-insp"></div>' + F.legend({ stale: true, calc: true });
   }
   function showInspector(info) {
     var host = E("cx-insp");
@@ -312,7 +313,8 @@
         " " + marketPill(mkt) +
         (secType(sym) === "INDEX" ? " · Index" : "") +
         ((p.sector || p.industry) ? " · " + esc([p.sector, p.industry].filter(Boolean).join(" — ")) : "") + "</div></div></div>" +
-        '<div class="cx-pxrow"><div><div class="cx-px" id="cx-px">' + F.fmtNum(q.price) + " <small>" + esc(q.currency || "") + "</small></div>" +
+        '<div class="cx-pxrow"><div><div class="cx-px" id="cx-px">' + F.fmtNum(q.price) + " <small>" + esc(q.currency || "") + "</small>" +
+        F.mark("stale", { source: qenv.source, status: qenv.timeliness || qenv.status, asOf: qenv.as_of }) + "</div>" +
         '<div class="cx-chg" id="cx-chg"><span class="' + dir(q.change_pct) + '">' + F.fmtPct(q.change_pct) + "</span> " +
         '<span class="mut">(' + F.fmtNum(q.change) + " " + esc(q.currency || "") + ")</span></div>" +
         '<div class="cx-src" id="cx-srcline">' + badge(qenv.timeliness || qenv.status) + " " + esc(F.srcName(qenv.source)) + " · " + esc(day(qenv.as_of)) + "</div></div>" +
@@ -423,7 +425,8 @@
       return;
     }
     var R = {
-      Overview: tOverview, Financials: tFinancials, Valuation: tValuation,
+      Overview: tOverview, Financials: tFinancials, "Key Ratios": tKeyRatios,
+      Peers: tPeers, Valuation: tValuation,
       Estimates: tEstimates, Earnings: tEarnings, News: tNews, Actions: tActions,
       Ownership: tHoldings, Charts: tCharts, Technicals: tTechnicals, Research: tResearchNew,
     };
@@ -435,7 +438,7 @@
   function perf(sym, main) {
     /* Overview analyst dashboard. */
     main.innerHTML = '<div id="cx-ov-biz">' + skel(2) + '</div><div id="cx-ov-perf">' + skel(2) + '</div>' +
-      '<div id="cx-ov-tech">' + skel(2) + '</div><div id="cx-ov-ratio">' + skel(2) + '</div><div id="cx-ov-news">' + skel(3) + "</div>";
+      '<div id="cx-ov-tech">' + skel(2) + '</div><div id="cx-ov-ratio">' + skel(2) + '</div><div id="cx-ov-score">' + skel(3) + '</div><div id="cx-ov-news">' + skel(3) + "</div>";
     API.get("company", { symbol: sym }).then(function (r) {
       if (!E("cx-ov-biz")) return;
       var p = (r.body && r.body.data) || null;
@@ -481,6 +484,76 @@
         items.length ? items.slice(0, 5).map(newsRow).join("") + prov(r.body)
         : empty("Latest news", "No news items were returned for this security."));
     });
+    /* Scores & drivers (master spec §4, equity only): rule-based gauges +
+       cited pros/cons from VERIFIED inputs only. Every rule is printed;
+       gauges omit when their inputs are absent. Heuristic, not a rating. */
+    Promise.all([
+      API.get("ratios", { symbol: sym }),
+      API.get("analytics", { symbol: sym }),
+      API.get("shareholding", { symbol: sym }),
+    ]).then(function (rs) {
+      if (!E("cx-ov-score")) return;
+      var V = window.FT_VIZ;
+      var rr = (rs[0].body && rs[0].body.data) || {};
+      var an = (rs[1].body && rs[1].body.data) || null;
+      var sh = (rs[2].body && rs[2].body.data) || null;
+      function num(v) { return (v === null || v === undefined || v === "None" || isNaN(Number(v))) ? null : Number(v); }
+      var pe = num(rr.PERatio), sPe = num((rr.sector_benchmarks || {})["P/E"]);
+      var roe = num(rr.ROE), roa = num(rr.ReturnOnAssetsTTM);
+      var tt = an ? an.trend_template || {} : {};
+      var snap = an ? an.snapshot || {} : {};
+      var rsi = num(snap.rsi14);
+      var prom = null;
+      try {
+        var own = (sh && sh.ownership) || [];
+        for (var i = 0; i < own.length; i++) {
+          if (/promoter/i.test(own[i].category || "")) prom = num(own[i].percentage);
+        }
+      } catch (e) { prom = null; }
+      var gauges = [], pros = [], cons = [];
+      if (pe !== null && sPe) {
+        var rel = pe / sPe;
+        gauges.push({ label: "Valuation", score: Math.max(5, Math.min(95, Math.round(70 - (rel - 1) * 100))),
+          tag: rel <= 1 ? "At/below sector" : "Above sector",
+          note: "P/E " + pe.toFixed(1) + "x vs sector " + sPe.toFixed(1) + "x. Rule: 70 at parity, ±100pts per 1.0x relative gap." });
+        if (rel > 1.2) cons.push({ t: "con", text: "Priced above its sector multiple", cite: "P/E " + pe.toFixed(1) + "x vs sector " + sPe.toFixed(1) + "x" });
+        else if (rel <= 1) pros.push({ t: "pro", text: "Priced at or below its sector multiple", cite: "P/E " + pe.toFixed(1) + "x vs sector " + sPe.toFixed(1) + "x" });
+      }
+      if (roe !== null) {
+        var dScore = 50;
+        if (roe >= 15) dScore += 20; else if (roe >= 10) dScore += 10; else if (roe < 0) dScore -= 20;
+        gauges.push({ label: "Durability", score: Math.max(5, Math.min(95, dScore)),
+          tag: roe >= 15 ? "Strong returns" : roe >= 10 ? "Adequate returns" : "Weak returns",
+          note: "From reported ROE " + roe.toFixed(1) + "%. Rule: base 50; +20 ROE≥15, +10 ROE 10–15, −20 ROE<0." });
+        if (roe >= 15) pros.push({ t: "pro", text: "Strong return on equity", cite: "ROE " + roe.toFixed(1) + "%" });
+        else if (roe < 0) cons.push({ t: "con", text: "Negative return on equity", cite: "ROE " + roe.toFixed(1) + "%" });
+      }
+      if (tt.passed !== undefined && tt.total) {
+        var mScore = Math.round(tt.passed / tt.total * 100);
+        gauges.push({ label: "Momentum", score: mScore,
+          tag: (an.phase && an.phase.phase) || "Trend read",
+          note: "Trend-template " + tt.passed + "/" + tt.total + " from terminal analytics." });
+      }
+      if (prom !== null) {
+        var oScore = prom >= 40 && prom <= 70 ? 75 : prom > 70 ? 55 : prom >= 25 ? 60 : 45;
+        gauges.push({ label: "Ownership", score: oScore,
+          tag: prom > 70 ? "Concentrated" : prom >= 40 ? "Balanced" : "Dispersed",
+          note: "Promoter holding " + prom.toFixed(1) + "%. Rule: 40–70% = 75, >70% = 55, 25–40% = 60, <25% = 45." });
+        if (prom < 30) cons.push({ t: "con", text: "Low promoter holding", cite: "Promoters " + prom.toFixed(1) + "%" });
+        else if (prom >= 40 && prom <= 70) pros.push({ t: "pro", text: "Balanced promoter holding", cite: "Promoters " + prom.toFixed(1) + "%" });
+      }
+      if (rsi !== null) {
+        if (rsi > 70) cons.push({ t: "con", text: "Technically overbought on momentum", cite: "RSI-14 " + rsi.toFixed(1) });
+        else if (rsi < 30) pros.push({ t: "pro", text: "Oversold bounce setup on momentum", cite: "RSI-14 " + rsi.toFixed(1) });
+      }
+      if (!gauges.length && !pros.length && !cons.length) { E("cx-ov-score").innerHTML = ""; return; }
+      E("cx-ov-score").innerHTML = sec("Scores & drivers",
+        (gauges.length ? '<div class="gauges">' + gauges.map(V.gauge).join("") + "</div>" : "") +
+        V.prosCons(pros.slice(0, 4).concat(cons.slice(0, 4))) +
+        '<div class="cx-note">Rule-based read of verified KPIs — a heuristic starting point, not a rating. ' +
+        "Each driver cites its metric. Full inputs under Valuation &amp; Technicals.</div>" +
+        F.legend({ stale: true, calc: true }));
+    }).catch(function () { if (E("cx-ov-score")) E("cx-ov-score").innerHTML = ""; });
     /* Fundamental trend: reported revenue/PAT bars + deterministic read. */
     API.get("fundamentals", { symbol: sym, statement: "income", period: "annual" }).then(function (r) {
       var host = E("cx-main");
@@ -704,7 +777,7 @@
     }
     var head = '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Particulars (' + esc(unit) + ')</th>' +
       reps.map(function (r) { return '<th scope="col" class="num">' + esc(r.fiscalDateEnding || r.date || "") + "</th>"; }).join("") +
-        '<th scope="col" class="num">YoY</th></tr></thead><tbody>';
+        '<th scope="col" class="num">YoY ' + F.mark("calc", null) + '</th></tr></thead><tbody>';
     var used = {}, pri = "";
     STMT_PRIORITY.forEach(function (p, ix) {
       var k = stmtKey(reps[0], p[1].map(function (a) { return a.toLowerCase(); }));
@@ -728,7 +801,7 @@
         "<div class='cx-prov'>Actual reported periods only — never interpolated.</div></div>";
     }
     var out = sec(title, h +
-      '<div class="cx-prov">' + (ccy ? "Currency <b>" + esc(ccy) + "</b> · " : "") + 'figures in <b>' + esc(unit) + "</b> · YoY shown only when mathematically valid.</div>" + prov(env));
+      '<div class="cx-prov">' + (ccy ? "Currency <b>" + esc(ccy) + "</b> · " : "") + 'figures in <b>' + esc(unit) + "</b> · YoY shown only when mathematically valid.</div>" + F.legend({ stale: true, calc: true }) + prov(env));
     if (title === "Income statement") {
       setTimeout(function () {
         var cv = document.getElementById(chartId);
@@ -798,6 +871,153 @@
     });
     go();
   }
+  /* Key Ratios tab (master spec §4): periods as columns, metrics as rows,
+     most-recent column bold, ‡ on computed rows, sector-average muted
+     sub-lines where benchmarks exist, info tooltips per metric. */
+  var KR_DEFS = {
+    "Revenue": "Total operating revenue for the period (reported).",
+    "Net profit": "Profit after tax for the period (reported).",
+    "Net margin": "Net profit ÷ revenue × 100 (terminal-calculated).",
+    "ROE": "Net profit ÷ average equity × 100 (terminal-calculated).",
+    "Debt / Equity": "Total debt ÷ shareholder equity (terminal-calculated).",
+  };
+  function tKeyRatios(sym, main) {
+    main.innerHTML = '<div id="cx-kr">' + skel(5) + "</div>";
+    function pick(rep, keys) {
+      for (var i = 0; i < keys.length; i++) {
+        var v = rep[keys[i]];
+        if (v !== undefined && v !== null && v !== "None" && !isNaN(Number(v))) return Number(v);
+      }
+      return null;
+    }
+    Promise.all([
+      API.get("fundamentals", { symbol: sym, statement: "income", period: "annual" }),
+      API.get("fundamentals", { symbol: sym, statement: "balance", period: "annual" }),
+      API.get("ratios", { symbol: sym }),
+    ]).then(function (rs) {
+      if (!E("cx-kr")) return;
+      var inc = (((rs[0].body || {}).data || {}).reports) || [];
+      var bal = (((rs[1].body || {}).data || {}).reports) || [];
+      var renv = rs[2].body || {}, r = renv.data || {};
+      function per(x) { return String(x.fiscalDateEnding || x.date || x.period || ""); }
+      var byP = {};
+      inc.forEach(function (x) {
+        var p = per(x); if (!p) return;
+        (byP[p] = byP[p] || {}).rev = pick(x, ["totalRevenue", "revenue", "revenues", "sales"]);
+        byP[p].pat = pick(x, ["netIncome", "net_income", "netEarnings", "profitAfterTax"]);
+      });
+      bal.forEach(function (x) {
+        var p = per(x); if (!p) return;
+        (byP[p] = byP[p] || {}).eq = pick(x, ["totalShareholderEquity", "totalEquity", "equity"]);
+        byP[p].debt = pick(x, ["totalDebt", "totDebt", "interestBearingDebt"]);
+      });
+      var periods = Object.keys(byP).sort().reverse().slice(0, 5);
+      if (!periods.length) {
+        E("cx-kr").innerHTML = sec("Key ratios", empty("Key ratios", "No annual statement history to build multi-year ratios."));
+        return;
+      }
+      function fmtV(v, kind) {
+        if (v === null || v === undefined) return "—";
+        return kind === "pct" ? v.toFixed(1) + "%" : kind === "x" ? v.toFixed(2) + "x" : F.fmtNum(v);
+      }
+      function row(label, vals, mark, def) {
+        return "<tr><td title='" + esc(def || "") + "'>" + esc(label) + "</td>" + vals.map(function (c, i) {
+          return "<td class='num'" + (i === 0 ? " style='font-weight:700'" : "") + ">" +
+            (c === null ? "—" : fmtV(c.v, c.k) + (mark ? F.mark(mark, null) : "")) + "</td>";
+        }).join("") + "</tr>";
+      }
+      var rev = periods.map(function (p) { var v = byP[p].rev; return v === null || v === undefined ? null : { v: v }; });
+      var pat = periods.map(function (p) { var v = byP[p].pat; return v === null || v === undefined ? null : { v: v }; });
+      var mg = periods.map(function (p) {
+        var o = byP[p];
+        if (o.rev === null || o.rev === undefined || o.pat === null || o.pat === undefined || !o.rev) return null;
+        return { v: o.pat / o.rev * 100, k: "pct" };
+      });
+      var roe = periods.map(function (p, i) {
+        var o = byP[p], nxt = byP[periods[i + 1]];
+        var e1 = o.eq, e0 = nxt ? nxt.eq : null;
+        if (o.pat === null || o.pat === undefined || e1 === null || e1 === undefined) {
+          if (e0 === null || e0 === undefined) return null;
+        }
+        var avg = (e0 !== null && e0 !== undefined) ? (e1 + e0) / 2 : e1;
+        if (!avg) return null;
+        return { v: o.pat / avg * 100, k: "pct" };
+      });
+      var de = periods.map(function (p) {
+        var o = byP[p];
+        if (o.debt === null || o.debt === undefined || o.eq === null || o.eq === undefined || !o.eq) return null;
+        return { v: o.debt / o.eq, k: "x" };
+      });
+      var bench = r.sector_benchmarks || {};
+      var sub = [];
+      if (bench["P/E"] !== undefined && bench["P/E"] !== null) sub.push("P/E sector avg " + Number(bench["P/E"]).toFixed(1) + "x");
+      if (bench.ROE !== undefined && bench.ROE !== null) sub.push("ROE sector avg " + Number(bench.ROE).toFixed(1) + "%");
+      E("cx-kr").innerHTML = sec("Key ratios",
+        '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Metric</th>' +
+        periods.map(function (p) { return "<th scope='col' class='num'>" + esc(p.slice(0, 7)) + "</th>"; }).join("") +
+        "</tr></thead><tbody>" +
+        row("Revenue", rev, "stale", KR_DEFS.Revenue) +
+        row("Net profit", pat, "stale", KR_DEFS["Net profit"]) +
+        row("Net margin", mg, "calc", KR_DEFS["Net margin"]) +
+        row("ROE", roe, "calc", KR_DEFS.ROE) +
+        row("Debt / Equity", de, "calc", KR_DEFS["Debt / Equity"]) +
+        "</tbody></table></div>" +
+        (sub.length ? "<div class='cx-note'>" + esc(sub.join(" · ")) + " (sector benchmarks where supplied).</div>" : "") +
+        F.legend({ stale: true, calc: true }) + prov(renv));
+    }).catch(function () {
+      if (E("cx-kr")) E("cx-kr").innerHTML = sec("Key ratios", err());
+    });
+  }
+  function tPeers(sym, main) {
+    var saved = "";
+    try { saved = sessionStorage.getItem("ft-peers") || ""; } catch (e) { /* ignore */ }
+    main.innerHTML = sec("Peers",
+      "<div class='sub'>No automatic peer universe exists — enter symbols to compare side by side. " +
+      "Nothing here is ranked and nothing wins.</div>" +
+      "<div class='card sect'><div class='row'><input id='peer-in' class='in' aria-label='Peer symbols, comma separated' " +
+      "placeholder='e.g. INFY.NS, WIPRO.NS' style='flex:1;min-width:200px' value='" + esc(saved || sym) + "'>" +
+      "<button class='btn primary' id='peer-go'>Load peers</button>" +
+      "<button class='btn sm' id='peer-cmp'>Open in Compare →</button></div>" +
+      "<div id='peer-out' style='margin-top:10px'></div></div>");
+    function go() {
+      var list = ($("peer-in").value || "").split(",").map(function (s) { return s.trim().toUpperCase(); })
+        .filter(Boolean).slice(0, 4);
+      try { sessionStorage.setItem("ft-peers", list.join(", ")); } catch (e) { /* ignore */ }
+      if (!list.length) return;
+      $("peer-out").innerHTML = skel(4);
+      Promise.all(list.map(function (s) {
+        return Promise.all([API.get("quote", { symbol: s }), API.get("ratios", { symbol: s })]).then(function (rs) {
+          return { s: s, q: (rs[0].body && rs[0].body.data) || {}, r: (rs[1].body && rs[1].body.data) || {} };
+        }).catch(function () { return { s: s, q: {}, r: {} }; });
+      })).then(function (rows) {
+        if (!$("peer-out")) return;
+        function cell(v, fmt) {
+          if (v === undefined || v === null || v === "None" || isNaN(Number(v))) return "—";
+          return fmt(Number(v)) + F.mark("stale", null);
+        }
+        $("peer-out").innerHTML = '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Metric</th>' +
+          rows.map(function (x) {
+            return "<th scope='col' class='num'><a href='#/company/" + esc(x.s) + "'>" + esc(x.s) + "</a></th>";
+          }).join("") + "</tr></thead><tbody>" +
+          "<tr><td>Price</td>" + rows.map(function (x) {
+            return "<td class='num'>" + (x.q.price === undefined || x.q.price === null ? "—" : F.fmtNum(x.q.price) + F.mark("stale", null)) + "</td>";
+          }).join("") + "</tr>" +
+          "<tr><td>P/E</td>" + rows.map(function (x) { return "<td class='num'>" + cell(x.r.PERatio, function (v) { return v.toFixed(1) + "x"; }) + "</td>"; }).join("") + "</tr>" +
+          "<tr><td>EPS</td>" + rows.map(function (x) { return "<td class='num'>" + cell(x.r.EPS, function (v) { return F.fmtNum(v); }) + "</td>"; }).join("") + "</tr>" +
+          "<tr><td>ROE</td>" + rows.map(function (x) { return "<td class='num'>" + cell(x.r.ROE, function (v) { return v.toFixed(1) + "%"; }) + "</td>"; }).join("") + "</tr>" +
+          "<tr><td>ROCE</td>" + rows.map(function (x) { return "<td class='num'>" + cell(x.r.ROCE, function (v) { return v.toFixed(1) + "%"; }) + "</td>"; }).join("") + "</tr>" +
+          "<tr><td>Market cap</td>" + rows.map(function (x) { return "<td class='num'>" + cell(x.r.MarketCapitalization, function (v) { return F.fmtIN(v, x.q.currency || "INR"); }) + "</td>"; }).join("") + "</tr>" +
+          "</tbody></table></div>" + F.legend({ stale: true });
+      });
+    }
+    $("peer-go").onclick = go;
+    $("peer-in").onkeydown = function (e) { if (e.key === "Enter") go(); };
+    $("peer-cmp").onclick = function () {
+      try { sessionStorage.setItem("ft-cmp", sym); } catch (e) { /* ignore */ }
+      location.hash = "#/compare";
+    };
+    go();
+  }
   function tValuation(sym, main) {
     main.innerHTML = '<div id="cx-val">' + skel(5) + "</div>";
     Promise.all([API.get("ratios", { symbol: sym }), API.get("quote", { symbol: sym })]).then(function (rs) {
@@ -819,8 +1039,8 @@
         ["Dividend yield", r.DividendYield && r.DividendYield !== "None" ? r.DividendYield + "%" : null]];
       var h = sec("Valuation",
         '<div class="cx-facts">' + grid.filter(function (g) { return g[1] !== null; }).map(function (g) {
-          return "<div><dt>" + g[0] + "</dt><dd>" + g[1] + "</dd></div>";
-        }).join("") + "</div>" + prov(env) +
+          return "<div><dt>" + g[0] + "</dt><dd>" + g[1] + F.mark("stale", { source: env.source, status: env.status, asOf: env.as_of }) + "</dd></div>";
+        }).join("") + "</div>" + F.legend({ stale: true, calc: true }) + prov(env) +
         '<p class="cx-note">Peer comparison lives in the Compare workspace (no automatic peer universe, no rankings). ' +
         "<button class='cx-btn2' id='cx-peer'>Compare " + esc(sym) + " side-by-side →</button></p>");
       E("cx-val").innerHTML = h;
@@ -862,8 +1082,7 @@
           '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Ratio</th><th scope="col" class="num">Value</th><th scope="col">Quality</th><th scope="col">Detail</th></tr></thead><tbody>' +
           rows.map(function (n, ix) {
             return "<tr><td>" + esc(n.label) + (n.variant ? " <span class='cx-note'>(" + esc(n.variant) + ")</span>" : "") +
-              "</td><td class='num'>" + disp(n) + "</td><td><span class='cx-q cx-q-calc'>CALC</span></td>" +
-              "<td><button class='cx-btn2' data-calc='" + ix + "'>Formula</button></td></tr>";
+              "</td><td class='num'>" + disp(n) + " " + F.mark("calc", { source: "Terminal ratio engine", status: "Calculated", asOf: n.calculated_at }) + "</td><td>Formula inspector →</td><td><button class='cx-btn2' data-calc='" + ix + "'>Formula</button></td></tr>";
           }).join("") + "</tbody></table></div>" +
           '<div id="cx-calc-insp"></div><div class="cx-prov">Single canonical engine · click Formula for inputs, period, source, timestamp.</div>');
         E("cx-val").appendChild(el);
@@ -1036,7 +1255,9 @@
         return "<label class='cx-legend'><input type='checkbox' data-sma='" + p[0] + "'" + (p[1] ? " checked" : "") + "> SMA" + p[0] + "</label>";
       }).join("") + "</div></div>" +
       '<div class="chart-box"><canvas class="chart" id="cx-c" role="img" aria-label="Price history chart"></canvas><div class="chart-tip"></div></div>' +
-      '<div class="cx-prov" id="cx-cmeta"></div><div id="cx-cerr"></div>');
+      '<div class="cx-prov" id="cx-cmeta"></div>' +
+      '<div style="margin-top:8px"><button class="cx-btn2" id="cx-vt" aria-expanded="false">View as table</button></div>' +
+      '<div id="cx-vtwrap" class="vt-table" hidden></div><div id="cx-cerr"></div>');
     function smas() {
       var out = [];
       Array.prototype.forEach.call(main.querySelectorAll("[data-sma]"), function (c) { if (c.checked) out.push(Number(c.getAttribute("data-sma"))); });
@@ -1054,6 +1275,34 @@
         window.FT_CHART.drawPriceChart(E("cx-c"), d.bars, { sma: smas() });
         E("cx-cmeta").innerHTML = "Source <b>" + esc(F.srcName(r.body.source)) + "</b> · " + esc(d.bars.length) +
           " bars · as of <b>" + esc(day(r.body.as_of)) + "</b>";
+        (function () {
+          var tb = E("cx-vt"), tw = E("cx-vtwrap");
+          if (!tb || !tw || tb.getAttribute("data-bound")) return;
+          tb.setAttribute("data-bound", "1");
+          tb.onclick = function () {
+            var open = tw.hasAttribute("hidden");
+            tb.setAttribute("aria-expanded", open ? "true" : "false");
+            if (!open) { tw.setAttribute("hidden", ""); return; }
+            var rows = d.bars.map(function (b) {
+              var dt = "-";
+              try {
+                var dd = new Date(b.t * 1000);
+                if (!isNaN(dd)) dt = dd.toISOString().slice(0, 10);
+              } catch (e) { /* keep dash */ }
+              return "<tr><td>" + esc(dt) + "</td><td class='num'>" + F.fmtNum(b.o) + "</td>" +
+                "<td class='num'>" + F.fmtNum(b.h) + "</td><td class='num'>" + F.fmtNum(b.l) + "</td>" +
+                "<td class='num'>" + F.fmtNum(b.c) + "</td><td class='num'>" + (b.v === null || b.v === undefined ? "—" : F.fmtInt(b.v)) + "</td></tr>";
+            }).join("");
+            tw.innerHTML = '<div class="cx-scroll" style="margin-top:8px"><table class="cx-t"><caption class="cx-note" style="text-align:left">' +
+              "Source " + esc(F.srcName(r.body.source)) + " · status " + esc(r.body.timeliness || r.body.status || "") +
+              " · as of " + esc(day(r.body.as_of)) + "</caption>" +
+              "<thead><tr><th scope='col'>Date</th><th scope='col' class='num'>Open</th>" +
+              "<th scope='col' class='num'>High</th><th scope='col' class='num'>Low</th>" +
+              "<th scope='col' class='num'>Close</th><th scope='col' class='num'>Volume</th></tr></thead>" +
+              "<tbody>" + rows + "</tbody></table></div>";
+            tw.removeAttribute("hidden");
+          };
+        })();
       }).catch(function () { if (E("cx-cerr")) E("cx-cerr").innerHTML = err(); });
     }
     var cur = "1Y";

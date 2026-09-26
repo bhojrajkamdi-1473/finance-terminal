@@ -4,10 +4,10 @@
 (function () {
   "use strict";
   var C = {
-    grid: "#e7ebf0", ink: "#687182", up: "#18794e", dn: "#c03535",
-    upFill: "rgba(24,121,78,.14)", dnFill: "rgba(192,53,53,.14)",
-    volUp: "rgba(24,121,78,.30)", volDn: "rgba(192,53,53,.30)",
-    cross: "#9aa3af", smas: ["#1a56c4", "#9a6b12", "#6d4fc2"],
+    grid: "#e7ebf0", ink: "#5b6068", up: "#1a7f37", dn: "#c62828",
+    upFill: "rgba(26,127,55,.22)", dnFill: "rgba(198,40,40,.22)",
+    volUp: "rgba(26,127,55,.30)", volDn: "rgba(198,40,40,.30)",
+    cross: "#8a8f96", smas: ["#2563eb", "#9a6b12", "#0e7490"],
   };
   var C_DARK = {
     grid: "#1E2A45", ink: "#8A9BC0", up: "#00D68F", dn: "#FF4D6A",
@@ -68,7 +68,7 @@
     function y(v) { return padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB - volH); }
     // grid + y labels
     ctx.strokeStyle = C.grid; ctx.fillStyle = C.ink;
-    ctx.font = "10px 'IBM Plex Mono',Consolas,monospace"; ctx.lineWidth = 1;
+    ctx.font = "10px Inter,system-ui,sans-serif"; ctx.lineWidth = 1;
     for (var g = 0; g <= 4; g++) {
       var gv = lo + ((hi - lo) * g) / 4, gy = Math.round(y(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - padR, gy); ctx.stroke();
@@ -179,7 +179,7 @@
     vals.forEach(function (v, i) { if (i) ctx.lineTo(x(i), y(v)); else ctx.moveTo(x(i), y(v)); });
     ctx.stroke();
     ctx.lineTo(x(vals.length - 1), H); ctx.lineTo(x(0), H); ctx.closePath();
-    ctx.globalAlpha = 0.12; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
+    ctx.globalAlpha = 0.22; ctx.fillStyle = col; ctx.fill(); ctx.globalAlpha = 1;
   }
   /* Grouped bars: financial statement charts (revenue/EBITDA/PAT...). */
   function drawBars(canvas, groups, opts) {
@@ -211,7 +211,7 @@
     var zeroY = padT + (1 - (0 - mn) / span) * (H - padT - padB);
     function y(v) { return padT + (1 - (v - mn) / span) * (H - padT - padB); }
     ctx.strokeStyle = P.grid; ctx.fillStyle = P.ink;
-    ctx.font = "10px 'JetBrains Mono','IBM Plex Mono',Consolas,monospace"; ctx.lineWidth = 1;
+    ctx.font = "10px Inter,system-ui,sans-serif"; ctx.lineWidth = 1;
     for (var g = 0; g <= 3; g++) {
       var gv = mn + (span * g) / 3, gy = Math.round(y(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - 6, gy); ctx.stroke();
@@ -269,7 +269,7 @@
     function x(i, n) { return padL + (i / Math.max(n - 1, 1)) * (W - padL - 8); }
     function y(v) { return padT + (1 - (v - mn) / span) * (H - padT - padB); }
     ctx.strokeStyle = P.grid; ctx.fillStyle = P.ink;
-    ctx.font = "10px 'JetBrains Mono','IBM Plex Mono',Consolas,monospace"; ctx.lineWidth = 1;
+    ctx.font = "10px Inter,system-ui,sans-serif"; ctx.lineWidth = 1;
     for (var g = 0; g <= 3; g++) {
       var gv = mn + (span * g) / 3, gy = Math.round(y(gv)) + 0.5;
       ctx.beginPath(); ctx.moveTo(padL, gy); ctx.lineTo(W - 8, gy); ctx.stroke();

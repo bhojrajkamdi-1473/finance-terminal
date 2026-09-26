@@ -13,18 +13,59 @@
     return s !== "" && !/^(none|null|undefined|nan|-|n\/a|—)$/i.test(s);
   }
   function dir(v) { return window.FT_FMT.dirClass(v); }
-  /* KPI strip: cells {label, value, sub, tip}. Null values are dropped;
-     the strip reflows. Returns "" when nothing is showable. */
+  /* KPI strip: cells {label, value, sub, tip, mark("stale"|"calc"), info}.
+     Null values are dropped; the strip reflows. Returns "" when empty. */
   function kpiStrip(cells, opts) {
     opts = opts || {};
+    var F = window.FT_FMT;
     var live = (cells || []).filter(function (c) { return c && hasV(c.value); });
     if (!live.length) return "";
     return '<div class="kstrip' + (opts.big ? " big" : "") + '">' + live.map(function (c) {
+      var mk = c.mark === "stale" ? F.mark("stale", c.info)
+        : c.mark === "calc" ? F.mark("calc", c.info) : "";
       return '<div class="kpi"' + (c.tip ? " title='" + esc(c.tip) + "'" : "") + ">" +
         '<div class="k-l">' + esc(c.label || "") + "</div>" +
-        '<div class="k-v">' + c.value + "</div>" +
+        '<div class="k-v">' + c.value + mk + "</div>" +
         (hasV(c.sub) ? '<div class="k-s">' + c.sub + "</div>" : "") + "</div>";
     }).join("") + "</div>";
+  }
+  /* MetricTile (master spec §3): white card, label → value + inline
+     †/‡ mark → colored delta → full-width gradient sparkline.
+     t = {label, value(html), delta(html, may be ""), spark:[closes]|null,
+       up(bool), mark("stale"|"calc"|""), info{source,status,asOf},
+       tip(triplet string), compact(bool)}. Spark omitted entirely when
+     no history exists. */
+  var tileN = 0;
+  function metricTile(t) {
+    t = t || {};
+    if (!hasV(t.value) && !hasV(t.label)) return "";
+    var F = window.FT_FMT;
+    var mk = "";
+    if (t.mark === "stale") mk = F.mark("stale", t.info);
+    else if (t.mark === "calc") mk = F.mark("calc", t.info);
+    var spark = "";
+    if (t.spark && t.spark.length >= 2) {
+      var up = t.up !== false;
+      var col = up ? "var(--up)" : "var(--dn)";
+      spark = '<svg class="tile-spark" viewBox="0 0 100 28" preserveAspectRatio="none" aria-hidden="true">' +
+        '<defs><linearGradient id="tg' + (tileN++) + '" x1="0" y1="0" x2="0" y2="1">' +
+        '<stop offset="0" stop-color="' + (up ? "#1a7f37" : "#c62828") + '" stop-opacity="0.25"/>' +
+        '<stop offset="1" stop-color="' + (up ? "#1a7f37" : "#c62828") + '" stop-opacity="0"/></linearGradient></defs>' +
+        '<path d="' + sparkPath(t.spark) + '" fill="none" stroke="' + col + '" stroke-width="1.6"/>' +
+        '<path d="' + sparkPath(t.spark) + ' L 100 28 L 0 28 Z" fill="url(#tg' + (tileN - 1) + ')" stroke="none"/></svg>';
+    }
+    return '<div class="mtile' + (t.compact ? " compact" : "") + '"' +
+      (t.tip ? ' title="' + esc(t.tip) + '"' : "") + ">" +
+      '<div class="mt-l">' + esc(t.label || "") + "</div>" +
+      '<div class="mt-v">' + t.value + mk + "</div>" +
+      (hasV(t.delta) ? '<div class="mt-d">' + t.delta + "</div>" : "") + spark + "</div>";
+  }
+  function sparkPath(vals) {
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals), sp = hi - lo || 1;
+    return vals.map(function (v, i) {
+      var x = (i / (vals.length - 1)) * 100, y = 26 - ((v - lo) / sp) * 24;
+      return (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    }).join(" ");
   }
   /* Heatmap: equal tiles (no fabricated weights), color intensity from
      value through a neutral midpoint. Tooltip carries detail. */
@@ -80,8 +121,45 @@
   function emptyFeature(title, why) {
     return "<div class='cx-empty'><b>" + esc(title) + "</b><p>" + esc(why || "This feature has no verified data source right now.") + "</p></div>";
   }
+  /* Score gauge row (master spec §4): semi-circle red→yellow→green arc,
+     centered score, colored pill tag below. g = {label, score(0-100),
+     tag, note}. Omitted when score is absent — never a fabricated dial. */
+  function gauge(g) {
+    g = g || {};
+    var s = Number(g.score);
+    if (isNaN(s)) return "";
+    s = Math.max(0, Math.min(100, Math.round(s)));
+    var col = s >= 60 ? "var(--up)" : s >= 40 ? "var(--warn)" : "var(--dn)";
+    var arc = Math.PI * (s / 100);
+    var x2 = 50 + 40 * Math.cos(Math.PI - arc), y2 = 48 - 40 * Math.sin(Math.PI - arc);
+    var large = s > 50 ? 1 : 0;
+    return '<div class="gauge" title="' + esc(g.note || "") + '">' +
+      '<svg viewBox="0 0 100 52" aria-hidden="true">' +
+      '<path d="M 10 48 A 40 40 0 0 1 90 48" fill="none" stroke="var(--line-2)" stroke-width="9"/>' +
+      '<path d="M 10 48 A 40 40 0 0 1 ' + x2.toFixed(1) + " " + y2.toFixed(1) +
+      '" fill="none" stroke="' + col + '" stroke-width="9" stroke-linecap="round"/>' +
+      '<text x="50" y="42" text-anchor="middle" font-size="17" font-weight="700" fill="var(--ink)">' + s + "</text></svg>" +
+      '<div class="g-l">' + esc(g.label || "") + "</div>" +
+      (g.tag ? '<div class="g-tag" style="color:' + col + '">' + esc(g.tag) + "</div>" : "") + "</div>";
+  }
+  /* Pros & cons (master spec §4): plain two-column bullets, green/red
+     headings. items = [{t:"pro"|"con", text, cite}]. Every bullet cites
+     its metric — no uncited claims. */
+  function prosCons(items) {
+    var pros = (items || []).filter(function (i) { return i && i.t === "pro" && hasV(i.text); });
+    var cons = (items || []).filter(function (i) { return i && i.t === "con" && hasV(i.text); });
+    if (!pros.length && !cons.length) return "";
+    function li(i) {
+      return "<li>" + esc(i.text) +
+        (hasV(i.cite) ? ' <span class="pc-cite">(' + esc(i.cite) + ")</span>" : "") + "</li>";
+    }
+    return '<div class="proscons"><div><h4 class="pro-h">Strengths</h4><ul>' +
+      pros.map(li).join("") + "</ul></div>" +
+      '<div><h4 class="con-h">Concerns</h4><ul>' + cons.map(li).join("") + "</ul></div></div>";
+  }
   window.FT_VIZ = {
-    hasV: hasV, kpiStrip: kpiStrip, heatmap: heatmap, bars: bars,
+    hasV: hasV, kpiStrip: kpiStrip, metricTile: metricTile, gauge: gauge,
+    prosCons: prosCons, heatmap: heatmap, bars: bars,
     srcLine: srcLine, emptyFeature: emptyFeature, esc: esc, dir: dir,
   };
 })();

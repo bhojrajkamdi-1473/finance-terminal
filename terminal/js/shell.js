@@ -12,7 +12,7 @@
     ["OVERVIEW", ["dashboard", "markets"]],
     ["ANALYSIS", ["companies", "screener", "compare", "watchlist", "portfolio"]],
     ["RESEARCH", ["research", "earnings", "actions", "ipos", "news"]],
-    ["DATA", ["macro"]],
+    ["DATA", ["macro", "mfunds"]],
     ["TOOLS", ["status", "settings"]],
   ];
   function sectionize() {
@@ -44,32 +44,31 @@
       nav.appendChild(frag);
     } catch (e) { /* shell must never break nav */ }
   }
-  /* ---------- topbar market strip ---------- */
-  var STRIP = [["^NSEI", "NIFTY"], ["^BSESN", "SENSEX"], ["^GSPC", "S&P 500"]];
+  /* ---------- ticker strip (master spec §5): below header, independent
+     horizontal scroll, 6 indices, cells link to company pages ---------- */
+  var STRIP = [["^NSEI", "NIFTY 50"], ["^BSESN", "SENSEX"], ["^NSEBANK", "BANK NIFTY"],
+    ["^CNXIT", "NIFTY IT"], ["^GSPC", "S&P 500"], ["^IXIC", "NASDAQ"]];
   function strip() {
     try {
-      if ($("mstrip")) return;
-      var bar = document.querySelector("#topbar .topbar-right");
-      if (!bar || !window.FT_API) return;
-      var el = document.createElement("span");
-      el.id = "mstrip";
-      el.className = "mstrip";
-      el.setAttribute("aria-label", "Market status");
-      bar.insertBefore(el, bar.firstChild);
+      var host = $("tkstrip");
+      if (!host || !window.FT_API || host.getAttribute("data-run")) return;
+      host.setAttribute("data-run", "1");
       function load() {
-        var host = $("mstrip");
-        if (!host) return;
+        var h = $("tkstrip");
+        if (!h) return;
         window.FT_API.get("market-overview").then(function (r) {
           var items = ((r.body || {}).items) || [];
           var by = {};
           items.forEach(function (i) { by[i.symbol] = i; });
-          host.innerHTML = STRIP.map(function (p) {
+          h.innerHTML = STRIP.map(function (p) {
             var it = by[p[0]], q = (it && it.quote) || {};
             if (q.price === null || q.price === undefined) return "";
             var cls = (window.FT_FMT ? window.FT_FMT.dirClass(q.change_pct) : "");
             var pct = (q.change_pct === null || q.change_pct === undefined) ? ""
               : ' <span class="' + cls + '">' + (window.FT_FMT ? window.FT_FMT.fmtPct(q.change_pct) : "") + "</span>";
-            return '<span class="ms"><b>' + p[1] + "</b> " + esc(String(q.price)) + pct + "</span>";
+            return '<a class="tk-cell" href="#/company/' + encodeURIComponent(p[0]) + '">' +
+              '<span class="tk-n">' + p[1] + "</span>" +
+              '<span class="tk-v">' + esc(String(q.price)) + "</span>" + pct + "</a>";
           }).join("");
         }).catch(function () { /* strip stays empty; never blocks */ });
       }
@@ -346,7 +345,7 @@
           var bars = (((h.body || {}).data) || {}).bars || [];
           hists[s] = bars.map(function (b) { return b.c; });
           if (++done === needed.length) paintHist();
-          else paintPulseSparks();
+          else paintPulse();
         }).catch(function () { if (++done === needed.length) paintHist(); });
       });
     });
@@ -358,14 +357,20 @@
       API.get("indicators").then(function (r) {
         if (!$("d-ind")) return;
         var items = ((r.body || {}).items) || [];
-        var cells = [];
+        var tiles = [];
         items.forEach(function (it) {
           if (!V.hasV(it.price)) return;
-          cells.push("<div class='pcell'><div class='pnm'>" + esc2(it.label) + "</div>" +
-            "<div class='pvl'>" + F.fmtNum(it.price) + " <small>" + esc2(it.currency || "") + "</small></div>" +
-            "<div class='" + F.dirClass(it.change_pct) + "' style='font-weight:650'>" + F.fmtPct(it.change_pct) + "</div></div>");
+          tiles.push(V.metricTile({
+            label: it.label,
+            value: F.fmtNum(it.price) + (it.currency ? " <small>" + esc2(it.currency) + "</small>" : ""),
+            delta: "<span class='" + F.dirClass(it.change_pct) + "'>" + F.fmtPct(it.change_pct) + "</span>",
+            mark: "stale",
+            info: { source: "yahoo", status: "delayed", asOf: it.as_of },
+          }));
         });
-        host.innerHTML = cells.join("");
+        host.innerHTML = tiles.length
+          ? '<div class="mtiles">' + tiles.join("") + "</div>" + F.legend({ stale: true })
+          : "";
         var src = items.filter(function (it) { return V.hasV(it.price); })[0] || {};
         $("d-indsrc").innerHTML = src.as_of
           ? "<div class='src'>Same Yahoo feed · " + esc2(String(src.as_of).slice(0, 10)) + "</div>"
@@ -375,33 +380,35 @@
     function paintPulse() {
       var host = $("d-pulse");
       if (!host) return;
-      var cells = [];
-      SPARK_IDX.forEach(function (p, ix) {
-        var v = q(p[0]);
-        if (!V.hasV(v.price) && !(hists[p[0]] || []).length) return;
+      var tiles = [];
+      SPARK_IDX.forEach(function (p) {
+        var item = quotes[p[0]] || {};
+        var v = item.quote || {};
+        var cl = hists[p[0]] || [];
+        if (!V.hasV(v.price) && !cl.length) return;
         /* Fallback: quote leg often ships price without change_pct for
            indices — derive 1D return from verified history instead of
            printing a dash. */
-        var pct = V.hasV(v.change_pct) ? v.change_pct : ret(hists[p[0]] || [], 1);
-        var pctHtml = (pct === null || pct === undefined)
-          ? ""
-          : "<div class='" + F.dirClass(pct) + "' style='font-weight:650'>" + F.fmtPct(pct) + "</div>";
-        cells.push("<div class='pcell'><div class='pnm'>" + p[1] + "</div>" +
-          "<div class='pvl'>" + F.fmtNum(v.price !== undefined && v.price !== null ? v.price : (hists[p[0]] || []).slice(-1)[0]) + "</div>" +
-          pctHtml +
-          "<canvas class='spark' id='sp-" + ix + "' aria-hidden='true'></canvas></div>");
+        var pct = V.hasV(v.change_pct) ? v.change_pct : ret(cl, 1);
+        var px = (v.price !== undefined && v.price !== null) ? v.price : cl.slice(-1)[0];
+        tiles.push(V.metricTile({
+          label: p[1],
+          value: F.fmtNum(px),
+          delta: (pct === null || pct === undefined) ? "" :
+            "<span class='" + F.dirClass(pct) + "'>" + F.fmtPct(pct) + "</span>",
+          spark: cl.length >= 2 ? cl : null,
+          up: (pct === null || pct === undefined) ? (cl.length >= 2 ? cl[cl.length - 1] >= cl[0] : true) : pct >= 0,
+          mark: "stale",
+          info: { source: item.source || "yahoo", status: "delayed", asOf: v.as_of },
+          tip: p[1] + " · " + (item.source ? F.srcName(item.source) : "Yahoo Finance") + " · delayed" +
+            (v.as_of ? " · " + String(v.as_of).slice(0, 10) : ""),
+        }));
       });
-      host.innerHTML = cells.join("") || "<div class='cx-note'>Index quotes unavailable.</div>";
+      host.innerHTML = tiles.length
+        ? '<div class="mtiles">' + tiles.join("") + "</div>" + F.legend({ stale: true })
+        : "<div class='cx-note'>Index quotes unavailable.</div>";
       var first = q("^NSEI");
-      $("d-pulsesrc").innerHTML = V.srcLine({ label: "Market data", source: "yahoo", timeliness: "delayed", asOf: first.as_of });
-      paintPulseSparks();
-    }
-    function paintPulseSparks() {
-      SPARK_IDX.forEach(function (p, ix) {
-        var cv = $("sp-" + ix), cl = hists[p[0]];
-        if (!cv || !cl || cl.length < 5) return;
-        window.FT_CHART.drawSpark(cv, cl, cl[cl.length - 1] >= cl[0]);
-      });
+      $("d-pulsesrc").innerHTML = "";
     }
     function paintHist() {
       paintPulse();
@@ -768,20 +775,97 @@
       });
       var first = d.bars[0].nav, last = d.bars[d.bars.length - 1].nav;
       var chg = first ? (last - first) / first * 100 : null;
-      $("mf-out").innerHTML = "<h3>" + F.esc(d.scheme_name || ("Scheme " + code)) + "</h3>" +
-        "<div class='kstrip big'><div class='kpi'><div class='k-l'>Latest NAV</div>" +
-        "<div class='k-v'>" + F.fmtNum(d.latest_nav) + "</div>" +
-        "<div class='k-s'>" + F.esc(d.latest_date || "") + "</div></div>" +
-        (chg !== null ? "<div class='kpi'><div class='k-l'>Change (" + d.bars.length + " sessions)</div>" +
-          "<div class='k-v " + F.dirClass(chg) + "'>" + F.fmtPct(chg) + "</div></div>" : "") +
-        "</div><div class='cx-note'>" + F.esc(d.fund_house || "") +
-        (d.scheme_category ? " · " + F.esc(d.scheme_category) : "") + "</div>" +
-        "<div class='chart-box' style='margin-top:10px'><canvas class='chart' id='mf-c' style='height:230px' role='img' aria-label='NAV history'></canvas><div class='chart-tip'></div></div>" +
-        "<div class='cx-prov'>Data · mfapi.in (AMFI) · end-of-day</div>";
-      if ($("mf-c")) window.FT_CHART.drawPriceChart($("mf-c"), bars, { sma: [] });
+      var staleMk = F.mark("stale", { source: "mfapi.in", status: "AMFI end-of-day", asOf: d.latest_date });
+      var calcMk = F.mark("calc", { source: "Terminal", status: "Calculated", asOf: d.latest_date });
+      var info = { house: d.fund_house || "", cat: d.scheme_category || "", code: code, name: d.scheme_name || ("Scheme " + code) };
+      $("mf-out").innerHTML = "<h3>" + F.esc(info.name) + "</h3>" +
+        "<div class='tabs' role='tablist' aria-label='Fund sections' id='mf-tabs'>" +
+        ["Overview", "NAV History", "Fund Info"].map(function (t, i) {
+          return "<button role='tab' aria-selected='" + (i === 0) + "' data-mf='" + t + "'" + (i === 0 ? " class='on'" : "") + ">" + t + "</button>";
+        }).join("") + "</div><div id='mf-tab-out' style='margin-top:10px'></div>" +
+        F.legend({ stale: true, calc: true });
+      function paint(tab) {
+        var host = $("mf-tab-out");
+        if (!host) return;
+        Array.prototype.forEach.call(document.querySelectorAll("#mf-tabs button"), function (x) {
+          var on = x.getAttribute("data-mf") === tab;
+          x.classList.toggle("on", on);
+          x.setAttribute("aria-selected", on ? "true" : "false");
+        });
+        if (tab === "NAV History") {
+          host.innerHTML = '<div class="cx-scroll" style="max-height:420px;overflow:auto"><table class="cx-t"><thead><tr>' +
+            "<th scope='col'>Date</th><th scope='col' class='num'>NAV " + staleMk + "</th></tr></thead><tbody>" +
+            d.bars.slice().reverse().slice(0, 120).map(function (p) {
+              return "<tr><td>" + F.esc(p.date || "") + "</td><td class='num'>" + F.fmtNum(p.nav) + "</td></tr>";
+            }).join("") + "</tbody></table></div><div class='cx-note'>Latest 120 sessions · AMFI end-of-day.</div>";
+          return;
+        }
+        if (tab === "Fund Info") {
+          host.innerHTML = '<dl class="cx-facts">' +
+            "<div><dt>Scheme</dt><dd>" + F.esc(info.name) + "</dd></div>" +
+            "<div><dt>Code</dt><dd>" + F.esc(info.code) + "</dd></div>" +
+            "<div><dt>Fund house</dt><dd>" + F.esc(info.house || "—") + "</dd></div>" +
+            "<div><dt>Category</dt><dd>" + F.esc(info.cat || "—") + "</dd></div></dl>" +
+            "<div class='cx-empty' style='margin-top:10px'><b>Holdings &amp; Returns (CAGR)</b>" +
+            "<p>No verified holdings or returns feed is configured — these sections are omitted rather than estimated.</p></div>";
+          return;
+        }
+        host.innerHTML = "<div class='kstrip big'><div class='kpi'><div class='k-l'>Latest NAV</div>" +
+          "<div class='k-v'>" + F.fmtNum(d.latest_nav) + staleMk + "</div>" +
+          "<div class='k-s'>" + F.esc(d.latest_date || "") + "</div></div>" +
+          (chg !== null ? "<div class='kpi'><div class='k-l'>Change (" + d.bars.length + " sessions)</div>" +
+            "<div class='k-v " + F.dirClass(chg) + "'>" + F.fmtPct(chg) + calcMk + "</div></div>" : "") +
+          "</div><div class='cx-note'>" + F.esc(info.house) +
+          (info.cat ? " · " + F.esc(info.cat) : "") + "</div>" +
+          "<div class='chart-box' style='margin-top:10px'><canvas class='chart' id='mf-c' style='height:230px' role='img' aria-label='NAV history'></canvas><div class='chart-tip'></div></div>" +
+          "<div class='cx-prov'>Data · mfapi.in (AMFI) · end-of-day</div>";
+        if ($("mf-c")) window.FT_CHART.drawPriceChart($("mf-c"), bars, { sma: [] });
+      }
+      Array.prototype.forEach.call(document.querySelectorAll("#mf-tabs button"), function (x) {
+        x.onclick = function () { paint(x.getAttribute("data-mf")); };
+      });
+      paint("Overview");
     });
   }
   if (window.FT_PAGES) window.FT_PAGES.pMF = pMF;
+  /* ---------- mutual funds list (search-driven; no browse endpoint exists,
+     so no invented directory — search only, every row links to detail) ----- */
+  function pMFunds() {
+    var API = window.FT_API, F = window.FT_FMT;
+    $("view").innerHTML = "<h1 class='h-page'>Mutual funds</h1>" +
+      "<div class='sub'>AMFI-published NAV data via mfapi.in · NAV is end-of-day, never a live price</div>" +
+      "<div class='card sect'><div class='row'><input id='mf-q' class='in' aria-label='Search mutual fund schemes' " +
+      "placeholder='Search schemes e.g. index fund' style='flex:1;min-width:200px'>" +
+      "<button class='btn primary' id='mf-go'>Search</button></div>" +
+      "<div id='mf-out' style='margin-top:10px'><div class='cx-note'>Type at least 2 characters to search verified AMFI scheme records.</div></div></div>" +
+      F.legend({ stale: true });
+    function go() {
+      var q = ($("mf-q").value || "").trim();
+      if (q.length < 2) return;
+      $("mf-out").innerHTML = "<div class='cx-skel'></div><div class='cx-skel'></div>";
+      API.get("mf/search", { q: q }).then(function (r) {
+        if (!$("mf-out")) return;
+        var rows = ((((r.body || {}).data || {}).results) || []);
+        if (!rows.length) {
+          $("mf-out").innerHTML = "<div class='cx-empty'><b>Mutual funds</b><p>No verified data available.</p>" +
+            "<p class='why'>" + F.esc((r.body || {}).message || "No schemes matched.") + "</p></div>";
+          return;
+        }
+        $("mf-out").innerHTML = "<div class='cx-scroll'><table class='cx-t'><thead><tr>" +
+          "<th scope='col'>Scheme</th><th scope='col'>Code</th><th scope='col'>Fund house</th></tr></thead><tbody>" +
+          rows.slice(0, 30).map(function (x) {
+            return "<tr><td><a href='#/mf/" + F.esc(String(x.code || "")) + "'>" + F.esc(x.name || x.code || "") + "</a></td>" +
+              "<td class='num'>" + F.esc(String(x.code || "")) + "</td>" +
+              "<td>" + F.esc(x.fund_house || x.amc || "—") + "</td></tr>";
+          }).join("") + "</tbody></table></div>";
+      }).catch(function () {
+        if ($("mf-out")) $("mf-out").innerHTML = "<div class='cx-empty'><b>Mutual funds</b><p>Search unreachable.</p></div>";
+      });
+    }
+    $("mf-go").onclick = go;
+    $("mf-q").onkeydown = function (e) { if (e.key === "Enter") go(); };
+  }
+  if (window.FT_PAGES) window.FT_PAGES.pMFunds = pMFunds;
   /* ---------- markets: indicators strip injected above sections ---------- */
   function marketsStrip() {
     try {
@@ -818,11 +902,8 @@
     } catch (e) { /* never break markets */ }
   }
   function theme() {
-    try {
-      var q = (location.search || "").match(/theme=(light|dark)/);
-      var t = q ? q[1] : (localStorage.getItem("ft-theme") || "dark");
-      document.body.dataset.theme = (t === "light") ? "light" : "dark";
-    } catch (e) { document.body.dataset.theme = "dark"; }
+    /* Master spec: LIGHT ONLY. No toggle, no ?theme override. */
+    try { document.body.dataset.theme = "light"; } catch (e) { /* ignore */ }
   }
   function boot() { theme(); sectionize(); strip(); marketsStrip(); }
   document.addEventListener("DOMContentLoaded", function () { setTimeout(boot, 400); });

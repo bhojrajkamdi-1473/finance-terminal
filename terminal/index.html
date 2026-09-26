@@ -7,15 +7,15 @@
 <link rel="icon" type="image/svg+xml" href="/terminal/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="/terminal/styles.css?v=4">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<link rel="stylesheet" href="/terminal/styles.css?v=5">
 </head>
-<body data-theme="dark">
+<body data-theme="light">
 <a class="skip-link" href="#view">Skip to workspace</a>
 <div id="app">
   <header id="topbar">
     <a class="fi-brand" href="#/welcome" aria-label="FINSIGHT home">
-      <svg class="fi-mark" width="26" height="26" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="6" fill="#0C1624"/><path d="M20 14h26v7H29v8h15v7H29v14h-9V14z" fill="#C49A3C"/><rect x="20" y="50" width="26" height="3" fill="#C49A3C" opacity="0.45"/></svg>
+      <svg class="fi-mark" width="26" height="26" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="12" fill="#2563eb"/><path d="M20 14h26v7H29v8h15v7H29v14h-9V14z" fill="#ffffff"/><rect x="20" y="50" width="26" height="3" fill="#ffffff" opacity="0.45"/></svg>
       <span class="fi-name">FINSIGHT<small>FINANCIAL INTELLIGENCE, RECONCILED</small></span>
     </a>
     <div class="search-wrap">
@@ -23,14 +23,14 @@
       <div id="search-results" class="search-results hidden" role="listbox"></div>
     </div>
     <div class="topbar-right">
-      <span id="data-status" class="pill pill-live" title="Market data provider status">DELAYED · YAHOO</span>
-      <button class="btn sm" id="top-theme" title="Toggle light / dark workspace" aria-label="Toggle theme">Theme</button>
+      <span id="data-status" class="pill" title="Market data provider status"><a href="#/status" style="color:inherit;text-decoration:none">DATA STATUS</a></span>
       <button class="btn sm" id="top-refresh" title="Reload current view" aria-label="Refresh current view">Refresh</button>
       <a class="btn sm" href="#/settings" aria-label="Open settings">Settings</a>
       <button class="topbar-profile" id="top-profile" title="Local workspace profile (this device only)"><span class="avatar" id="profile-initial">–</span><span id="profile-name">Profile</span></button>
       <span id="clock" class="clock"></span>
     </div>
   </header>
+  <div class="tk-strip" id="tkstrip" role="region" aria-label="Market ticker"></div>
   <div id="shell">
     <nav id="sidenav" aria-label="Terminal sections"></nav>
     <main id="view"></main>

@@ -395,7 +395,8 @@
           (res.length ? ' · <a id="s-csv" href="/api/screener?' + qs + '&format=csv" download="screen.csv">Export CSV</a>' : "");
         function th(label, metric) {
           var arrow = sortBy === metric ? (sortDir === "asc" ? " ▲" : " ▼") : "";
-          return "<th scope='col' class='num'><a href='#' data-sort='" + metric + "' style='color:inherit'>" + label + arrow + "</a></th>";
+          var aria = sortBy === metric ? (sortDir === "asc" ? "ascending" : "descending") : "none";
+          return "<th scope='col' class='num' aria-sort='" + aria + "'><a href='#' data-sort='" + metric + "' style='color:inherit'>" + label + arrow + "</a></th>";
         }
         el("s-out").innerHTML = "<div class='card flush'><div style='padding:12px 14px 0'><h3>Matches (" + res.length + ") " + F.statusPill("delayed") + "</h3>" +
           "<div class='src'>backed by: " + F.esc((b.backed_by || []).join(", ")) + "</div></div>" +
@@ -412,14 +413,14 @@
                     var th = (m.threshold && m.threshold.length !== undefined && typeof m.threshold !== "number")
                       ? m.threshold.join("…") : m.threshold;
                     return m.metric + " " + m.op + " " + th;
-                  }).join(" · ")) + "</span>" : "") + "</td><td class='num'><b>" +
-                F.fmtNum(x.quote.price) + " " + F.esc(x.quote.currency || "") + "</b></td><td class='num " + F.dirClass(x.quote.change_pct) + "'>" + F.fmtPct(x.quote.change_pct) +
-                "</td><td class='num'>" + (t.rsi14 === undefined || t.rsi14 === null ? "—" : F.fmtNum(t.rsi14) + " <span class='pill pill-calc'>CALC</span>") +
+                  }).join(" · ")) + "</span>" : "") +                 "</td><td class='num'><b>" +
+                F.fmtNum(x.quote.price) + " " + F.esc(x.quote.currency || "") + F.mark("stale", { source: "quote-chain", status: "delayed", asOf: x.quote.as_of || x.as_of }) + "</b></td><td class='num " + F.dirClass(x.quote.change_pct) + "'>" + F.fmtPct(x.quote.change_pct) +
+                "</td><td class='num'>" + (t.rsi14 === undefined || t.rsi14 === null ? "—" : F.fmtNum(t.rsi14) + " " + F.mark("calc", { source: "Terminal analytics", status: "Calculated" })) +
                 "</td><td class='num'>" + fund("PERatio") + "</td><td class='num'>" + fund("ROE") +
                 "</td><td>" + F.statusPill(x.timeliness || x.status) + (x.stale ? " " + F.statusPill("STALE") : "") +
                 "<div class='src'>" + F.fmtIST(x.as_of) + "</div></td>" +
                 "<td class='num'><button class='btn sm' data-wl='" + F.esc(x.symbol) + "'>+ Watch</button></td></tr>";
-            }).join("") + "</tbody></table></div>"
+            }).join("") + "</tbody></table></div><div style='padding:0 14px 4px'>" + F.legend({ stale: true, calc: true }) + "</div>"
             : unavail("No symbols pass these filters right now.")) +
           (excl.length ? "<div style='padding:0 14px 12px'><h3 style='margin-top:10px'>Excluded from filter (no data — not scored)</h3><ul style='margin:6px 0;padding-left:18px'>" +
             excl.map(function (x) {
@@ -1441,11 +1442,11 @@
           items.map(function (i) {
             var q = i.quote || {};
             return "<tr><td class='txt'><a href='#/company/" + F.esc(i.symbol) + "'>" +
-              secCell(i.symbol, i.name || q.name, q.exchange) + "</a></td><td class='num'><b>" + F.fmtNum(q.price) + " " + F.esc(q.currency || "") +
+              secCell(i.symbol, i.name || q.name, q.exchange) + "</a></td><td class='num'><b>" + F.fmtNum(q.price) + " " + F.esc(q.currency || "") + F.mark("stale", { source: "quote-chain", status: "delayed", asOf: q.as_of }) +
               "</b></td><td class='num " + F.dirClass(q.change_pct) + "'>" + F.fmtPct(q.change_pct) +
               "</td><td class='num'>" + F.fmtInt(q.volume) + "</td><td class='txt' id='w-fund-" + F.esc(i.symbol.replace(/[^A-Z0-9]/g, "")) + "'><span class='src'>—</span></td>" +
               "<td class='num'><button class='btn sm danger' data-rm='" + F.esc(i.symbol) + "'>remove</button></td></tr>";
-          }).join("") + "</tbody></table></div>" : unavail("Watchlist is empty. Add symbols to track them.");
+          }).join("") + "</tbody></table></div>" + F.legend({ stale: true }) : unavail("Watchlist is empty. Add symbols to track them.");
         Array.prototype.forEach.call(document.querySelectorAll("[data-rm]"), function (x) {
           x.onclick = function () { API.del("watchlist", { symbol: x.getAttribute("data-rm") }).then(load); };
         });
@@ -1476,9 +1477,9 @@
         var b = r.body || {}, pos = b.positions || [];
         var h = "<div class='kpis sect'>" +
           kpi("Invested", F.fmtMoney(b.invested_value), "your input") +
-          kpi("Current value", (b.current_value === null || b.current_value === undefined) ? "—" : F.fmtMoney(b.current_value), "market data · delayed") +
-          kpi("Unrealised P&L", (b.unrealized_pnl === null || b.unrealized_pnl === undefined) ? "—" : F.fmtMoney(b.unrealized_pnl), "calculated") +
-          kpi("P&L %", F.fmtPct(b.pnl_pct), "calculated") + "</div>";
+          kpi("Current value", (b.current_value === null || b.current_value === undefined) ? "—" : F.fmtMoney(b.current_value) + F.mark("stale", null), "market data") +
+          kpi("Unrealised P&L", (b.unrealized_pnl === null || b.unrealized_pnl === undefined) ? "—" : F.fmtMoney(b.unrealized_pnl) + F.mark("calc", null), "calculated") +
+          kpi("P&L %", F.fmtPct(b.pnl_pct) + (b.pnl_pct === null || b.pnl_pct === undefined || isNaN(Number(b.pnl_pct)) ? "" : F.mark("calc", null)), "calculated") + "</div>" + F.legend({ stale: true, calc: true });
         if (pos.length) {
           var palette = ["#1a56c4", "#18794e", "#9a6b12", "#6d4fc2", "#687182", "#c03535", "#0e7490", "#b45309"];
           h += "<div class='card sect'><h3>Allocation (current value)</h3><div class='alloc' role='img' aria-label='Portfolio allocation'>" +
@@ -1606,7 +1607,7 @@
         function rrow(label, key) {
           return "<tr><td class='txt freeze'>" + label + "</td>" + cols.map(function (c) {
             var v = c.ratios && c.ratios[key];
-            return "<td class='num'>" + (v === undefined || v === null || v === "None" ? "—" : F.esc(String(v))) + "</td>";
+            return "<td class='num'>" + (v === undefined || v === null || v === "None" ? "—" : F.esc(String(v)) + F.mark("stale", null)) + "</td>";
           }).join("") + "</tr>";
         }
         var h = "<div class='card flush'><div class='twrap'><table class='t'><thead><tr><th scope='col' class='cmp-head freeze'>Metric</th>" +
@@ -1615,16 +1616,16 @@
               F.logo(c.symbol, (c.prof && c.prof.name) || (c.quote && c.quote.name), 26) + "<br>" +
               secCell(c.symbol, (c.prof && c.prof.name) || (c.quote && c.quote.name), null) + "</a></th>";
           }).join("") + "</tr></thead><tbody>";
-        h += qrow("Price", function (c) { return c.quote ? "<b>" + F.fmtNum(c.quote.price) + "</b> " + F.esc(c.quote.currency || "") : "—"; });
-        h += qrow("Δ% vs prev close", function (c) { return c.quote ? "<span class='" + F.dirClass(c.quote.change_pct) + "'>" + F.fmtPct(c.quote.change_pct) + "</span>" : "—"; });
-        h += qrow("Revenue (" + F.esc((cols[0].fx && cols[0].fx.per) || "?") + ")", function (c) { return c.fx.rev0 === null ? "—" : F.fmtMoney(c.fx.rev0); });
-        h += qrow("Revenue growth YoY", function (c) { return c.fx.growth === null ? "—" : "<span class='" + F.dirClass(c.fx.growth) + "'>" + F.fmtPct(c.fx.growth) + "</span>"; });
-        h += qrow("Net profit", function (c) { return c.fx.ni0 === null ? "—" : F.fmtMoney(c.fx.ni0); });
-        h += qrow("Net margin", function (c) { return c.fx.margin === null ? "—" : F.fmtPct(c.fx.margin); });
+        h += qrow("Price", function (c) { return c.quote ? "<b>" + F.fmtNum(c.quote.price) + "</b> " + F.esc(c.quote.currency || "") + F.mark("stale", null) : "—"; });
+        h += qrow("Δ% vs prev close", function (c) { return c.quote ? "<span class='" + F.dirClass(c.quote.change_pct) + "'>" + F.fmtPct(c.quote.change_pct) + "</span>" + F.mark("stale", null) : "—"; });
+        h += qrow("Revenue (" + F.esc((cols[0].fx && cols[0].fx.per) || "?") + ")", function (c) { return c.fx.rev0 === null ? "—" : F.fmtMoney(c.fx.rev0) + F.mark("stale", null); });
+        h += qrow("Revenue growth YoY", function (c) { return c.fx.growth === null ? "—" : "<span class='" + F.dirClass(c.fx.growth) + "'>" + F.fmtPct(c.fx.growth) + "</span>" + F.mark("calc", null); });
+        h += qrow("Net profit", function (c) { return c.fx.ni0 === null ? "—" : F.fmtMoney(c.fx.ni0) + F.mark("stale", null); });
+        h += qrow("Net margin", function (c) { return c.fx.margin === null ? "—" : F.fmtPct(c.fx.margin) + F.mark("calc", null); });
         h += rrow("Market cap", "MarketCapitalization") + rrow("P/E", "PERatio") + rrow("P/B", "PriceToBookRatio") +
           rrow("EPS", "EPS") + rrow("ROE", "ROE") + rrow("Dividend yield", "DividendYield");
         h += qrow("Debt/Equity", function () { return "—"; });
-        el("k-out").innerHTML = h + "</tbody></table></div><div class='prov' style='padding:0 14px 12px'>Quotes: delayed chain · " +
+        el("k-out").innerHTML = h + "</tbody></table></div><div style='padding:0 14px 4px'>" + F.legend({ stale: true, calc: true }) + "</div><div class='prov' style='padding:0 14px 12px'>Quotes: delayed chain · " +
           "financials: reported statements where configured · ratios: " +
           (cols[0].ratios ? "reported provider data" : "unavailable — no configured provider supplies ratios for this symbol") +
           " · Debt/Equity: unavailable — no leverage feed configured</div></div>";

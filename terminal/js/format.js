@@ -48,20 +48,51 @@
     if (v === null || v === undefined || isNaN(Number(v))) return "mut";
     return Number(v) > 0 ? "up" : Number(v) < 0 ? "dn" : "mut";
   }
-  function statusPill(status) {
-    /* Pure timeliness (live/delayed/eod/historical) renders NO stamp —
-       feed freshness lives on the Data status page (#/status). Every
-       other state (errors, discrepancies, single-source, calculated)
-       still renders, because those change interpretation. */
-    var quiet = {
-      live: 1, delayed: 1, DELAYED: 1, "END-OF-DAY": 1, HISTORICAL: 1,
-    };
-    if (quiet[status]) return "";
+  /* Provenance marks (master spec §2): compact superscript references.
+     kind: "stale" (†) | "calc" (‡). info: {source, status, asOf}.
+     Full triplet deferred to hover/tap tooltip + Data Status page. */
+  function triplet(info) {
+    info = info || {};
+    return [info.source ? srcName(info.source) : null, info.status || null,
+      info.asOf || info.as_of || null].filter(function (x) { return x; }).join(" · ");
+  }
+  function mark(kind, info) {
+    var tip = triplet(info);
+    if (kind === "stale") {
+      return '<sup class="mk mk-stale" ' + (tip ? 'title="' + esc(tip) + '"' : "") +
+        ' aria-label="Stale data' + (tip ? ": " + esc(tip) : "") + '">†</sup>';
+    }
+    if (kind === "calc") {
+      return '<sup class="mk mk-calc" ' + (tip ? 'title="' + esc(tip) + '"' : "") +
+        ' aria-label="Calculated value' + (tip ? ": " + esc(tip) : "") + '">‡</sup>';
+    }
+    return "";
+  }
+  /* One legend line per section (never per tile/row). Pass which marks
+     the section actually uses. */
+  function legend(use) {
+    use = use || {};
+    var parts = [];
+    if (use.stale) parts.push("<b>†</b> delayed feed");
+    if (use.calc) parts.push("<b>‡</b> calculated");
+    if (!parts.length) return "";
+    return '<div class="mk-legend">' + parts.join(" &nbsp; ") +
+      ' — hover for source &amp; time, or see <a href="#/status">Data Status</a> for full detail.</div>';
+  }
+  function statusPill(status, info) {
+    /* Master legend: REAL-TIME = no mark; STALE = †; CALCULATED = ‡;
+       UNAVAILABLE = visible text; ERROR = its own pill. */
+    var s = String(status || "");
+    if (/^real-?time$/i.test(s) || s === "live" || s === "delayed" ||
+        s === "DELAYED" || s === "END-OF-DAY" || s === "HISTORICAL") {
+      if (/^real-?time$/i.test(s) || s === "live") return "";
+      return mark("stale", info);
+    }
+    if (/calc/i.test(s)) return mark("calc", info);
     var m = {
       calculated: ["pill-calc", "CALC"], ai: ["pill-ai", "AI"],
       unavailable: ["pill-na", "UNAVAIL"], error: ["pill-na", "ERROR"],
-      // timeliness vocabulary renders quiet (see above); live claims stay visible
-      "REAL-TIME": ["pill-live", "REAL-TIME"],
+      // timeliness renders as marks above; error states keep full pills
       CALCULATED: ["pill-calc", "CALCULATED"],
       UNAVAILABLE: ["pill-na", "UNAVAILABLE"],
       ERROR: ["pill-na", "ERROR"],
@@ -242,7 +273,7 @@
   }
   window.FT_FMT = {
     fmtNum, fmtInt, fmtPct, fmtMoney, fmtIN, fmtDate, fmtDateTime, esc,
-    dirClass, statusPill, srcName, fmtIST, secId, typeBadge, prov,
+    dirClass, statusPill, mark, legend, triplet, srcName, fmtIST, secId, typeBadge, prov,
     logo, logoFallback, LOGOS, secType, INDEX_SYMS,
     fmtStmt, stmtUnit, fmtPrice, fmtMult, fmtTimeHM,
   };

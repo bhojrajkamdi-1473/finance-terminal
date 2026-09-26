@@ -8,7 +8,8 @@
     ["portfolio", "Portfolio", "◳"], ["research", "Research", "✦"],
     ["earnings", "Earnings", "◐"], ["actions", "Actions", "⬔"],
     ["ipos", "IPOs", "⬑"], ["news", "News", "▤"],
-    ["macro", "Macro", "⊕"], ["status", "Data Status", "◔"],
+    ["macro", "Macro", "⊕"], ["mfunds", "Mutual Funds", "▦"],
+    ["status", "Data Status", "◔"],
     ["settings", "Settings", "⚙"],
   ];
   function route() {
@@ -36,6 +37,7 @@
     else if (parts[0] === "earnings") P.pEarnings();
     else if (parts[0] === "actions") P.pActions();
     else if (parts[0] === "macro") P.pMacro();
+    else if (parts[0] === "mfunds" && P.pMFunds) P.pMFunds();
     else if (parts[0] === "status" && P.pStatus) P.pStatus();
     else if (parts[0] === "settings") P.pSettings();
     else P.pDashboard();
