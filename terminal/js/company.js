@@ -61,11 +61,14 @@
     return "<span class='cx-q " + cls + "' title='Market bucket'>" + esc(mkt.label || "Global") + "</span>";
   }
   function badge(st) {
+    /* Pure timeliness renders NO badge — feed freshness lives on the
+       Data status page (#/status). LIVE / CALCULATED still badge. */
     var s = String(st || "").toUpperCase();
     var cls = "cx-b-na", lbl = s || "—";
     if (/LIVE/.test(s)) { cls = "cx-b-live"; lbl = "LIVE"; }
     else if (/REAL-TIME/.test(s)) { cls = "cx-b-live"; lbl = "REAL-TIME"; }
-    else if (/DELAY|END-OF-DAY|HISTORICAL|SINGLE/.test(s)) { cls = "cx-b-del"; lbl = "DELAYED"; }
+    else if (/DELAY|END-OF-DAY|HISTORICAL/.test(s)) { return ""; }
+    else if (/SINGLE/.test(s)) { cls = "cx-b-na"; lbl = "SINGLE SOURCE"; }
     else if (/CALC/.test(s)) { cls = "cx-b-calc"; lbl = "CALCULATED"; }
     return '<span class="cx-badge ' + cls + '">' + esc(lbl) + "</span>";
   }
@@ -85,8 +88,6 @@
     var src = env.source ? F2.srcName(env.source) : "";
     if (src && src !== "?") parts.push("Data · " + src);
     else parts.push("Market data");
-    var st = env.timeliness || env.status || "";
-    if (/delay/i.test(st)) parts.push("delayed");
     var asof = String(env.as_of || "").slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}/.test(asof)) parts.push(asof);
     if (parts.length <= 1) return "";

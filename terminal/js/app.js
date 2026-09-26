@@ -8,7 +8,8 @@
     ["portfolio", "Portfolio", "⬣"], ["research", "Research", "✎"],
     ["earnings", "Earnings", "◐"], ["actions", "Corp Actions", "⬔"],
     ["ipos", "IPOs", "◉"], ["news", "News", "▤"],
-    ["macro", "Macro", "◍"], ["settings", "Settings", "⚙"],
+    ["macro", "Macro", "◍"], ["status", "Data Status", "◔"],
+    ["settings", "Settings", "⚙"],
   ];
   function route() {
     var h = (location.hash || "#/dashboard").replace(/^#\/?/, "");
@@ -35,6 +36,7 @@
     else if (parts[0] === "earnings") P.pEarnings();
     else if (parts[0] === "actions") P.pActions();
     else if (parts[0] === "macro") P.pMacro();
+    else if (parts[0] === "status" && P.pStatus) P.pStatus();
     else if (parts[0] === "settings") P.pSettings();
     else P.pDashboard();
   }
@@ -305,23 +307,29 @@
     tick(); setInterval(tick, 1000);
   }
   function providerPill() {
+    /* Neutral entry point to the Data status page (#/status), where feed
+       freshness (delayed vs live) is disclosed per provider. The pill
+       itself carries no timeliness claim. */
     var pill = document.getElementById("data-status");
+    function paint(alert) {
+      pill.className = "pill" + (alert ? " pill-bad" : "");
+      pill.innerHTML = "";
+      var a = document.createElement("a");
+      a.href = "#/status";
+      a.textContent = alert ? "DATA · CHECK" : "DATA STATUS";
+      a.style.cssText = "color:inherit;text-decoration:none";
+      a.setAttribute("aria-label", "Open Data status page");
+      pill.appendChild(a);
+      pill.title = "Feed freshness per provider — see Data status";
+    }
     window.FT_API.get("providers").then(function (r) {
       var list = ((r.body || {}).providers) || [];
-      var yahoo = list.filter(function (p) { return p.id === "yahoo"; })[0] || {};
-      var td = list.filter(function (p) { return p.id === "twelvedata"; })[0] || {};
-      var av = list.filter(function (p) { return p.id === "alphavantage"; })[0] || {};
-      var ia = list.filter(function (p) { return p.id === "indian-api"; })[0] || {};
-      var legs = "YAHOO" + (td.key_configured ? "+TD" : "") + (av.key_configured ? "+AV" : "") + (ia.key_configured ? "+IA" : "");
-      if (yahoo.state === "cooling") {
-        pill.className = "pill pill-delayed";
-        pill.textContent = "AUTO · YAHOO COOLING · " + legs;
-      } else {
-        pill.className = "pill pill-live";
-        pill.textContent = "AUTO · " + legs;
-      }
-      pill.title = "Free-automatic chain: Yahoo → Twelve Data → Alpha Vantage → unavailable";
-    });
+      var alert = list.some(function (p) {
+        return p.health && (p.health.state === "cooling" ||
+          (p.health.consecutive_errors || 0) > 0);
+      });
+      paint(alert);
+    }).catch(function () { paint(false); });
   }
   function profileChip() {
     /* Local workspace label only (this device). No account, no auth. */

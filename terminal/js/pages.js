@@ -1740,7 +1740,7 @@
       "TWELVE_DATA_API_KEY — optional, server-side only, enables the middle fallback leg.<br><br>" +
       "INDIAN_STOCK_MARKET_API_KEY — optional, server-side only. With a key: full NSE/BSE coverage (statements, ownership, forecasts, news, actions, history). Without: free quote + market fundamentals.<br><br>" +
       "TERMINAL_DB — sqlite path (default ./terminal-data/terminal.db).<br><br>No key is ever shipped to the browser. Validate input; external content is escaped before render.</div>" +
-      "<h3 style='margin-top:12px'>Legend</h3><div class='row'>" + F.statusPill("REAL-TIME") + F.statusPill("DELAYED") + F.statusPill("END-OF-DAY") + F.statusPill("CALCULATED") + F.statusPill("UNAVAILABLE") + F.statusPill("STALE") + "</div></div></div>";
+      "<h3 style='margin-top:12px'>Legend</h3><div class='row'>" + F.statusPill("REAL-TIME") + F.statusPill("CALCULATED") + F.statusPill("UNAVAILABLE") + F.statusPill("STALE") + "<a class='src' href='#/status'>Feed timeliness lives on the Data status page →</a></div></div></div>";
     API.get("providers").then(function (r) {
       if (!el("s-prov")) return;
       var b = r.body || {}, list = b.providers || [];
@@ -1818,8 +1818,52 @@
     });
   }
 
+  /* ---------- Data status: the one place feed freshness is disclosed.
+     Every provider row states whether its data is delayed or live, with
+     last-ok timestamps and latency. Numbers elsewhere stay clean. */
+  function pStatus() {
+    var F = window.FT_FMT;
+    function esc2(s) { return F.esc(s === null || s === undefined ? "" : String(s)); }
+    document.getElementById("view").innerHTML =
+      "<h1 class='h-page'>Data status</h1>" +
+      "<div class='sub'>Is it delayed or not — answered here, per provider. Retail market feeds " +
+      "(Yahoo, Upstox analytics, Twelve Data free tier) are exchange-delayed by construction; " +
+      "only an authorized real-time feed would change that, and none is configured.</div>" +
+      "<div class='card flush sect'><div class='twrap'><table class='t' id='st-t'>" +
+      "<thead><tr><th scope='col'>Provider</th><th scope='col'>State</th>" +
+      "<th scope='col'>Freshness</th><th scope='col' class='num'>Latency</th>" +
+      "<th scope='col' class='txt'>Detail</th></tr></thead>" +
+      "<tbody><tr><td colspan='5'>Loading provider health…</div></td></tr></tbody></table></div></div>" +
+      "<div class='prov'>Source: live /api/providers health · timestamps are server time</div>";
+    window.FT_API.get("providers").then(function (r) {
+      var host = document.querySelector("#st-t tbody");
+      if (!host) return;
+      var list = ((r.body || {}).providers) || [];
+      host.innerHTML = list.map(function (p) {
+        var h = p.health || {};
+        var caps = p.capabilities || {};
+        var movesData = caps.quote || caps.history;
+        var fresh = (p.key_required && !p.key_configured) ? "NOT CONFIGURED"
+          : !movesData ? "—"
+          : "DELAYED"; // no authorized real-time feed is configured anywhere
+        var pill = fresh === "DELAYED" ? "<span class='pill pill-na'>DELAYED</span>"
+          : "<span class='pill pill-na'>" + esc2(fresh) + "</span>";
+        var lat = (h.last_latency_ms === null || h.last_latency_ms === undefined)
+          ? "—" : Math.round(h.last_latency_ms) + " ms";
+        var state = esc2(p.state || "?");
+        return "<tr><td class='txt'><b>" + esc2(p.label || p.id) + "</b></td>" +
+          "<td class='txt'>" + state + "</td><td>" + pill + "</td>" +
+          "<td class='num'>" + lat + "</td>" +
+          "<td class='txt' style='white-space:normal;max-width:340px'>" + esc2(p.detail || "") + "</td></tr>";
+      }).join("");
+    }).catch(function () {
+      var host = document.querySelector("#st-t tbody");
+      if (host) host.innerHTML = "<tr><td colspan='5'>Provider health unreachable.</td></tr>";
+    });
+  }
+
   window.FT_PAGES = {
     init, clearTimers, pDashboard, pMarkets, pScreener, pCompanies, pCompany, pWatchlist,
-    pPortfolio, pNews, pResearch, pCompare, pIPOs, pEarnings, pMacro, pSettings, pWelcome, toast,
+    pPortfolio, pNews, pResearch, pCompare, pIPOs, pEarnings, pMacro, pSettings, pWelcome, pStatus, toast,
   };
 })();

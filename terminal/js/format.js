@@ -49,15 +49,19 @@
     return Number(v) > 0 ? "up" : Number(v) < 0 ? "dn" : "mut";
   }
   function statusPill(status) {
+    /* Pure timeliness (live/delayed/eod/historical) renders NO stamp —
+       feed freshness lives on the Data status page (#/status). Every
+       other state (errors, discrepancies, single-source, calculated)
+       still renders, because those change interpretation. */
+    var quiet = {
+      live: 1, delayed: 1, DELAYED: 1, "END-OF-DAY": 1, HISTORICAL: 1,
+    };
+    if (quiet[status]) return "";
     var m = {
-      live: ["pill-live", "LIVE"], delayed: ["pill-delayed", "DELAYED"],
       calculated: ["pill-calc", "CALC"], ai: ["pill-ai", "AI"],
       unavailable: ["pill-na", "UNAVAIL"], error: ["pill-na", "ERROR"],
-      // timeliness vocabulary: the actual data status of a quote
+      // timeliness vocabulary renders quiet (see above); live claims stay visible
       "REAL-TIME": ["pill-live", "REAL-TIME"],
-      DELAYED: ["pill-delayed", "DELAYED"],
-      "END-OF-DAY": ["pill-delayed", "END-OF-DAY"],
-      HISTORICAL: ["pill-delayed", "HISTORICAL"],
       CALCULATED: ["pill-calc", "CALCULATED"],
       UNAVAILABLE: ["pill-na", "UNAVAILABLE"],
       ERROR: ["pill-na", "ERROR"],

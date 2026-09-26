@@ -13,7 +13,7 @@
     ["ANALYSIS", ["companies", "screener", "compare", "watchlist", "portfolio"]],
     ["RESEARCH", ["research", "earnings", "actions", "ipos", "news"]],
     ["DATA", ["macro"]],
-    ["TOOLS", ["settings"]],
+    ["TOOLS", ["status", "settings"]],
   ];
   function sectionize() {
     try {
