@@ -2,13 +2,13 @@
 (function () {
   "use strict";
   var NAV = [
-    ["dashboard", "Dashboard", "▦"], ["markets", "Markets", "◈"],
-    ["companies", "Companies", "◎"], ["screener", "Screener", "▼"],
+    ["dashboard", "Dashboard", "⬡"], ["markets", "Markets", "◈"],
+    ["companies", "Companies", "◎"], ["screener", "Screener", "⊟"],
     ["compare", "Compare", "⇄"], ["watchlist", "Watchlist", "★"],
-    ["portfolio", "Portfolio", "⬣"], ["research", "Research", "✎"],
-    ["earnings", "Earnings", "◐"], ["actions", "Corp Actions", "⬔"],
-    ["ipos", "IPOs", "◉"], ["news", "News", "▤"],
-    ["macro", "Macro", "◍"], ["status", "Data Status", "◔"],
+    ["portfolio", "Portfolio", "◳"], ["research", "Research", "✦"],
+    ["earnings", "Earnings", "◐"], ["actions", "Actions", "⬔"],
+    ["ipos", "IPOs", "⬑"], ["news", "News", "▤"],
+    ["macro", "Macro", "⊕"], ["status", "Data Status", "◔"],
     ["settings", "Settings", "⚙"],
   ];
   function route() {
