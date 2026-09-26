@@ -490,6 +490,15 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_market_overview(self):
         from concurrent.futures import ThreadPoolExecutor
 
+        # 60s server cache: dashboard + topbar strip poll every 60s.
+        # Without this every poll fans out ~30 quotes at once and trips
+        # the indian-api 30/min guard (HTTP 429 -> cooling).
+        hit = _domain_cache.get("market:overview")
+        if hit is not None:
+            env = dict(hit)
+            env["served_from"] = "cache"
+            return _send_json(self, env, _envelope_status(env))
+
         def one(sym):
             env = registry.market_data.get_quote(sym)
             return {
@@ -498,9 +507,13 @@ class Handler(BaseHTTPRequestHandler):
                 "quote": env.get("data"),
             }
 
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             out = list(pool.map(one, DEFAULT_SYMBOLS))
-        return _send_json(self, {"ok": True, "items": out})
+        env = {"ok": True, "items": out}
+        _domain_cache.set("market:overview", env, 60.0)
+        env = dict(env)
+        env["served_from"] = "provider"
+        return _send_json(self, env, _envelope_status(env))
 
     # Heavy indicators (metals, energy, FX, volatility, crypto, rates).
     # All served by the existing quote chain (Yahoo covers these
@@ -535,7 +548,7 @@ class Handler(BaseHTTPRequestHandler):
                 "market": env.get("market") or {"id": "GLOBAL", "label": "Global"},
             }
 
-        with ThreadPoolExecutor(max_workers=8) as pool:
+        with ThreadPoolExecutor(max_workers=4) as pool:
             out = list(pool.map(one, self.INDICATORS))
         return _send_json(self, {"ok": True, "items": out})
 
@@ -1442,10 +1455,11 @@ class Handler(BaseHTTPRequestHandler):
 
     # -- static ---------------------------------------------------------
     def _serve_static(self, path: str):
-        # Primary product: "/" opens the Finance Terminal.
+        # Primary product: "/" opens the portfolio homepage.
+        # The Finance Terminal lives under /terminal/.
         if path == "/":
             return self._send_file(
-                os.path.join(TERMINAL_DIR, "index.html"), "text/html"
+                os.path.join(ROOT, "index.html"), "text/html"
             )
         # Legacy personal portfolio site, preserved under /portfolio/.
         # Its relative links (assets/..., about.html) keep working because

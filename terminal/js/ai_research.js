@@ -140,9 +140,13 @@
       m.textContent = bits.join("  ·  ");
     }
     function fail(reason) {
+      var r = String(reason || "The research service did not respond.");
+      var hint = /not configured|no llm|missing key/i.test(r)
+        ? "<p class='why'>Setup: set AI_PROVIDER + AI_API_KEY (+ optional AI_MODEL) in the server environment / Render dashboard, then redeploy. Evidence tabs above are unaffected.</p>"
+        : "";
       host.querySelector("#cxai-out").innerHTML =
-        '<div class="cx-empty"><b>AI research unavailable</b><p>' + esc(reason || "The research service did not respond.") +
-        "</p><p class='why'>Verified market data in the tabs above remains available.</p></div>";
+        '<div class="cx-empty"><b>AI research unavailable</b><p>' + esc(r) +
+        "</p><p class='why'>Verified market data in the tabs above remains available.</p>" + hint + "</div>";
     }
     host.querySelector("#cxai-run").onclick = function () {
       var btn = host.querySelector("#cxai-run");

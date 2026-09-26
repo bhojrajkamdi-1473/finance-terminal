@@ -344,21 +344,20 @@
     window.FT_PROFILE = { paint: paint };
   }
   function themeToggle() {
+    /* v4 is dark-only: lock the workspace, drop the stale Light toggle. */
+    try {
+      document.body.dataset.theme = "dark";
+      localStorage.removeItem("ft-theme");
+    } catch (e) { /* ignore */ }
     var b = document.getElementById("top-theme");
     if (!b) return;
-    function label() {
-      var dark = document.body.dataset.theme !== "light";
-      b.textContent = dark ? "Light" : "Dark";
-    }
-    label();
+    b.textContent = "Dark";
+    b.title = "FINSIGHT v4 is dark-only";
+    b.setAttribute("aria-disabled", "true");
     b.onclick = function () {
-      var next = document.body.dataset.theme === "light" ? "dark" : "light";
-      document.body.dataset.theme = next;
-      try { localStorage.setItem("ft-theme", next); } catch (e) { /* ignore */ }
-      label();
+      document.body.dataset.theme = "dark";
+      try { localStorage.removeItem("ft-theme"); } catch (e) { /* ignore */ }
     };
-    /* keep label in sync if theme changes elsewhere */
-    new MutationObserver(label).observe(document.body, { attributes: true, attributeFilter: ["data-theme"] });
   }
   window.addEventListener("hashchange", route);
   document.addEventListener("DOMContentLoaded", function () {

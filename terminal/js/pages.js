@@ -475,7 +475,8 @@
   }
 
   /* ---------- company detail ---------- */
-  var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings", "News", "Actions", "Ownership", "Charts", "Technicals", "Research"];
+  /* v4: 5 tabs (company.js override is canonical). Kept in sync. */
+  var CTABS = ["Overview", "Financials", "Valuation", "Technicals", "Research"];
   function pCompany(sym, tab) {
     sym = (sym || "").toUpperCase();
     tab = tab || "Overview";
