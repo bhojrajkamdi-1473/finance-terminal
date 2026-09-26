@@ -6,16 +6,14 @@
 (function () {
   "use strict";
   var API, F;
-  /* v4: 5 tabs. Old 11-tab URLs keep working via TAB_ALIAS below —
-     Estimates→Valuation, Earnings/Charts→Technicals, News/Actions→Overview,
-     Ownership→Financials. No renderer deleted, no data lost. */
-  var CTABS = ["Overview", "Financials", "Valuation", "Technicals", "Research"];
-  var TAB_ALIAS = { Estimates: "Valuation", Earnings: "Technicals", News: "Overview",
-    Actions: "Overview", Ownership: "Financials", Charts: "Technicals" };
+  /* 11 tabs restored — collapsing hid Charts/News/Earnings/Actions/
+     Ownership/Estimates from nav with no in-tab replacement. Overflow
+     scrolls horizontally (CSS) instead. */
+  var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings",
+    "News", "Actions", "Ownership", "Charts", "Technicals", "Research"];
   /* Indexes get their own tab set and metric model — never P/E, EPS,
      ROE cards. Every renderer below branches on secType(). */
-  var INDEX_TABS = ["Overview", "Technicals", "Research"];
-  var INDEX_ALIAS = { News: "Overview", Charts: "Technicals" };
+  var INDEX_TABS = ["Overview", "News", "Charts", "Technicals", "Research"];
   var STOCK_ONLY = { Financials: 1, Valuation: 1, Estimates: 1, Earnings: 1, Ownership: 1, Actions: 1 };
   function secType(sym, quote) { return window.FT_FMT.secType(sym, quote); }
   var timers = [];
@@ -119,8 +117,6 @@
     API = window.FT_API; F = window.FT_FMT;
     sym = String(sym || "").toUpperCase();
     var isIdx = secType(sym) === "INDEX";
-    if (isIdx && INDEX_ALIAS[tab]) tab = INDEX_ALIAS[tab];
-    if (!isIdx && TAB_ALIAS[tab]) tab = TAB_ALIAS[tab];
     var tabs = isIdx ? INDEX_TABS : CTABS;
     if (tabs.indexOf(tab) < 0) tab = "Overview";
     clearCx();
