@@ -5,7 +5,10 @@ equity research, nine documented projects, NISM certifications.
 
 - **Stack:** pure static HTML + CSS + vanilla JS. No framework, no build
   step beyond file copying, no database, no backend, no API keys.
-- **Live site:** Cloudflare Pages (free plan), auto-deployed from GitHub.
+- **Live site:** https://bhojrajkamdi-1473.github.io/finance-terminal/
+  (GitHub Pages, free plan — auto-deployed from GitHub on every push
+  to `master` via `.github/workflows/deploy-pages.yml`).
+- **Documents:** project reports, resume and certificates live on verified
 - **Documents:** project reports, resume and certificates live on verified
   external Google Drive / LinkedIn / Coursera URLs (see
   `data/link-inventory.json`, git-ignored). Nothing is fabricated.
@@ -54,11 +57,12 @@ git-ignored). Page CTAs use the verified URLs directly as static anchors.
 ## Deployment (free)
 
 - **Source:** GitHub (`master` branch)
-- **Hosting:** Cloudflare Pages, free plan — no paid Workers, storage,
-  databases, or analytics.
-- **Build command:** `python build_static.py`
-- **Output directory:** `dist`
-- **Root directory:** repository root
+- **Hosting:** GitHub Pages, free plan (public repo = $0) — no paid
+  Workers, storage, databases, or analytics. The site is equally
+  portable to Cloudflare Pages free (build `python build_static.py`,
+  output `dist`) with no code changes.
+- **Build:** `.github/workflows/deploy-pages.yml` runs
+  `python build_static.py` and publishes `dist/` automatically.
 
 Workflow for every future update:
 
