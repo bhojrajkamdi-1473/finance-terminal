@@ -4,11 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Resume — Bhojraj Kamdi</title>
-  <meta name="description" content="Resume of Bhojraj Kamdi — PGDM–Finance '27. View the current CV directly.">
+  <meta name="description" content="Resume of Bhojraj Kamdi — PGDM–Finance '27. The full CV opens as a Google Document.">
   <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,300..600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@300..800&family=Newsreader:ital,opsz,wght@0,6..72,300..700;1,6..72,300..700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="assets/styles.css">
 </head>
 <body>
@@ -18,17 +18,16 @@
     <a class="brand" href="index.html">Bhojraj Kamdi<span class="brand-dot">.</span></a>
     <nav class="nav" aria-label="Primary">
       <ul>
-        <li><a href="index.html">Home</a></li>
-        <li><a href="about.html">About</a></li>
-        <li><a href="experience.html">Experience</a></li>
-        <li><a href="projects.html">Projects</a></li>
-        <li><a href="certifications.html">Certifications</a></li>
-        <li><a href="contact.html">Contact</a></li>
+        <li><a href="index.html#about">About</a></li>
+        <li><a href="index.html#experience">Experience</a></li>
+        <li><a href="index.html#work">Projects</a></li>
+        <li><a href="index.html#approach">Approach</a></li>
+        <li><a href="index.html#credentials">Credentials</a></li>
       </ul>
     </nav>
     <div class="topbar-actions">
-      <a class="btn btn-ghost btn-sm" href="https://www.linkedin.com/in/bhojrajkamdi" target="_blank" rel="noopener noreferrer">LinkedIn<span class="arrow">&nbsp;↗</span></a>
-      <a class="btn btn-outline btn-sm" href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit" target="_blank" rel="noopener noreferrer">Resume</a>
+      <a class="btn btn-solid btn-sm" href="index.html#contact">Contact<span class="arrow">&nbsp;↗</span></a>
+      <a class="btn btn-ghost btn-sm" href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit" target="_blank" rel="noopener noreferrer">Resume<span class="arrow">&nbsp;↗</span></a>
     </div>
     <button class="nav-toggle" id="navToggle" aria-expanded="false" aria-label="Open menu" aria-controls="mobileMenu">
       <span class="bar"></span>
@@ -37,12 +36,15 @@
   </header>
 
   <div class="mobile-menu" id="mobileMenu">
-    <a href="index.html">Home</a>
-    <a href="about.html">About</a>
-    <a href="experience.html">Experience</a>
-    <a href="projects.html">Projects</a>
-    <a href="certifications.html">Certifications</a>
-    <a href="contact.html">Contact</a>
+    <nav aria-label="Mobile">
+      <a href="index.html#about">About</a>
+      <a href="index.html#experience">Experience</a>
+      <a href="index.html#work">Projects</a>
+      <a href="index.html#approach">Approach</a>
+      <a href="index.html#credentials">Credentials</a>
+      <a href="index.html#contact">Contact</a>
+      <a href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit">Resume ↗</a>
+    </nav>
     <div class="mm-actions">
       <a href="https://www.linkedin.com/in/bhojrajkamdi" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>
       <a href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit" target="_blank" rel="noopener noreferrer">Resume</a>
@@ -52,48 +54,64 @@
   <main id="main">
     <section class="page-hero">
       <div class="container">
-        <p class="eyebrow rv">06 — Resume</p>
+        <p class="sec-label">Resume</p>
         <h1 class="rv">The current CV, one click away.</h1>
-        <p class="lede rv rv-d1">A single authoritative resume. Every resume button on this site — navigation, homepage, contact, footer, mobile menu — opens this same document.</p>
+        <p class="lead rv d1">One authoritative document. Every resume link on this site — topbar, footer, contact and home — opens this same Google Document.</p>
       </div>
     </section>
 
     <section class="section">
-      <div class="container">
-        <div class="card rv" style="max-width:720px;">
-          <span class="card-tag-row"><span class="pill pill--gold">Current CV</span><span class="pill">Google Docs</span></span>
-          <h3 style="font-size:1.5rem;">Bhojraj Kamdi — Resume</h3>
-          <p style="max-width:60ch;">PGDM–Finance '27 · Audit &amp; accounts exposure · Equity research internship · Nine documented projects · NISM Series V-A. The document opens directly in Google Drive — no download, no intermediary page.</p>
-          <div class="report-cta-row">
-            <a class="btn btn-solid" href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit" target="_blank" rel="noopener noreferrer">View resume<span class="arrow"> ↗</span></a>
-            <a class="btn btn-outline" href="https://www.linkedin.com/in/bhojrajkamdi" target="_blank" rel="noopener noreferrer">LinkedIn<span class="arrow"> ↗</span></a>
-            <a class="btn btn-ghost" href="mailto:bhojrajkamdi14@gmail.com">Email</a>
+      <div class="container narrow">
+        <article class="project-panel rv">
+          <span class="pnum">CV</span>
+          <div class="project-head">
+            <span class="project-type">Google Document · always current</span>
+            <h2 class="project-title">Bhojraj Kamdi — Resume</h2>
+            <p class="project-question">PGDM–Finance '27 · Audit &amp; accounts internship · Equity research internship · Nine documented projects · NISM Series V-A and Series VIII.</p>
           </div>
+          <div class="project-main">
+            <div class="proj-fields">
+              <p class="proj-field"><b>Why a document</b>The resume is published as a Google Document so the version you see is always the current one — no uploads, no stale PDFs.</p>
+              <p class="proj-field"><b>Needs a platform</b>If a PDF is required for a specific application, it is attached directly in that conversation rather than hosted here.</p>
+            </div>
+            <a class="arrow-link" href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit" target="_blank" rel="noopener noreferrer"><span>Open resume</span><span class="arrow">↗</span></a>
+            <div class="panel-tags">
+              <span class="pill pill--gold">Current</span>
+              <span class="pill">Google Docs</span>
+            </div>
+          </div>
+        </article>
+
+        <div class="sec-head rv mt-8">
+          <p class="sec-label"><span class="num">01 /</span> What the CV points to</p>
+          <h2 class="sec-title">Every item on it has a source here.</h2>
         </div>
 
-        <div class="sec-head rv" style="margin-top:56px;">
-          <p class="sec-label"><span class="num">( 01 )</span> What the CV points to</p>
-          <h2 class="sec-title">Each item points to its source.</h2>
-        </div>
-        <div class="grid-3">
-          <a class="card rv" href="experience.html">
-            <span class="card-tag-row"><span class="pill pill--gold">Experience</span></span>
-            <h3>Internships with certificates</h3>
-            <p>G M Achhra audit work and the Finsckool research internship — each with its completion document linked.</p>
-            <span class="card-foot"><span>Verify</span><span class="arrow">→</span></span>
-          </a>
-          <a class="card rv rv-d1" href="projects.html">
-            <span class="card-tag-row"><span class="pill pill--gold">Projects</span></span>
-            <h3>Nine projects with reports</h3>
-            <p>Each project states its question, work and finding — with full reports opening directly from Drive.</p>
-            <span class="card-foot"><span>Verify</span><span class="arrow">→</span></span>
-          </a>
-          <a class="card rv rv-d2" href="certifications.html">
-            <span class="card-tag-row"><span class="pill pill--gold">Credentials</span></span>
-            <h3>Credentials and statuses</h3>
-            <p>Passes, participations and simulations.</p>
-            <span class="card-foot"><span>Verify</span><span class="arrow">→</span></span>
-          </a>
+        <div class="grid row-gap-lg">
+          <div class="col-4 rv">
+            <a class="focus-card" href="experience.html">
+              <p class="focus-kicker">Experience</p>
+              <h3>Internships with certificates</h3>
+              <p>G M Achhra audit work and the Finsckool research internship, each documented with its completion letter.</p>
+              <p class="resume-card-link">Verify the work<span class="arrow"> →</span></p>
+            </a>
+          </div>
+          <div class="col-4 rv d1">
+            <a class="focus-card" href="projects.html">
+              <p class="focus-kicker">Projects</p>
+              <h3>Nine projects with reports</h3>
+              <p>Each project states its question, approach and finding — reports open directly from Google Drive.</p>
+              <p class="resume-card-link">Verify the work<span class="arrow"> →</span></p>
+            </a>
+          </div>
+          <div class="col-4 rv d2">
+            <a class="focus-card" href="certifications.html">
+              <p class="focus-kicker">Credentials</p>
+              <h3>Credentials and statuses</h3>
+              <p>Passes, participations and simulations, each flagged by how it is evidenced.</p>
+              <p class="resume-card-link">Verify the work<span class="arrow"> →</span></p>
+            </a>
+          </div>
         </div>
       </div>
     </section>
@@ -103,32 +121,19 @@
     <div class="container">
       <div class="footer-grid">
         <div class="footer-brand">
-          <p class="serif" style="font-size:1.25rem;">Bhojraj Kamdi<span class="brand-dot">.</span></p>
-          <p>PGDM–Finance '27. Audit &amp; assurance exposure, equity research internship, and nine projects across audit, analysis and markets.</p>
+          <p class="serif">Bhojraj Kamdi<span class="brand-dot">.</span></p>
+          <p>Finance · Audit · Research</p>
+          <p>Pune · India · PGDM-Finance'27 · Open to opportunities</p>
         </div>
-        <div class="footer-col">
-          <h4>Site</h4>
-          <ul>
-            <li><a href="index.html">Home</a></li>
-            <li><a href="about.html">About</a></li>
-            <li><a href="experience.html">Experience</a></li>
-            <li><a href="projects.html">Projects</a></li>
-            <li><a href="certifications.html">Certifications</a></li>
-        <li><a href="contact.html">Contact</a></li>
-          </ul>
-        </div>
-        <div class="footer-col">
-          <h4>Direct</h4>
-          <ul>
-            <li><a href="https://www.linkedin.com/in/bhojrajkamdi" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a></li>
-            <li><a href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit" target="_blank" rel="noopener noreferrer">Resume</a></li>
-            <li><a href="mailto:bhojrajkamdi14@gmail.com">Email</a></li>
-          </ul>
+        <div class="footer-links">
+          <a href="https://www.linkedin.com/in/bhojrajkamdi" target="_blank" rel="noopener noreferrer">LinkedIn ↗</a>
+          <a href="mailto:bhojrajkamdi14@gmail.com">Email</a>
+          <a href="https://docs.google.com/document/d/1BFeB2oi3oYkQRqjwEmUpC3M__p_ACSpZ/edit" target="_blank" rel="noopener noreferrer">Resume</a>
         </div>
       </div>
       <div class="footer-bottom">
-        <span>© <span id="year">2026</span> Bhojraj Kamdi.</span>
-        <span>Audit · Analysis · Markets.</span>
+        <span>© <span id="year">2026</span> Bhojraj Kamdi</span>
+        <span>Pune, India</span>
       </div>
     </div>
   </footer>
