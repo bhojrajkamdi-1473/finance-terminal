@@ -89,12 +89,12 @@ def c_static(ctx):
     with _u.urlopen(ctx["base"] + "/terminal/", timeout=25) as r:
         assert r.status == 200
         html = r.read().decode("utf-8", "replace")
-    assert "FINANCE TERMINAL" in html, html[:200]
-    # Root route opens the Finance Terminal (legacy portfolio at /portfolio/).
+    assert "FINSIGHT" in html, html[:200]
+    # Root route opens the portfolio homepage (terminal lives at /terminal/).
     with _u.urlopen(ctx["base"] + "/", timeout=25) as r:
         assert r.status == 200
         root = r.read().decode("utf-8", "replace")
-    assert "FINANCE TERMINAL" in root, root[:200]
+    assert "Bhojraj Kamdi" in root, root[:200]
     with _u.urlopen(ctx["base"] + "/portfolio/", timeout=25) as r:
         assert r.status == 200
     for asset in (

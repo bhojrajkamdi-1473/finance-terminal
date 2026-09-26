@@ -3,25 +3,31 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Finance Terminal — Institutional Research</title>
+<title>FINSIGHT — Financial Intelligence, Reconciled</title>
+<link rel="icon" type="image/svg+xml" href="/terminal/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/terminal/styles.css">
 </head>
 <body>
 <a class="skip-link" href="#view">Skip to workspace</a>
 <div id="app">
   <header id="topbar">
-    <div class="brand"><span class="brand-mark">FT</span> FINANCE TERMINAL <small>EQUITY RESEARCH</small></div>
+    <a class="fi-brand" href="#/welcome" aria-label="FINSIGHT home">
+      <svg class="fi-mark" width="26" height="26" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="12" fill="#0B1120"/><path d="M20 14h26v7H29v8h15v7H29v14h-9V14z" fill="#10B981"/><rect x="20" y="50" width="26" height="3" fill="#10B981" opacity="0.4"/></svg>
+      <span class="fi-name">FINSIGHT<small>FINANCIAL INTELLIGENCE, RECONCILED</small></span>
+    </a>
     <div class="search-wrap">
-      <input id="global-search" type="text" aria-label="Global security search" placeholder="Search company, ticker, sector, index…  ( / )" autocomplete="off" spellcheck="false">
+      <input id="global-search" type="text" aria-label="Global security search" placeholder="Search company, stock, index or symbol…  ( / )" autocomplete="off" spellcheck="false">
       <div id="search-results" class="search-results hidden" role="listbox"></div>
     </div>
     <div class="topbar-right">
       <span id="data-status" class="pill pill-live" title="Market data provider status">DELAYED · YAHOO</span>
+      <button class="btn sm" id="top-theme" title="Toggle light / dark workspace" aria-label="Toggle theme">Theme</button>
       <button class="btn sm" id="top-refresh" title="Reload current view" aria-label="Refresh current view">Refresh</button>
       <a class="btn sm" href="#/settings" aria-label="Open settings">Settings</a>
+      <button class="topbar-profile" id="top-profile" title="Local workspace profile (this device only)"><span class="avatar" id="profile-initial">–</span><span id="profile-name">Profile</span></button>
       <span id="clock" class="clock"></span>
     </div>
   </header>

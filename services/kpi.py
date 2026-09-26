@@ -57,21 +57,21 @@ def omit_absent(d: dict) -> dict:
 def roe_reported_or_calc(
     reported: Any, net_income: Any, equity_begin: Any, equity_end: Any
 ) -> dict | None:
-    """ROE hierarchy: reported wins; else NI / avg equity x 100."""
+    """ROE hierarchy: reported wins; else NI / average equity x 100.
+
+    Average equity REQUIRES both beginning and ending equity with a
+    valid period match. A single-sided equity figure is not an average
+    and must never silently stand in for one — omit instead.
+    """
     r = _num(reported)
     if r is not None:
         return {"value": round(r, 2), "unit": "%", "kind": "REPORTED"}
     ni, eb, ee = _num(net_income), _num(equity_begin), _num(equity_end)
-    if ni is None:
+    if ni is None or eb is None or ee is None:
         return None
-    if eb is not None and ee is not None and (eb + ee) != 0:
-        avg = (eb + ee) / 2.0
-    elif ee is not None and ee != 0:
-        avg = ee
-    elif eb is not None and eb != 0:
-        avg = eb
-    else:
+    if (eb + ee) == 0:
         return None
+    avg = (eb + ee) / 2.0
     if avg == 0:
         return None
     return {

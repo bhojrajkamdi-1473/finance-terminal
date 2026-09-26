@@ -3,12 +3,12 @@
   "use strict";
   var NAV = [
     ["dashboard", "Dashboard", "▦"], ["markets", "Markets", "◈"],
-    ["screener", "Screener", "▼"], ["companies", "Companies", "◎"],
+    ["companies", "Companies", "◎"], ["screener", "Screener", "▼"],
     ["compare", "Compare", "⇄"], ["watchlist", "Watchlist", "★"],
-    ["portfolio", "Portfolio", "⬣"], ["news", "News", "📰"],
-    ["research", "Research", "✎"], ["ipos", "IPOs", "◉"],
+    ["portfolio", "Portfolio", "⬣"], ["research", "Research", "✎"],
     ["earnings", "Earnings", "◐"], ["actions", "Corp Actions", "⬔"],
-    ["macro", "Macro", "🌐"], ["settings", "Settings", "⚙"],
+    ["ipos", "IPOs", "◉"], ["news", "News", "▤"],
+    ["macro", "Macro", "◍"], ["settings", "Settings", "⚙"],
   ];
   function route() {
     var h = (location.hash || "#/dashboard").replace(/^#\/?/, "");
@@ -21,6 +21,7 @@
     window.scrollTo(0, 0);
     document.getElementById("view").scrollTop = 0;
     if (parts[0] === "company" && parts[1]) P.pCompany(parts[1], parts[2] || "Overview");
+    else if (parts[0] === "welcome") P.pWelcome();
     else if (parts[0] === "mf" && parts[1] && P.pMF) P.pMF(parts[1]);
     else if (parts[0] === "markets") P.pMarkets();
     else if (parts[0] === "screener") P.pScreener();
@@ -322,12 +323,45 @@
       pill.title = "Free-automatic chain: Yahoo → Twelve Data → Alpha Vantage → unavailable";
     });
   }
+  function profileChip() {
+    /* Local workspace label only (this device). No account, no auth. */
+    function paint() {
+      var nm = "";
+      try { nm = localStorage.getItem("fi-profile") || ""; } catch (e) { /* ignore */ }
+      document.getElementById("profile-name").textContent = nm || "Profile";
+      document.getElementById("profile-initial").textContent = (nm || "–").charAt(0).toUpperCase();
+    }
+    paint();
+    document.getElementById("top-profile").onclick = function () { location.hash = "#/settings"; };
+    window.FT_PROFILE = { paint: paint };
+  }
+  function themeToggle() {
+    var b = document.getElementById("top-theme");
+    if (!b) return;
+    function label() {
+      var dark = document.body.dataset.theme !== "light";
+      b.textContent = dark ? "Light" : "Dark";
+    }
+    label();
+    b.onclick = function () {
+      var next = document.body.dataset.theme === "light" ? "dark" : "light";
+      document.body.dataset.theme = next;
+      try { localStorage.setItem("ft-theme", next); } catch (e) { /* ignore */ }
+      label();
+    };
+    /* keep label in sync if theme changes elsewhere */
+    new MutationObserver(label).observe(document.body, { attributes: true, attributeFilter: ["data-theme"] });
+  }
   window.addEventListener("hashchange", route);
   document.addEventListener("DOMContentLoaded", function () {
     window.FT_PAGES.init();
-    buildNav(); bindSearch(); clock(); providerPill();
+    buildNav(); bindSearch(); clock(); providerPill(); profileChip(); themeToggle();
     document.getElementById("top-refresh").onclick = function () { route(); };
-    if (!location.hash) location.hash = "#/dashboard";
+    if (!location.hash) {
+      var seen = null;
+      try { seen = localStorage.getItem("fi-seen"); } catch (e) { /* ignore */ }
+      location.hash = seen ? "#/dashboard" : "#/welcome";
+    }
     route();
   });
 })();

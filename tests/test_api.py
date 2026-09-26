@@ -80,7 +80,7 @@ class ApiTest(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/terminal/", timeout=10) as r:
             self.assertEqual(r.status, 200)
             html = r.read().decode()
-        self.assertIn("FINANCE TERMINAL", html)
+        self.assertIn("FINSIGHT", html)
 
     def test_terminal_redirect(self):
         import http.client
@@ -262,7 +262,7 @@ class ApiTest(unittest.TestCase):
     def test_root_serves_terminal_portfolio_preserved(self):
         with urllib.request.urlopen(self.base + "/", timeout=10) as r:
             self.assertEqual(r.status, 200)
-            self.assertIn("FINANCE TERMINAL", r.read().decode())
+            self.assertIn("Bhojraj Kamdi", r.read().decode())
         with urllib.request.urlopen(self.base + "/portfolio/", timeout=10) as r:
             self.assertEqual(r.status, 200)
 

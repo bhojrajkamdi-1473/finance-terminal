@@ -9,10 +9,11 @@
   }
   /* ---------- sidebar sections ---------- */
   var SECTIONS = [
-    ["MARKETS", ["dashboard", "markets", "companies", "compare"]],
-    ["RESEARCH", ["screener", "watchlist", "portfolio", "news", "research", "earnings", "actions", "macro"]],
-    ["IPO", ["ipos"]],
-    ["SYSTEM", ["settings"]],
+    ["OVERVIEW", ["dashboard", "markets"]],
+    ["ANALYSIS", ["companies", "screener", "compare", "watchlist", "portfolio"]],
+    ["RESEARCH", ["research", "earnings", "actions", "ipos", "news"]],
+    ["DATA", ["macro"]],
+    ["TOOLS", ["settings"]],
   ];
   function sectionize() {
     try {
@@ -776,9 +777,9 @@
   function theme() {
     try {
       var q = (location.search || "").match(/theme=(light|dark)/);
-      var t = q ? q[1] : (localStorage.getItem("ft-theme") || "light");
-      document.body.dataset.theme = (t === "dark") ? "dark" : "light";
-    } catch (e) { document.body.dataset.theme = "light"; }
+      var t = q ? q[1] : (localStorage.getItem("ft-theme") || "dark");
+      document.body.dataset.theme = (t === "light") ? "light" : "dark";
+    } catch (e) { document.body.dataset.theme = "dark"; }
   }
   function boot() { theme(); sectionize(); strip(); marketsStrip(); }
   document.addEventListener("DOMContentLoaded", function () { setTimeout(boot, 400); });

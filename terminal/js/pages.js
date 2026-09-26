@@ -1337,7 +1337,7 @@
           container_id: "ch-tvw",
           symbol: tvSymbol(sym),
           interval: "D",
-          theme: "light",
+          theme: (document.body && document.body.dataset.theme === "light") ? "light" : "dark",
           style: "1",
           locale: "en",
           hide_side_toolbar: false,
@@ -1775,8 +1775,51 @@
     });
   }
 
+  /* ---------- FINSIGHT landing: brand + live market strip, zero invented numbers.
+     First visit only (app.js routes #/welcome when no fi-seen flag). */
+  function pWelcome() {
+    var F = window.FT_FMT;
+    function esc2(s) { return F.esc(s === null || s === undefined ? "" : String(s)); }
+    document.getElementById("view").innerHTML =
+      "<div class='fi-landing'><section class='fi-hero' aria-labelledby='fi-h1'>" +
+      "<svg class='fi-mark' width='44' height='44' viewBox='0 0 64 64' aria-hidden='true'>" +
+      "<rect width='64' height='64' rx='12' fill='#0B1120'/>" +
+      "<path d='M20 14h26v7H29v8h15v7H29v14h-9V14z' fill='#10B981'/>" +
+      "<rect x='20' y='50' width='26' height='3' fill='#10B981' opacity='0.4'/></svg>" +
+      "<h1 id='fi-h1'>FINSIGHT</h1>" +
+      "<p class='tag'>Financial intelligence, reconciled</p>" +
+      "<p class='lede'>Verified market data, financial analytics and research in one professional " +
+      "workspace. Every number traceable to its source; conflicting providers shown side by side, never averaged.</p>" +
+      "<div class='fi-cta'><a class='btn primary' href='#/dashboard' id='fi-enter'>Enter Finsight</a>" +
+      "<a class='btn' href='#/markets'>Explore terminal</a></div>" +
+      "<div class='fi-strip'><div class='lbl' style='margin-bottom:6px'>Live market snapshot</div>" +
+      "<div class='pulse' id='fi-pulse'></div></div>" +
+      "<div class='fi-foot' id='fi-src'>Loading market snapshot…</div>" +
+      "</section></div>";
+    try { localStorage.setItem("fi-seen", "1"); } catch (e) { /* ignore */ }
+    document.getElementById("fi-enter").focus({ preventScroll: true });
+    window.FT_API.get("market-overview").then(function (r) {
+      var host = document.getElementById("fi-pulse");
+      if (!host) return;
+      var items = (((r.body || {}).items) || []).filter(function (i) {
+        return i.quote && i.quote.price !== null && i.quote.price !== undefined;
+      }).slice(0, 6);
+      host.innerHTML = items.map(function (i) {
+        var qq = i.quote;
+        return "<div class='pcell'><div class='pnm'>" + esc2(qq.name || i.symbol) + "</div>" +
+          "<div class='pvl'>" + F.fmtNum(qq.price) + "</div>" +
+          "<div class='" + F.dirClass(qq.change_pct) + "' style='font-weight:650'>" + F.fmtPct(qq.change_pct) + "</div></div>";
+      }).join("") || "<div class='empty'><b>Snapshot unavailable</b><p>Market feed unreachable.</p></div>";
+      var src = document.getElementById("fi-src");
+      if (src) src.textContent = "Delayed market snapshot · " + items.length + " instruments · source: exchange-delayed feed";
+    }).catch(function () {
+      var host = document.getElementById("fi-pulse");
+      if (host) host.innerHTML = "";
+    });
+  }
+
   window.FT_PAGES = {
     init, clearTimers, pDashboard, pMarkets, pScreener, pCompanies, pCompany, pWatchlist,
-    pPortfolio, pNews, pResearch, pCompare, pIPOs, pEarnings, pMacro, pSettings, toast,
+    pPortfolio, pNews, pResearch, pCompare, pIPOs, pEarnings, pMacro, pSettings, pWelcome, toast,
   };
 })();

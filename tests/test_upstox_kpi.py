@@ -93,6 +93,11 @@ class KpiEngineTests(unittest.TestCase):
         self.assertIsNone(_kpi.roe_reported_or_calc(None, None, 400.0, 600.0))
         self.assertIsNone(_kpi.roe_reported_or_calc(None, 100.0, 0.0, 0.0))
 
+    def test_roe_single_sided_equity_omitted(self):
+        # One equity point is not an average — never stand in silently.
+        self.assertIsNone(_kpi.roe_reported_or_calc(None, 100.0, None, 600.0))
+        self.assertIsNone(_kpi.roe_reported_or_calc(None, 100.0, 400.0, None))
+
     def test_field_matrix_covers_required_domains(self):
         for domain in (
             "indian_quotes",

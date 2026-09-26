@@ -1,4 +1,4 @@
-# Finance Terminal
+# FINSIGHT — Financial Intelligence, Reconciled
 
 Institutional-style equity research terminal. Zero third-party dependencies —
 Python 3 stdlib on the backend, vanilla HTML/CSS/JS on the frontend.

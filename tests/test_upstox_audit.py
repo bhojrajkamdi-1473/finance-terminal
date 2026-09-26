@@ -491,6 +491,35 @@ class InstrumentResolutionTests(unittest.TestCase):
         self.assertIsNone(_ux.period_label_to_date("FY25"))
         self.assertIsNone(_ux.period_label_to_date(""))
 
+    def test_harvest_exact_matching_regression(self):
+        # "Tax" must never match "Profit After Tax"; "Current
+        # Liabilities" must never match "Non-Current Liabilities".
+        full = [
+            {
+                "particular": "Profit After Tax",
+                "history": [{"period": "Mar 2025", "value": 200}],
+            },
+            {
+                "particular": "Non-Current Liabilities",
+                "history": [{"period": "Mar 2025", "value": 900}],
+            },
+            {
+                "particular": "Current Liabilities",
+                "history": [{"period": "Mar 2025", "value": 100}],
+            },
+        ]
+        got = _ux.UpstoxProvider._harvest_full_statement(
+            full,
+            {
+                "incomeTaxExpense": ["Tax"],
+                "totalCurrentLiabilities": ["Current Liabilities"],
+            },
+        )
+        self.assertNotIn("incomeTaxExpense", got)  # no bare "Tax" row present
+        self.assertEqual(
+            got["totalCurrentLiabilities"]["2025-03-31"], 100 * 1e7
+        )  # exact row only
+
 
 class _Stub:
     def __init__(self, **methods):
