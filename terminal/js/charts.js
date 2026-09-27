@@ -112,6 +112,19 @@
       if (s.every(function (v) { return v === null; })) return;
       pathOf(s); ctx.strokeStyle = C.smas[k % C.smas.length]; ctx.lineWidth = 1; ctx.stroke();
     });
+    // analytical markers (breakout / VCP levels) — only when supplied
+    (opts.markers || []).forEach(function (m) {
+      if (m.value === null || m.value === undefined || isNaN(m.value)) return;
+      if (m.value < lo || m.value > hi) return;
+      var my = Math.round(y(m.value)) + 0.5;
+      ctx.save();
+      ctx.strokeStyle = m.color || C.cross; ctx.setLineDash([5, 4]); ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(padL, my); ctx.lineTo(W - padR, my); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.fillStyle = m.color || C.ink;
+      ctx.fillText(String(m.label || "").slice(0, 18), padL + 4, my - 4);
+      ctx.restore();
+    });
     // x labels
     ctx.fillStyle = C.ink;
     if (bars.length) {

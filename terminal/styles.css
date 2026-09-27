@@ -1,22 +1,37 @@
-/* FINSIGHT — Financial Intelligence, Reconciled. LIGHT ONLY (master spec).
-   Page #f7f8fa, cards #ffffff, hairlines #e3e6ea, one subtle shadow.
-   Brand blue #2563eb. Sans throughout incl. numerals (tabular-nums). */
+/* FINSIGHT v5 — Institutional terminal × research publication.
+   Light (primary): warm off-white, charcoal, navy structure, teal accent.
+   Dark (terminal): near-black charcoal, panels, muted navy, teal.
+   Both intentionally designed — never inverted. */
 :root{
-  --bg:#f7f8fa; --surface:#ffffff; --surface-2:#eef0f3; --surface-3:#e6e9ee;
-  --topbar:#ffffff; --sidenav:#ffffff;
-  --ink:#1a1c1f; --ink-2:#3c4148; --slate:#5b6068; --faint:#8a8f96; --dim:#c9ced4;
-  --line:#e3e6ea; --line-2:#d2d7dd;
-  --acc:#2563eb; --acc-ink:#1d4ed8; --acc-soft:#e8effd;
-  --info:#0e7490; --info-ink:#0e7490; --info-soft:#e0f2f5;
+  --bg:#faf9f6; --surface:#ffffff; --surface-2:#f3f1ec; --surface-3:#e9e6de;
+  --topbar:#ffffff; --sidenav:#ffffff; --navy:#1b2a4a;
+  --ink:#1c1e21; --ink-2:#3c4148; --slate:#5b6068; --faint:#8a8f96; --dim:#c9ced4;
+  --line:#e5e2d9; --line-2:#d5d1c6;
+  --acc:#0e7490; --acc-ink:#0b5f76; --acc-soft:#e0f2f5;
+  --info:#0e7490; --info-ink:#0b5f76; --info-soft:#e0f2f5;
   --up:#1a7f37; --up-soft:#e6f4ea;
   --dn:#c62828; --dn-soft:#fdecec;
   --warn:#9a6b12; --warn-soft:#faf3df;
   --sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
   --r-sm:4px; --r-md:6px; --r-lg:8px; --r-tile:10px;
-  --shadow:0 1px 2px rgba(16,24,40,.04);
+  --shadow:0 1px 2px rgba(16,24,40,.05);
   --row-h:30px; --cell-x:10px; --cell-y:5px;
   --nav-w:198px; --topbar-h:42px; --view-max:1560px;
+}
+/* Dark terminal environment — designed, not inverted. */
+body[data-theme="dark"]{
+  --bg:#101214; --surface:#17191d; --surface-2:#1e2126; --surface-3:#262a31;
+  --topbar:#141619; --sidenav:#141619; --navy:#232a3a;
+  --ink:#e8eaed; --ink-2:#c3c8cf; --slate:#9aa0a8; --faint:#6b7178; --dim:#3a3f46;
+  --line:#262a31; --line-2:#343942;
+  --acc:#2aa5bd; --acc-ink:#5cc6d8; --acc-soft:rgba(42,165,189,.13);
+  --info:#2aa5bd; --info-ink:#5cc6d8; --info-soft:rgba(42,165,189,.13);
+  --up:#4caf7d; --up-soft:rgba(76,175,125,.13);
+  --dn:#e0685c; --dn-soft:rgba(224,104,92,.13);
+  --warn:#d9a441; --warn-soft:rgba(217,164,65,.13);
+  --shadow:0 1px 2px rgba(0,0,0,.4);
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:13.5px;height:100%;-webkit-font-smoothing:antialiased}
@@ -50,6 +65,10 @@ a{color:var(--acc-ink)}
 #sidenav .nav-ic{width:16px;text-align:center;color:var(--faint);font-size:11px;font-family:var(--mono)}
 #sidenav a.on .nav-ic{color:var(--acc)}
 .nav-sec{font-size:9px;font-weight:600;letter-spacing:.1em;color:var(--dim);padding:12px 10px 4px;text-transform:uppercase;font-family:var(--mono)}
+.nav-more{margin-top:6px}
+.nav-more>summary{cursor:pointer;font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);padding:8px 10px;list-style:none}
+.nav-more>summary:hover{color:var(--ink)}
+.nav-more>summary::-webkit-details-marker{display:none}
 #view{flex:1;overflow:auto;padding:16px 20px 70px;min-width:0}
 #view>.wrap{max-width:var(--view-max);margin:0 auto}
 /* type */
@@ -347,3 +366,53 @@ table.cx-t td.freeze,table.cx-t th.freeze{position:sticky;left:0;background:var(
 @media(max-width:1024px){.cx-grid{grid-template-columns:minmax(0,1fr)}.cx-rail{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr))}}
 @media(max-width:768px){#view{padding:12px 12px 60px}.mt-v{font-size:21px}.fi-hero{padding:26px 20px}}
 @media(max-width:390px){.mtiles{grid-template-columns:1fr 1fr}.mt-v{font-size:19px}.tk-cell{padding:6px 10px}}
+
+/* ============ FINSIGHT v5: research-publication layer ============ */
+/* Serif editorial headlines (research, hero, section features). */
+.serif,.fi-hero h1,.res-doc h1,.res-doc h2{font-family:var(--serif)}
+/* Signal language: sparing semantics, never color-only (symbol + text). */
+.sig{display:inline-flex;align-items:center;gap:4px;font-weight:600;white-space:nowrap}
+.sig i{font-style:normal;font-weight:700}
+.sig-up{color:var(--up)} .sig-dn{color:var(--dn)} .sig-flat{color:var(--slate)}
+.sig-warn{color:var(--warn)} .sig-risk{color:var(--dn)}
+/* Analytical metric rows: number inside hierarchy, not a giant card. */
+.mrows{border-top:1px solid var(--line)}
+.mrow{display:grid;grid-template-columns:minmax(140px,1.2fr) minmax(0,1fr) auto;gap:6px 14px;align-items:baseline;padding:9px 2px;border-bottom:1px solid var(--line)}
+.mrow .m-l{color:var(--slate);font-size:12px}
+.mrow .m-v{font-weight:700;font-size:15px;font-variant-numeric:tabular-nums;text-align:right}
+.mrow .m-c{color:var(--faint);font-size:11px;text-align:right}
+.mrow .m-d{font-size:12px;font-weight:600;text-align:right}
+@media(max-width:640px){.mrow{grid-template-columns:1fr auto}.mrow .m-c{grid-column:1/-1;text-align:left}}
+/* Editorial tables: comparative, scannable, tabular numerals. */
+table.etable{width:100%;border-collapse:collapse;font-size:12.5px}
+table.etable th{text-align:left;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);font-weight:600;padding:8px 12px;border-bottom:1px solid var(--line-2);white-space:nowrap}
+table.etable td{padding:9px 12px;border-bottom:1px solid var(--line);font-variant-numeric:tabular-nums;vertical-align:baseline}
+table.etable td.num,table.etable th.num{text-align:right}
+table.etable tbody tr:hover td{background:var(--surface-2)}
+table.etable td.txt{max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* Masthead + regime rhythm: Context → Evidence → Analysis. */
+.masthead{border-bottom:2px solid var(--navy);padding:6px 2px 14px;margin-bottom:6px}
+.masthead h1{font-family:var(--serif);font-size:30px;font-weight:500;margin:0;letter-spacing:-.01em}
+.masthead .mast-date{color:var(--faint);font-size:11.5px;margin-top:2px}
+.regime{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0;border:1px solid var(--line);border-radius:var(--r-md);overflow:hidden;background:var(--surface)}
+.regime>div{padding:10px 14px}
+.regime>div:nth-child(2),.regime>div:nth-child(3){border-left:1px solid var(--line)}
+.regime .r-l{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);font-weight:600}
+.regime .r-v{font-size:15px;font-weight:700;margin-top:2px}
+/* Research document styling. */
+.res-doc{max-width:76ch}
+.res-doc h1{font-size:26px;font-weight:500;margin:0 0 4px}
+.res-doc h2{font-size:19px;font-weight:500;margin:26px 0 8px;padding-top:14px;border-top:1px solid var(--line)}
+.res-doc p{font-size:13.5px;line-height:1.65;color:var(--ink-2)}
+.res-doc .lede{font-size:15px;color:var(--ink)}
+.res-kicker{font-size:10.5px;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--acc-ink)}
+/* Signal map strip. */
+.sigmap{display:flex;flex-wrap:wrap;gap:8px 18px;align-items:center}
+.sigmap .sig{font-size:12.5px}
+/* Dark-mode hard spots that tokens don't cover. */
+body[data-theme="dark"] .tk-cell:hover{background:#1e2126}
+body[data-theme="dark"] .skel{background:linear-gradient(90deg,#1e2126 25%,#262a31 50%,#1e2126 75%);background-size:200% 100%}
+body[data-theme="dark"] .cx-skel{background:linear-gradient(90deg,#1e2126 25%,#262a31 50%,#1e2126 75%);background-size:200% 100%}
+body[data-theme="dark"] .err{color:#f0a49a}
+body[data-theme="dark"] .cx-err{color:#f0a49a}
+body[data-theme="dark"] .modal-back{background:rgba(0,0,0,.6)}

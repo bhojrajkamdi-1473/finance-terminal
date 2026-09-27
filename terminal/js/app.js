@@ -1,13 +1,18 @@
 /* Router, nav, global search, clock. Hash routes: #/route + #/company/SYM/Tab */
 (function () {
   "use strict";
+  /* v5 nav: 7 primary areas; everything else lives under More.
+     Route keys unchanged — deep links keep working. */
+  var NAV_PRIMARY = ["markets", "screener", "watchlist", "companies", "research", "portfolio", "news"];
   var NAV = [
-    ["dashboard", "Dashboard", "⬡"], ["markets", "Markets", "◈"],
-    ["companies", "Companies", "◎"], ["screener", "Screener", "⊟"],
-    ["compare", "Compare", "⇄"], ["watchlist", "Watchlist", "★"],
-    ["portfolio", "Portfolio", "◳"], ["research", "Research", "✦"],
+    ["markets", "Markets", "◈"], ["screener", "Screener", "⊟"],
+    ["watchlist", "Watchlist", "★"], ["companies", "Stocks", "◎"],
+    ["research", "Research", "✦"], ["portfolio", "Portfolio", "◳"],
+    ["news", "News", "▤"],
+    ["dashboard", "Dashboard", "⬡"],
+    ["compare", "Compare", "⇄"],
     ["earnings", "Earnings", "◐"], ["actions", "Actions", "⬔"],
-    ["ipos", "IPOs", "⬑"], ["news", "News", "▤"],
+    ["ipos", "IPOs", "⬑"],
     ["macro", "Macro", "⊕"], ["mfunds", "Mutual Funds", "▦"],
     ["status", "Data Status", "◔"],
     ["settings", "Settings", "⚙"],
@@ -346,20 +351,28 @@
     window.FT_PROFILE = { paint: paint };
   }
   function themeToggle() {
-    /* v4 is dark-only: lock the workspace, drop the stale Light toggle. */
-    try {
-      document.body.dataset.theme = "dark";
-      localStorage.removeItem("ft-theme");
-    } catch (e) { /* ignore */ }
+    /* v5: light + dark equally strong. Stored pref wins, default light. */
+    function current() {
+      var t = null;
+      try { t = localStorage.getItem("ft-theme"); } catch (e) { /* ignore */ }
+      return t === "dark" ? "dark" : "light";
+    }
+    function paint() {
+      var dark = document.body.dataset.theme === "dark";
+      var b = document.getElementById("top-theme");
+      if (b) { b.textContent = dark ? "Light" : "Dark"; b.removeAttribute("aria-disabled"); }
+    }
+    document.body.dataset.theme = current();
+    paint();
     var b = document.getElementById("top-theme");
     if (!b) return;
-    b.textContent = "Dark";
-    b.title = "FINSIGHT v4 is dark-only";
-    b.setAttribute("aria-disabled", "true");
     b.onclick = function () {
-      document.body.dataset.theme = "dark";
-      try { localStorage.removeItem("ft-theme"); } catch (e) { /* ignore */ }
+      var next = document.body.dataset.theme === "dark" ? "light" : "dark";
+      document.body.dataset.theme = next;
+      try { localStorage.setItem("ft-theme", next); } catch (e) { /* ignore */ }
+      paint();
     };
+    new MutationObserver(paint).observe(document.body, { attributes: true, attributeFilter: ["data-theme"] });
   }
   window.addEventListener("hashchange", route);
   document.addEventListener("DOMContentLoaded", function () {

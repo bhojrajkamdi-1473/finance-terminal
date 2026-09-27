@@ -297,6 +297,38 @@
     var m = E("cx-modal");
     if (m) m.remove();
   }
+  /* QUICK READ band: Trend / Relative Strength / Phase / Setup from the
+     terminal analytics engine. Signals, not decoration — omitted when
+     the inputs are absent. */
+  function paintQuick(sym) {
+    API.get("analytics", { symbol: sym }).then(function (r) {
+      if (!E("cx-quick")) return;
+      var d = (r.body && r.body.data) || null;
+      if (!d) { E("cx-quick").innerHTML = ""; return; }
+      var snap = d.snapshot || {}, rs = d.relative_strength || {},
+        bo = d.breakout || {}, ph = d.phase || {}, tt = d.trend_template || {};
+      function item(label, text, dirn, tip) {
+        if (text === null || text === undefined || text === "" || text === "—") return "";
+        var cls = dirn > 0 ? "sig-up" : dirn < 0 ? "sig-dn" : "sig-flat";
+        var sym2 = dirn > 0 ? "↑" : dirn < 0 ? "↓" : "→";
+        return "<div><div class='r-l'>" + esc(label) + "</div><div class='r-v'><span class='sig " + cls +
+          "' title='" + esc(tip || "") + "'><i>" + sym2 + "</i> " + esc(String(text)) + "</span> " +
+          F.mark("calc", null) + "</div></div>";
+      }
+      var rsV = (rs.rs_pp === null || rs.rs_pp === undefined) ? null : rs.rs_pp;
+      var trendTxt = (tt.passed !== undefined && tt.total) ? tt.passed + "/" + tt.total + " criteria" : (ph.phase || null);
+      var trendDir = (tt.passed !== undefined && tt.total) ? (tt.passed >= tt.total * 0.6 ? 1 : tt.passed <= tt.total * 0.3 ? -1 : 0) : 0;
+      var setupTxt = (bo.status && bo.status !== "NONE") ? bo.status :
+        ((snap.rsi14 !== null && snap.rsi14 !== undefined && snap.rsi14 > 70) ? "Overheated" : null);
+      var cells = item("Trend", trendTxt, trendDir, "Trend-template criteria met, terminal analytics") +
+        item("Relative Strength", rsV === null ? null : F.fmtPct(rsV), rsV === null ? 0 : (rsV > 2 ? 1 : rsV < -2 ? -1 : 0), "vs " + (d.benchmark || "benchmark")) +
+        item("Phase", ph.phase || null, /up|mark/i.test(ph.phase || "") ? 1 : /down/i.test(ph.phase || "") ? -1 : 0, "Weinstein phase") +
+        item("Setup", setupTxt, 0, "Breakout / momentum setup read");
+      if (!cells) { E("cx-quick").innerHTML = ""; return; }
+      E("cx-quick").innerHTML = "<div class='res-kicker' style='margin-bottom:6px'>Quick read</div>" +
+        "<div class='regime'>" + cells + "</div>" + F.legend({ calc: true });
+    }).catch(function () { if (E("cx-quick")) E("cx-quick").innerHTML = ""; });
+  }
   function loadHead(sym) {
     Promise.all([API.get("company", { symbol: sym }), API.get("quote", { symbol: sym })]).then(function (rs) {
       if (!E("cx-head")) return;
@@ -321,7 +353,9 @@
         '<div class="cx-actions"><button class="cx-btn2" id="cx-wl">+ Watchlist</button>' +
         '<button class="cx-btn2" id="cx-pf">+ Portfolio</button>' +
         '<button class="cx-btn2" id="cx-cmp">Compare</button></div></div>' +
-        '<div class="cx-strip" id="cx-strip">' + skel(2) + "</div>";
+        '<div class="cx-strip" id="cx-strip">' + skel(2) + "</div>" +
+        '<div id="cx-quick" style="margin-top:10px"></div>';
+      paintQuick(sym);
       E("cx-wl").onclick = function () {
         API.post("watchlist", { symbol: sym, name: q.name || "" }).then(function (r) {
           toast(r.body.ok ? sym + " added to watchlist." : "Could not add to watchlist.");
@@ -438,7 +472,7 @@
   function perf(sym, main) {
     /* Overview analyst dashboard. */
     main.innerHTML = '<div id="cx-ov-biz">' + skel(2) + '</div><div id="cx-ov-perf">' + skel(2) + '</div>' +
-      '<div id="cx-ov-tech">' + skel(2) + '</div><div id="cx-ov-ratio">' + skel(2) + '</div><div id="cx-ov-score">' + skel(3) + '</div><div id="cx-ov-news">' + skel(3) + "</div>";
+      '<div id="cx-ov-tech">' + skel(2) + '</div><div id="cx-ov-trend">' + skel(3) + '</div><div id="cx-ov-ratio">' + skel(2) + '</div><div id="cx-ov-score">' + skel(3) + '</div><div id="cx-ov-news">' + skel(3) + "</div>";
     API.get("company", { symbol: sym }).then(function (r) {
       if (!E("cx-ov-biz")) return;
       var p = (r.body && r.body.data) || null;
@@ -477,6 +511,49 @@
         "</dd></div></div>" + prov(r.body)
         : empty("Technical snapshot", "Technical analytics need verified price history."));
     });
+    /* Trend structure: SMA 50/150/200 computed client-side from verified
+       closes (marked ‡), stack order, RS + phase from analytics. */
+    Promise.all([
+      API.get("history", { symbol: sym, range: "2Y", interval: "1d" }),
+      API.get("analytics", { symbol: sym }),
+    ]).then(function (rs) {
+      if (!E("cx-ov-trend")) return;
+      var bars = ((((rs[0].body || {}).data) || {}).bars) || [];
+      var cl = bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null && v !== undefined; });
+      var an = (rs[1].body && rs[1].body.data) || {};
+      var rsd = an.relative_strength || {}, ph = an.phase || {};
+      function sma(n) {
+        if (cl.length < n) return null;
+        var s = 0;
+        for (var i = cl.length - n; i < cl.length; i++) s += cl[i];
+        return s / n;
+      }
+      var s50 = sma(50), s150 = sma(150), s200 = sma(200);
+      if (s50 === null && s150 === null && s200 === null) { E("cx-ov-trend").innerHTML = ""; return; }
+      function srow(l, v, up) {
+        if (v === null) return "";
+        return "<div><div class='r-l'>" + l + "</div><div class='r-v'>" + F.fmtNum(v) +
+          " <span class='sig " + (up === null ? "sig-flat" : up ? "sig-up" : "sig-dn") + "'><i>" +
+          (up === null ? "→" : up ? "↑" : "↓") + "</i></span> " + F.mark("calc", null) + "</div></div>";
+      }
+      var last = cl.length ? cl[cl.length - 1] : null;
+      var stack = (s50 !== null && s150 !== null && s200 !== null)
+        ? ((s50 > s150 && s150 > s200) ? "50 > 150 > 200" : "Not stacked") : null;
+      var rsV = (rsd.rs_pp === null || rsd.rs_pp === undefined) ? null : F.fmtPct(rsd.rs_pp);
+      E("cx-ov-trend").innerHTML = sec("Trend structure",
+        "<div class='regime'>" +
+        srow("SMA 50", s50, last !== null && s50 !== null ? last >= s50 : null) +
+        srow("SMA 150", s150, last !== null && s150 !== null ? last >= s150 : null) +
+        srow("SMA 200", s200, last !== null && s200 !== null ? last >= s200 : null) +
+        "</div>" +
+        ((stack || rsV || ph.phase) ?
+          "<div class='mrows' style='margin-top:10px'>" +
+          (stack ? "<div class='mrow'><span class='m-l'>Stack</span><span class='m-v' style='font-size:13px'>" + stack + "</span><span class='m-c'>SMA order</span></div>" : "") +
+          (rsV ? "<div class='mrow'><span class='m-l'>RS vs " + esc(an.benchmark || "benchmark") + "</span><span class='m-v'>" + rsV + "</span><span class='m-c'>relative strength</span></div>" : "") +
+          (ph.phase ? "<div class='mrow'><span class='m-l'>Phase</span><span class='m-v' style='font-size:13px'>" + esc(ph.phase) + "</span><span class='m-c'>Weinstein</span></div>" : "") +
+          "</div>" : "") +
+        F.legend({ calc: true }));
+    }).catch(function () { if (E("cx-ov-trend")) E("cx-ov-trend").innerHTML = ""; });
     API.get("news", { symbol: sym, limit: 5 }).then(function (r) {
       if (!E("cx-ov-news")) return;
       var items = (((r.body || {}).data) || {}).items || [];
@@ -1253,19 +1330,35 @@
       '<div class="cx-toolbar"><div class="grp" role="group" aria-label="Range" id="cx-rg">' +
       ["1M", "3M", "6M", "1Y", "3Y", "5Y"].map(function (x, i) {
         return '<button class="cx-btn2' + (x === "1Y" ? " on" : "") + '" data-r="' + x + '">' + x + "</button>";
-      }).join("") + '</div><div class="grp" role="group" aria-label="Overlays" id="cx-sma">' +
-      [[20, 1], [50, 1], [200, 0]].map(function (p) {
+      }).join("") +       '</div><div class="grp" role="group" aria-label="Overlays" id="cx-sma">' +
+      [[50, 1], [150, 1], [200, 0]].map(function (p) {
         return "<label class='cx-legend'><input type='checkbox' data-sma='" + p[0] + "'" + (p[1] ? " checked" : "") + "> SMA" + p[0] + "</label>";
       }).join("") + "</div></div>" +
       '<div class="chart-box"><canvas class="chart" id="cx-c" role="img" aria-label="Price history chart"></canvas><div class="chart-tip"></div></div>' +
       '<div class="cx-prov" id="cx-cmeta"></div>' +
+      '<div id="cx-rsbox" style="margin-top:10px"><div class="lbl" style="margin-bottom:4px">Relative strength vs benchmark</div>' +
+      "<canvas class='chart' id='cx-rs' style='height:110px' role='img' aria-label='Relative strength chart'></canvas>" +
+      "<div class='cx-note' id='cx-rsnote'></div></div>" +
       '<div style="margin-top:8px"><button class="cx-btn2" id="cx-vt" aria-expanded="false">View as table</button></div>' +
       '<div id="cx-vtwrap" class="vt-table" hidden></div><div id="cx-cerr"></div>');
     function smas() {
       var out = [];
       Array.prototype.forEach.call(main.querySelectorAll("[data-sma]"), function (c) { if (c.checked) out.push(Number(c.getAttribute("data-sma"))); });
-      return out.length ? out : [20];
+      return out.length ? out : [50];
     }
+    var cxMarkers = [];
+    API.get("analytics", { symbol: sym }).then(function (r) {
+      var d = (r.body && r.body.data) || null;
+      if (!d) return;
+      var bo = d.breakout || {};
+      if (bo.reference_level !== null && bo.reference_level !== undefined && !isNaN(Number(bo.reference_level))) {
+        cxMarkers = [{ value: Number(bo.reference_level), label: "Breakout level", color: "#9a6b12" }];
+      }
+      var vcp = d.vcp || {};
+      if (vcp.detected && vcp.pivot !== null && vcp.pivot !== undefined && !isNaN(Number(vcp.pivot))) {
+        cxMarkers.push({ value: Number(vcp.pivot), label: "VCP pivot", color: "#0e7490" });
+      }
+    }).catch(function () { /* markers optional */ });
     function draw(range) {
       E("cx-cerr").innerHTML = "";
       API.get("history", { symbol: sym, range: range, interval: "1d" }).then(function (r) {
@@ -1275,9 +1368,36 @@
           E("cx-cerr").innerHTML = empty("Chart", "No verified history for this range.");
           return;
         }
-        window.FT_CHART.drawPriceChart(E("cx-c"), d.bars, { sma: smas() });
+        window.FT_CHART.drawPriceChart(E("cx-c"), d.bars, { sma: smas(), markers: cxMarkers });
         E("cx-cmeta").innerHTML = "Source <b>" + esc(F.srcName(r.body.source)) + "</b> · " + esc(d.bars.length) +
           " bars · as of <b>" + esc(day(r.body.as_of)) + "</b>";
+        (function () {
+          var bench = /\.NS$|\.BO$/.test(sym) ? "^NSEI" : "^GSPC";
+          API.get("history", { symbol: bench, range: range, interval: "1d" }).then(function (br) {
+            var cv = E("cx-rs");
+            if (!cv) return;
+            var bb = ((((br.body || {}).data) || {}).bars) || [];
+            var bmap = {};
+            bb.forEach(function (x) { bmap[x.t] = x.c; });
+            var labels = [], vals = [];
+            d.bars.forEach(function (b) {
+              var bc = bmap[b.t];
+              if (b.c !== null && b.c !== undefined && bc !== null && bc !== undefined && bc) {
+                labels.push(b.t); vals.push(b.c / bc * 100);
+              }
+            });
+            if (vals.length < 5) {
+              var nn = E("cx-rsnote");
+              if (nn) nn.textContent = "Not enough overlapping history for relative strength.";
+              return;
+            }
+            window.FT_CHART.drawLines(cv, { labels: labels.map(function (t) {
+              try { return new Date(t * 1000).toISOString().slice(0, 10); } catch (e) { return ""; }
+            }), series: [{ name: "RS vs " + bench.replace(/^\^/, ""), values: vals }] });
+            var nn2 = E("cx-rsnote");
+            if (nn2) nn2.textContent = "Stock ÷ " + bench.replace(/^\^/, "") + ", rebased · " + vals.length + " sessions";
+          }).catch(function () { /* RS pane optional */ });
+        })();
         (function () {
           var tb = E("cx-vt"), tw = E("cx-vtwrap");
           if (!tb || !tw || tb.getAttribute("data-bound")) return;
@@ -1390,10 +1510,55 @@
           F.legend({ calc: true }) + prov(r.body));
     }).catch(function () { if (E("cx-tq")) E("cx-tq").innerHTML = sec("Technicals", err()); });
   }
-  /* ---------------- research tab (new) ---------------- */
+  /* ---------------- research tab: report-style snapshot + notes ---------------- */
   function tResearchNew(sym, main) {
-    main.innerHTML = '<div id="cx-research"></div>' +
+    main.innerHTML = '<div id="cx-rep"></div><div id="cx-research"></div>' +
       '<section class="cx-sec"><h2>Your notes</h2><div id="cx-notes">' + skel(2) + "</div></section>";
+    /* Investment snapshot: business, snapshot metrics, risks, monitor list —
+       every line cited, everything from verified endpoints. */
+    Promise.all([
+      API.get("company", { symbol: sym }),
+      API.get("quote", { symbol: sym }),
+      API.get("ratios", { symbol: sym }),
+      API.get("analytics", { symbol: sym }).catch(function () { return { body: null }; }),
+    ]).then(function (rs) {
+      if (!E("cx-rep")) return;
+      var prof = (rs[0].body && rs[0].body.data) || {};
+      var qq = (rs[1].body && rs[1].body.data) || {};
+      var rt = (rs[2].body && rs[2].body.data) || {};
+      var an = (rs[3].body && rs[3].body.data) || null;
+      function num(v) { return (v === null || v === undefined || v === "None" || isNaN(Number(v))) ? null : Number(v); }
+      var snap = [
+        ["Revenue growth", null, "see Financials"],
+        ["Margin trend", null, "see Financials"],
+        ["Valuation", num(rt.PERatio) !== null ? num(rt.PERatio).toFixed(1) + "x P/E" : null, "trailing"],
+        ["Relative strength", an && an.relative_strength && an.relative_strength.rs_pp !== null &&
+          an.relative_strength.rs_pp !== undefined ? F.fmtPct(an.relative_strength.rs_pp) : null, "vs " + ((an && an.benchmark) || "benchmark")],
+      ].filter(function (x) { return x[1] !== null; });
+      var risks = [], monitor = [];
+      var roe = num(rt.ROE), de = null;
+      if (roe !== null && roe < 0) risks.push(["Negative return on equity", "ROE " + roe.toFixed(1) + "%"]);
+      var snapRsi = an && an.snapshot ? num(an.snapshot.rsi14) : null;
+      if (snapRsi !== null && snapRsi > 70) risks.push(["Momentum overheated", "RSI-14 " + snapRsi.toFixed(1)]);
+      if (snapRsi !== null && (snapRsi > 70 || snapRsi < 30)) monitor.push(["RSI extremes", "RSI-14 " + snapRsi.toFixed(1)]);
+      var bo = an ? an.breakout || {} : {};
+      if (bo.status && bo.status !== "NONE") monitor.push(["Breakout structure", String(bo.status)]);
+      else monitor.push(["Price vs SMA 200", "see Trend structure"]);
+      if (!snap.length && !risks.length) { E("cx-rep").innerHTML = ""; return; }
+      E("cx-rep").innerHTML = '<section class="cx-sec res-doc" aria-label="Investment snapshot">' +
+        '<div class="res-kicker">' + esc((qq.name || prof.name || sym)) + " — Investment snapshot</div>" +
+        (prof.description ? "<p class='lede'>" + esc(String(prof.description).slice(0, 420)) + "</p>" : "") +
+        (snap.length ? "<h2>Snapshot</h2><div class='mrows'>" + snap.map(function (s) {
+          return "<div class='mrow'><span class='m-l'>" + esc(s[0]) + "</span><span class='m-v'>" + esc(s[1]) +
+            "</span><span class='m-c'>" + esc(s[2]) + "</span></div>";
+        }).join("") + "</div>" : "") +
+        (risks.length ? "<h2>Risks</h2><ul>" + risks.map(function (x) {
+          return "<li><b>" + esc(x[0]) + "</b> <span class='pc-cite'>(" + esc(x[1]) + ")</span></li>";
+        }).join("") + "</ul>" : "<h2>Risks</h2><p>No rule-based risk flags fired on current verified inputs.</p>") +
+        "<h2>What to monitor</h2><ul>" + monitor.map(function (x) {
+          return "<li><b>" + esc(x[0]) + "</b> <span class='pc-cite'>(" + esc(x[1]) + ")</span></li>";
+        }).join("") + "</ul>" + F.legend({ stale: true, calc: true }) + "</section>";
+    }).catch(function () { if (E("cx-rep")) E("cx-rep").innerHTML = ""; });
     function mount() {
       var host = E("cx-research");
       if (!host) return;

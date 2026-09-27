@@ -8,6 +8,9 @@
     return (window.FT_FMT ? window.FT_FMT.esc(String(s === null || s === undefined ? "" : s)) : String(s));
   }
   /* ---------- sidebar sections ---------- */
+  /* v5 nav: 7 primary areas; the rest under a More disclosure.
+     Route keys unchanged — deep links keep working. */
+  var NAV_PRIMARY = ["markets", "screener", "watchlist", "companies", "research", "portfolio", "news"];
   var SECTIONS = [
     ["OVERVIEW", ["dashboard", "markets"]],
     ["ANALYSIS", ["companies", "screener", "compare", "watchlist", "portfolio"]],
@@ -26,22 +29,26 @@
       if (!links.dashboard) return;
       nav.setAttribute("data-sec", "1");
       var frag = document.createDocumentFragment();
-      SECTIONS.forEach(function (sec) {
-        var has = sec[1].some(function (r) { return links[r]; });
-        if (!has) return;
-        var lab = document.createElement("div");
-        lab.className = "nav-sec";
-        lab.textContent = sec[0];
-        frag.appendChild(lab);
-        sec[1].forEach(function (r) { if (links[r]) frag.appendChild(links[r]); });
-      });
-      /* any route not mapped (future pages) keeps working at the end */
+      NAV_PRIMARY.forEach(function (r) { if (links[r]) frag.appendChild(links[r]); });
+      var more = document.createElement("details");
+      more.className = "nav-more";
+      var sum = document.createElement("summary");
+      sum.textContent = "More";
+      more.appendChild(sum);
       Object.keys(links).forEach(function (r) {
-        var mapped = SECTIONS.some(function (s) { return s[1].indexOf(r) >= 0; });
-        if (!mapped) frag.appendChild(links[r]);
+        if (NAV_PRIMARY.indexOf(r) < 0) more.appendChild(links[r]);
       });
+      frag.appendChild(more);
       nav.innerHTML = "";
       nav.appendChild(frag);
+      /* Reveal More when the active route lives inside it. */
+      window.addEventListener("hashchange", function () {
+        try {
+          var on = nav.querySelector("a.on");
+          var det = on && on.closest ? on.closest("details.nav-more") : null;
+          if (det) det.open = true;
+        } catch (e) { /* ignore */ }
+      });
     } catch (e) { /* shell must never break nav */ }
   }
   /* ---------- ticker strip (master spec §5): below header, independent
@@ -293,11 +300,19 @@
   function pDashboard() {
     var API = window.FT_API, F = window.FT_FMT, V = window.FT_VIZ, I = window.FT_INTERP;
     function esc2(s) { return F.esc(s === null || s === undefined ? "" : String(s)); }
-    $("view").innerHTML = "<h1 class='h-page'>Market dashboard</h1>" +
-      "<div class='sub'>Delayed market data · every visual answers what changed and by how much</div>" +
-      "<section aria-label='Market pulse'><h2>Market pulse</h2><div class='pulse' id='d-pulse'>" +
+    var todayStr = "";
+    try {
+      todayStr = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric", timeZone: "Asia/Kolkata" });
+    } catch (e) { todayStr = ""; }
+    $("view").innerHTML = "<div class='masthead'><h1>FINSIGHT</h1>" +
+      "<div class='mast-date'>Market Overview &nbsp;·&nbsp; " + esc2(todayStr) + " &nbsp;·&nbsp; delayed feeds</div></div>" +
+      "<section aria-label='Market overview'><div id='d-pulse'>" +
       SPARK_IDX.map(function () { return "<div class='pcell'><div class='cx-skel'></div></div>"; }).join("") +
       "</div><div id='d-pulsesrc'></div></section>" +
+      "<section aria-label='Market regime' style='margin-top:14px'><div class='res-kicker'>Market regime</div><div class='regime' id='d-regime'>" +
+      "<div><div class='cx-skel'></div></div></div></section>" +
+      "<section aria-label='Watchlist' style='margin-top:14px'><div class='res-kicker'>Watchlist</div><div id='d-watch'>" +
+      "<div class='cx-skel'></div><div class='cx-skel'></div></div></section>" +
       "<section aria-label='Market indicators' style='margin-top:12px'><h2>Market indicators</h2>" +
       "<div class='pulse' id='d-ind'>" +
       ["Gold", "Silver", "Crude", "USD/INR", "Volatility", "Crypto"].map(function () {
@@ -306,9 +321,7 @@
       "<div class='an-grid' style='margin-top:12px'>" +
       "<div class='an-8'><section aria-label='Market performance'><h2>Market performance</h2>" +
       "<div class='card'><div id='d-perf'></div><div id='d-perfnote'></div></div></section></div>" +
-      "<div class='an-4'><section aria-label='Market regime'><h2>Market regime</h2>" +
-      "<div class='card'><div id='d-regime'></div></div></section></div>" +
-      "<div class='an-4'><section aria-label='Sector heatmap'><h2>Sector heatmap</h2>" +
+      "<div class='an-4'><section aria-label='Sector heatmap'><h2>Sectors</h2>" +
       "<div class='card'><div id='d-heat'></div><div id='d-heatnote'></div></div></section></div>" +
       "<div class='an-8'><section aria-label='Market breadth'><h2>Market breadth</h2>" +
       "<div class='card'><div id='d-breadth'></div></div></section></div>" +
@@ -320,9 +333,9 @@
       "<div class='card'><div id='d-vol'></div></div></section></div>" +
       "<div class='an-8'><section aria-label='Index structure'><h2>Nifty 50 structure</h2>" +
       "<div class='card'><div id='d-struct'></div></div></section></div>" +
-      "<div class='an-8'><section aria-label='Latest news'><h2>Latest market news</h2>" +
+      "<div class='an-8'><section aria-label='Latest news'><h2>Research</h2>" +
       "<div class='card'><div id='d-news'></div></div></section></div>" +
-      "<div class='an-4'><section aria-label='IPO pulse'><h2>IPO pulse</h2>" +
+      "<div class='an-4'><section aria-label='IPO pulse'><h2>Risk &amp; calendar</h2>" +
       "<div class='card'><div id='d-ipo'></div></div></section></div>" +
       "</div>";
     var quotes = {}, hists = {};
@@ -336,8 +349,9 @@
     API.get("market-overview").then(function (r) {
       var items = ((r.body || {}).items) || [];
       items.forEach(function (i) { quotes[i.symbol] = i; });
-            paintPulse();
+      paintPulse();
       paintMovers();
+      paintWatchlist();
       paintIndicators();      var needed = SPARK_IDX.map(function (p) { return p[0]; });
       var done = 0;
       needed.forEach(function (s) {
@@ -447,18 +461,24 @@
       if (rg) {
         var cl = hists["^NSEI"] || [];
         var m1m = ret(cl, 21), m3m = ret(cl, 63);
-        var sma200 = cl.length > 200 ? cl.slice(-200).reduce(function (a, b) { return a + b; }, 0) / 200 : null;
-        var last = cl.length ? cl[cl.length - 1] : null;
         var trendState = (m3m === null) ? null : (m3m >= 5 ? "Bullish" : m3m <= -5 ? "Bearish" : "Neutral");
-        var dist = (last !== null && sma200) ? (last - sma200) / sma200 * 100 : null;
-        var cells = [
-          { label: "Trend", value: trendState, sub: "3M Nifty move", mark: "calc" },
-          { label: "Momentum", value: m1m === null ? null : F.fmtPct(m1m), sub: "1M Nifty", mark: "calc" },
-          { label: "Distance from 200D", value: dist === null ? null : F.fmtPct(dist), sub: "SMA", mark: "calc" },
-        ];
+        var eq2 = Object.keys(quotes).map(function (s) { return quotes[s]; })
+          .filter(function (i) { return i.quote && V.hasV(i.quote.price) && i.symbol.charAt(0) !== "^"; });
+        var adv = eq2.filter(function (i) { return (i.quote.change_pct || 0) > 0; }).length;
+        var dec = eq2.filter(function (i) { return (i.quote.change_pct || 0) < 0; }).length;
+        var breadthState = (adv === 0 && dec === 0) ? null : (adv > dec * 1.5 ? "Improving" : dec > adv * 1.5 ? "Weak" : "Mixed");
+        var vix = (quotes["^INDIAVIX"] || {}).quote || {};
+        var vixState = !V.hasV(vix.price) ? null : (vix.price > 20 ? "Elevated" : vix.price > 14 ? "Normal" : "Calm");
+        function rcell(l, v) {
+          return "<div><div class='r-l'>" + l + "</div><div class='r-v'>" +
+            (v === null ? "—" : esc2(v) + " " + F.mark("calc", null)) + "</div></div>";
+        }
+        rg.innerHTML = rcell("Trend", trendState) + rcell("Breadth", breadthState) + rcell("Volatility", vixState) +
+          "<div style='grid-column:1/-1;border-top:1px solid var(--line);padding:6px 14px'>" +
+          F.legend({ calc: true }) + "</div>";
         var rtext = I.regime({ trend: trendState ? trendState.toLowerCase() : null,
           momentum: m1m === null ? null : (m1m >= 0 ? "positive" : "negative") });
-        rg.innerHTML = V.kpiStrip(cells) + F.legend({ calc: true }) + (rtext ? "<p class='interp'>" + esc2(rtext) + "</p>" : "");
+        if (rtext) rg.innerHTML += "<div style='grid-column:1/-1;padding:0 14px 10px'><p class='interp' style='margin:0'>" + esc2(rtext) + "</p></div>";
       }
       var st = $("d-struct");
       if (st) {
@@ -479,6 +499,56 @@
           ]) + F.legend({ stale: true, calc: true }) + "<p class='interp'>Nifty 50 sits " + pos + "% up its 52-week range.</p>";
         }
       }
+    }
+    function paintWatchlist() {
+      var host = $("d-watch");
+      if (!host) return;
+      API.get("watchlist").then(function (r) {
+        if (!$("d-watch")) return;
+        var items = ((r.body || {}).items) || [];
+        if (!items.length) {
+          host.innerHTML = "<div class='cx-note'>Watchlist is empty. <a href='#/watchlist'>Add symbols →</a></div>";
+          return;
+        }
+        var syms = items.slice(0, 6).map(function (i) { return i.symbol; });
+        Promise.all(syms.map(function (s) {
+          return API.get("analytics", { symbol: s }).then(function (a) {
+            return { s: s, d: (a.body && a.body.data) || null };
+          }).catch(function () { return { s: s, d: null }; });
+        })).then(function (anlys) {
+          if (!$("d-watch")) return;
+          var byA = {};
+          anlys.forEach(function (a) { byA[a.s] = a.d; });
+          function sig(v, good, bad) {
+            if (v === null || v === undefined || v === "") return "<span class='sig sig-flat'><i>→</i></span>";
+            return "<span class='sig " + (good ? "sig-up" : bad ? "sig-dn" : "sig-flat") + "'><i>" +
+              (good ? "↑" : bad ? "↓" : "→") + "</i></span>";
+          }
+          host.innerHTML = '<div class="cx-scroll"><table class="etable"><thead><tr>' +
+            "<th scope='col'>Ticker</th><th scope='col' class='num'>Price</th>" +
+            "<th scope='col' class='num'>Change</th><th scope='col'>RS</th>" +
+            "<th scope='col'>Trend</th><th scope='col'>Setup</th></tr></thead><tbody>" +
+            items.slice(0, 6).map(function (i) {
+              var qq = i.quote || {}, d = byA[i.symbol] || null;
+              var snap = d ? d.snapshot || {} : {};
+              var rs = d ? d.relative_strength || {} : {};
+              var bo = d ? d.breakout || {} : {};
+              var ph = d ? d.phase || {} : {};
+              var rsTxt = (rs.rs_pp === null || rs.rs_pp === undefined) ? "—" : F.fmtPct(rs.rs_pp);
+              var trend = ph.phase || "—";
+              var setup = (bo.status && bo.status !== "NONE") ? bo.status : ((V.hasV(snap.rsi14) && snap.rsi14 > 70) ? "Overheated" : "—");
+              return "<tr><td class='txt'><a href='#/company/" + esc2(i.symbol) + "'><b>" +
+                esc2(i.symbol.replace(/\.(NS|BO)$/, "")) + "</b></a></td>" +
+                "<td class='num'>" + F.fmtNum(qq.price) + " " + F.mark("stale", null) + "</td>" +
+                "<td class='num " + F.dirClass(qq.change_pct) + "'>" + F.fmtPct(qq.change_pct) + "</td>" +
+                "<td>" + sig(rs.rs_pp, (rs.rs_pp || 0) > 2, (rs.rs_pp || 0) < -2) + " " + rsTxt + "</td>" +
+                "<td>" + sig(trend, /up|mark/i.test(trend), /down/i.test(trend)) + " " + esc2(trend) + "</td>" +
+                "<td>" + esc2(setup) + "</td></tr>";
+            }).join("") + "</tbody></table></div>" + F.legend({ stale: true, calc: true });
+        });
+      }).catch(function () {
+        if ($("d-watch")) $("d-watch").innerHTML = "<div class='cx-note'>Watchlist unavailable.</div>";
+      });
     }
     function moverRows(list) {
       var F2 = window.FT_FMT;
@@ -906,8 +976,12 @@
     } catch (e) { /* never break markets */ }
   }
   function theme() {
-    /* Master spec: LIGHT ONLY. No toggle, no ?theme override. */
-    try { document.body.dataset.theme = "light"; } catch (e) { /* ignore */ }
+    /* v5: stored preference wins, default light. Never force. */
+    try {
+      var t = null;
+      try { t = localStorage.getItem("ft-theme"); } catch (e) { /* ignore */ }
+      if (!document.body.dataset.theme) document.body.dataset.theme = (t === "dark") ? "dark" : "light";
+    } catch (e) { /* ignore */ }
   }
   function boot() { theme(); sectionize(); strip(); marketsStrip(); }
   document.addEventListener("DOMContentLoaded", function () { setTimeout(boot, 400); });
