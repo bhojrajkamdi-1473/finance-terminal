@@ -260,17 +260,45 @@
             var q = i.quote || {};
             return "<tr><td class='txt'><a href='#/company/" + F.esc(i.symbol) + "'>" +
               (showName ? secCell(i.symbol, q.name, q.exchange) : "<b>" + F.esc(q.name || i.symbol) + "</b> <span class='tk' style='font-family:var(--mono);font-size:10.5px;color:var(--slate)'>" + F.esc(i.symbol) + "</span>") +
-              "</a></td><td class='num'><b>" + F.fmtNum(q.price) + " " + F.esc(q.currency || "") + "</b></td>" +
+              "</a></td><td class='num'><b>" + F.fmtNum(q.price) + " " + F.esc(q.currency || "") + F.mark("stale", null) + "</b></td>" +
               "<td class='num " + F.dirClass(q.change_pct) + "'>" + F.fmtPct(q.change_pct) + "</td>" +
               "<td>" + F.statusPill(i.status) + "</td></tr>";
           }).join("") + "</tbody></table></div></div>";
       }
       var adv = eq.filter(function (i) { return i.quote && i.quote.change_pct > 0; }).length;
       var dec = eq.filter(function (i) { return i.quote && i.quote.change_pct < 0; }).length;
-      el("m-sects").innerHTML = tbl("India — indices", inIdx, false) + tbl("Global — indices", glIdx, false) +
+      el("m-sects").innerHTML = "<div class='card sect'><h3>Comparative returns — 1Y, rebased = 100</h3>" +
+        "<canvas class='chart' id='m-reb' style='height:230px' role='img' aria-label='Index performance comparison'></canvas>" +
+        "<div class='cx-note' id='m-rebnote'></div></div>" +
+        tbl("India — indices", inIdx, false) + tbl("Global — indices", glIdx, false) +
         tbl("Equities — tracked universe", eq, true) +
         "<div class='prov'>Breadth (tracked equities, CALCULATED): <b class='up'>" + adv + " advancing</b> · <b class='dn'>" + dec +
-        " declining</b> · fallback chain · delayed</div>";
+        " declining</b> · fallback chain · delayed</div>" + F.legend({ stale: true, calc: true });
+      (function () {
+        var idxSyms = inIdx.concat(glIdx).slice(0, 8).map(function (i) { return i.symbol; });
+        if (idxSyms.length < 2) return;
+        Promise.all(idxSyms.map(function (s) {
+          return API.get("history", { symbol: s, range: "1Y", interval: "1d" }).then(function (h) {
+            return { s: s, bars: ((((h.body || {}).data) || {}).bars) || [] };
+          }).catch(function () { return { s: s, bars: [] }; });
+        })).then(function (sets) {
+          var cv = document.getElementById("m-reb");
+          if (!cv) return;
+          var series = sets.map(function (g) {
+            var cl = g.bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null && v !== undefined; });
+            if (cl.length < 20 || !cl[0]) return null;
+            return { name: g.s.replace(/^\^/, ""), values: cl.map(function (v) { return v / cl[0] * 100; }) };
+          }).filter(Boolean);
+          if (series.length < 2) {
+            var nn = document.getElementById("m-rebnote");
+            if (nn) nn.textContent = "Not enough index histories for comparison.";
+            return;
+          }
+          window.FT_CHART.drawLines(cv, { labels: [], series: series }, { xTitle: "Date (1Y daily)", yTitle: "Rebased = 100" });
+          var nn2 = document.getElementById("m-rebnote");
+          if (nn2) nn2.textContent = series.length + " indices · 1Y daily closes, rebased = 100 · delayed feeds.";
+        });
+      })();
     });
   }
 
@@ -422,6 +450,14 @@
                 "<td class='num'><button class='btn sm' data-wl='" + F.esc(x.symbol) + "'>+ Watch</button></td></tr>";
             }).join("") + "</tbody></table></div><div style='padding:0 14px 4px'>" + F.legend({ stale: true, calc: true }) + "</div>"
             : unavail("No symbols pass these filters right now.")) +
+          (res.length >= 4 ? "<div class='card sect' style='margin-top:12px'><h3>Distributions &amp; valuation vs quality</h3>" +
+            "<div class='an-grid'><div class='an-6'><div class='lbl' style='margin-bottom:4px'>P/E distribution</div>" +
+            "<canvas class='chart' id='s-hist-pe' style='height:170px' role='img' aria-label='P/E distribution'></canvas></div>" +
+            "<div class='an-6'><div class='lbl' style='margin-bottom:4px'>ROE distribution (%)</div>" +
+            "<canvas class='chart' id='s-hist-roe' style='height:170px' role='img' aria-label='ROE distribution'></canvas></div></div>" +
+            "<div style='margin-top:10px'><div class='lbl' style='margin-bottom:4px'>Valuation vs quality (P/E × vs ROE %)</div>" +
+            "<canvas class='chart' id='s-scatter' style='height:240px' role='img' aria-label='P/E versus ROE scatter'></canvas>" +
+            "<div class='cx-note' id='s-sc-note'></div></div>" + F.legend({ stale: true }) + "</div>" : "") +
           (excl.length ? "<div style='padding:0 14px 12px'><h3 style='margin-top:10px'>Excluded from filter (no data — not scored)</h3><ul style='margin:6px 0;padding-left:18px'>" +
             excl.map(function (x) {
               return "<li class='mut'>" + F.esc(x.symbol) + ": " + F.esc(x.excluded_reason) + "</li>";
@@ -444,6 +480,39 @@
             location.hash = "#/company/" + encodeURIComponent(tr.getAttribute("data-sym"));
           };
         });
+        (function () {
+          function num(v) { return (v === undefined || v === null || v === "None" || isNaN(Number(v))) ? null : Number(v); }
+          var pes = [], roes = [], pts = [];
+          res.forEach(function (x) {
+            var f = x.fundamental || {};
+            var pe = num(f.PERatio), roe = num(f.ROE);
+            if (pe !== null && pe > 0 && pe < 200) pes.push(pe);
+            if (roe !== null) roes.push(roe);
+            if (pe !== null && pe > 0 && pe < 200 && roe !== null)
+              pts.push({ label: String(x.symbol).replace(/\.(NS|BO)$/, ""), x: pe, y: roe });
+          });
+          function draw(id, fn) {
+            var cv = document.getElementById(id);
+            if (cv && fn) { try { fn(cv); } catch (e) { /* optional visuals */ } }
+          }
+          draw("s-hist-pe", pes.length >= 3 && window.FT_CHART ? function (cv) {
+            window.FT_CHART.drawHist(cv, pes, { xTitle: "P/E (×)", yTitle: "Companies" });
+          } : null);
+          draw("s-hist-roe", roes.length >= 3 && window.FT_CHART ? function (cv) {
+            window.FT_CHART.drawHist(cv, roes, { xTitle: "ROE (%)", yTitle: "Companies", color: "#0e7490" });
+          } : null);
+          var sc = document.getElementById("s-scatter");
+          if (sc && pts.length >= 2 && window.FT_CHART) {
+            try {
+              window.FT_CHART.drawScatter(sc, pts, {
+                xTitle: "P/E (×)", yTitle: "ROE (%)",
+                src: "Reported provider multiples · delayed",
+              });
+              var nn = document.getElementById("s-sc-note");
+              if (nn) nn.textContent = pts.length + " companies with both metrics · lower-right is cheaper quality.";
+            } catch (e) { /* optional */ }
+          } else if (sc) { sc.style.display = "none"; }
+        })();
       });
     }
     run();
@@ -1443,15 +1512,27 @@
           if (WL_SORT === "price") return ((b.quote && b.quote.price) || 0) - ((a.quote && a.quote.price) || 0);
           return String(a.name || a.symbol).localeCompare(String(b.name || b.symbol));
         });
-        el("w-t").innerHTML = items.length ? '<div class="twrap"><table class="t"><thead><tr><th scope="col">Security</th><th scope="col" class="num">Price</th><th scope="col" class="num">Change</th><th scope="col" class="num">Volume</th><th scope="col">Fund.</th><th scope="col"><span class="hidden">A</span></th></tr></thead><tbody>' +
+        el("w-t").innerHTML = items.length ? '<div class="twrap"><table class="t"><thead><tr><th scope="col">Security</th><th scope="col" class="num">Price</th><th scope="col" class="num">Change</th><th scope="col">Trend</th><th scope="col" class="num">Volume</th><th scope="col">Fund.</th><th scope="col"><span class="hidden">A</span></th></tr></thead><tbody>' +
           items.map(function (i) {
             var q = i.quote || {};
+            var sid = "wsp-" + String(i.symbol).replace(/[^A-Z0-9]/g, "");
             return "<tr><td class='txt'><a href='#/company/" + F.esc(i.symbol) + "'>" +
               secCell(i.symbol, i.name || q.name, q.exchange) + "</a></td><td class='num'><b>" + F.fmtNum(q.price) + " " + F.esc(q.currency || "") + F.mark("stale", { source: "quote-chain", status: "delayed", asOf: q.as_of }) +
               "</b></td><td class='num " + F.dirClass(q.change_pct) + "'>" + F.fmtPct(q.change_pct) +
-              "</td><td class='num'>" + F.fmtInt(q.volume) + "</td><td class='txt' id='w-fund-" + F.esc(i.symbol.replace(/[^A-Z0-9]/g, "")) + "'><span class='src'>—</span></td>" +
+              "</td><td><canvas class='spark' id='" + sid + "' style='width:90px;height:26px;display:block' aria-hidden='true'></canvas></td>" +
+              "<td class='num'>" + F.fmtInt(q.volume) + "</td><td class='txt' id='w-fund-" + F.esc(i.symbol.replace(/[^A-Z0-9]/g, "")) + "'><span class='src'>—</span></td>" +
               "<td class='num'><button class='btn sm danger' data-rm='" + F.esc(i.symbol) + "'>remove</button></td></tr>";
           }).join("") + "</tbody></table></div>" + F.legend({ stale: true }) : unavail("Watchlist is empty. Add symbols to track them.");
+        items.slice(0, 10).forEach(function (i) {
+          API.get("history", { symbol: i.symbol, range: "3M", interval: "1d" }).then(function (h) {
+            var cv = document.getElementById("wsp-" + String(i.symbol).replace(/[^A-Z0-9]/g, ""));
+            if (!cv || !window.FT_CHART) return;
+            var bars = ((((h.body || {}).data) || {}).bars) || [];
+            var cl = bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null && v !== undefined; });
+            if (cl.length < 5) return;
+            window.FT_CHART.drawSpark(cv, cl, cl[cl.length - 1] >= cl[0]);
+          }).catch(function () { /* spark optional */ });
+        });
         Array.prototype.forEach.call(document.querySelectorAll("[data-rm]"), function (x) {
           x.onclick = function () { API.del("watchlist", { symbol: x.getAttribute("data-rm") }).then(load); };
         });
@@ -1497,12 +1578,18 @@
             '<div class="twrap"><table class="t"><thead><tr><th scope="col">Security</th><th scope="col" class="num">Qty</th><th scope="col" class="num">Avg</th><th scope="col" class="num">LTP</th><th scope="col" class="num">Invested</th><th scope="col" class="num">Current</th><th scope="col" class="num">P&amp;L</th><th scope="col" class="num">Alloc</th><th scope="col"><span class="hidden">A</span></th></tr></thead><tbody>' +
             pos.map(function (p) {
               return "<tr><td class='txt'><a href='#/company/" + F.esc(p.symbol) + "'>" + secCell(p.symbol, p.name, null) + "</a></td><td class='num'>" + F.fmtNum(p.quantity, 0) +
-                "</td><td class='num'>" + F.fmtNum(p.avg_price) + "</td><td class='num'>" + F.fmtNum(p.current_price) +
+                "</td><td class='num'>" + F.fmtNum(p.avg_price) + "</td><td class='num'>" + F.fmtNum(p.current_price) + F.mark("stale", null) +
                 "</td><td class='num'>" + F.fmtMoney(p.invested_value) + "</td><td class='num'>" + (p.current_value === null ? "—" : F.fmtMoney(p.current_value)) +
-                "</td><td class='num " + F.dirClass(p.unrealized_pnl) + "'>" + (p.unrealized_pnl === null ? "—" : F.fmtMoney(p.unrealized_pnl) + " (" + F.fmtPct(p.pnl_pct) + ")") +
+                "</td><td class='num " + F.dirClass(p.unrealized_pnl) + "'>" + (p.unrealized_pnl === null ? "—" : F.fmtMoney(p.unrealized_pnl) + " (" + F.fmtPct(p.pnl_pct) + ")") + F.mark("calc", null) +
                 "</td><td class='num'>" + F.fmtPct(p.allocation_pct) + "</td>" +
                 "<td class='num'><button class='btn sm danger' data-prm='" + F.esc(p.symbol) + "'>x</button></td></tr>";
             }).join("") + "</tbody></table></div></div>";
+          h += "<div class='card sect'><h3>Contribution to P&amp;L</h3><div id='pf-contrib'>" +
+            window.FT_VIZ.bars(pos.filter(function (p) { return p.unrealized_pnl !== null && p.unrealized_pnl !== undefined; }).map(function (p) {
+              return { label: String(p.symbol).replace(/\.(NS|BO)$/, ""), value: p.unrealized_pnl, display: F.fmtMoney(p.unrealized_pnl) };
+            })) + "</div>" + F.legend({ calc: true }) +
+            "<div class='cx-note'>Position P&amp;L = (LTP − avg) × qty · terminal-calculated.</div></div>";
+          h += "<div class='card sect'><h3>Sector exposure</h3><div id='pf-sect'>" + skel(2) + "</div></div>";
         } else {
           h += "<div class='card'>" + unavail("No holdings yet.") + "</div>";
         }
@@ -1510,6 +1597,26 @@
         Array.prototype.forEach.call(document.querySelectorAll("[data-prm]"), function (x) {
           x.onclick = function () { API.del("portfolio", { symbol: x.getAttribute("data-prm") }).then(load); };
         });
+        (function () {
+          var host = el("pf-sect");
+          if (!host || !pos.length) return;
+          Promise.all(pos.slice(0, 8).map(function (p) {
+            return API.get("company", { symbol: p.symbol }).then(function (r) {
+              var d = (r.body && r.body.data) || {};
+              return { s: p.symbol, sector: d.sector || d.industry || "Unknown", v: p.current_value || 0 };
+            }).catch(function () { return { s: p.symbol, sector: "Unknown", v: 0 }; });
+          })).then(function (rows) {
+            var el2 = el("pf-sect");
+            if (!el2) return;
+            var by = {};
+            rows.forEach(function (x) { by[x.sector] = (by[x.sector] || 0) + x.v; });
+            var total = Object.keys(by).reduce(function (a, k) { return a + by[k]; }, 0);
+            if (!total) { el2.innerHTML = "<div class='cx-note'>Sector data unavailable.</div>"; return; }
+            el2.innerHTML = window.FT_VIZ.bars(Object.keys(by).map(function (k) {
+              return { label: k.slice(0, 22), value: by[k] / total * 100, display: (by[k] / total * 100).toFixed(1) + "%" };
+            })) + "<div class='cx-note'>Share of current value by company sector · terminal-calculated.</div>" + F.legend({ calc: true });
+          });
+        })();
       });
     }
     load();
@@ -1732,7 +1839,36 @@
             ok ? F.esc(last.value || "—") : "—",
             ok ? (last.date || "") + " · " + ((d && d.unit) || "") + " · Alpha Vantage"
                : ((r.body && r.body.message) || "Unavailable") + " · Alpha Vantage");
-        }).join("") + "</div>" + F.legend({ stale: true });
+        }).join("") + "</div>" + F.legend({ stale: true }) + "<div id='mc-charts' style='margin-top:10px'></div>";
+        var wrap = document.getElementById("mc-charts");
+        if (!wrap || !window.FT_CHART) return;
+        rs.forEach(function (r, ix) {
+          var d = r.body && r.body.data, pts = ((d && d.points) || []).slice().reverse();
+          if (pts.length < 3) return;
+          var vals = pts.map(function (p) {
+            var n = Number(p.value);
+            return isNaN(n) ? null : n;
+          });
+          if (!vals.some(function (v) { return v !== null; })) return;
+          var id = "mc-ch-" + ix;
+          var div = document.createElement("div");
+          var first = vals.filter(function (v) { return v !== null; })[0];
+          var lastV = vals.filter(function (v) { return v !== null; }).slice(-1)[0];
+          var read = (first !== undefined && lastV !== undefined && first)
+            ? " · " + ((lastV >= first ? "+" : "") + ((lastV - first) / Math.abs(first) * 100).toFixed(1) + "% over span") : "";
+          div.innerHTML = "<div class='lbl' style='margin:8px 0 4px'>" + F.esc(list[ix][0].replace(/_/g, " ")) +
+            (d.unit ? " (" + F.esc(d.unit) + ")" : "") + "</div>" +
+            "<canvas class='chart' id='" + id + "' style='height:150px' role='img' aria-label='" + F.esc(list[ix][0]) + " trend'></canvas>" +
+            "<div class='cx-note'>" + F.esc(pts.length + " points" + read + " · " + (d.unit || "")) + "</div>";
+          wrap.appendChild(div);
+          setTimeout(function () {
+            var cv = document.getElementById(id);
+            if (cv) window.FT_CHART.drawLines(cv, {
+              labels: pts.map(function (p) { return String(p.date || "").slice(0, 7); }),
+              series: [{ name: list[ix][0], values: pts.map(function (p) { var n = Number(p.value); return isNaN(n) ? null : n; }) }],
+            }, { xTitle: "Date", yTitle: d.unit || "Value" });
+          }, 60);
+        });
       });
     }
     econTiles(INDS, "mc-econ");
@@ -1897,6 +2033,22 @@
           "<td class='num'>" + lat + "</td>" +
           "<td class='txt' style='white-space:normal;max-width:340px'>" + esc2(p.detail || "") + "</td></tr>";
       }).join("");
+      /* Coverage visual: domains each provider actually serves (from the
+         capabilities map — counted, never estimated). */
+      var cov = list.map(function (p) {
+        var n = 0, caps = p.capabilities || {};
+        Object.keys(caps).forEach(function (k) { if (caps[k]) n++; });
+        return { label: p.label || p.id, value: n, display: n + " domains" };
+      }).filter(function (x) { return x.value > 0; });
+      var grid = document.getElementById("view");
+      if (grid && cov.length && window.FT_VIZ && !document.getElementById("st-cov")) {
+        var box = document.createElement("div");
+        box.className = "card sect";
+        box.innerHTML = "<h3>Provider coverage (domains served)</h3><div id='st-cov'></div>" +
+          "<div class='cx-note'>Counted from each provider's declared capabilities map.</div>";
+        grid.appendChild(box);
+        window.FT_VIZ.bars && (document.getElementById("st-cov").innerHTML = window.FT_VIZ.bars(cov));
+      }
     }).catch(function () {
       var host = document.querySelector("#st-t tbody");
       if (host) host.innerHTML = "<tr><td colspan='5'>Provider health unreachable.</td></tr>";

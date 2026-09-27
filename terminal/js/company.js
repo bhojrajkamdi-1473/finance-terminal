@@ -649,8 +649,16 @@
       var labels = reps.slice(0, 4).reverse().map(function (x) { return String(x.fiscalDateEnding || x.date || "").slice(0, 7); });
       var rev = series(["totalRevenue", "revenue", "revenues", "sales"]);
       var pat = series(["netIncome", "net_income", "netEarnings"]);
+      var opm = series(["operatingIncome", "operating_income", "ebit"]);
+      var eps = series(["basicEPS", "epsBasic", "eps", "dilutedEPS"]);
+      var margin = opm.map(function (o, i) {
+        return (o === null || rev[i] === null || !rev[i]) ? null : o / Math.abs(rev[i]) * 100;
+      });
+      var netm = pat.map(function (p, i) {
+        return (p === null || rev[i] === null || !rev[i]) ? null : p / Math.abs(rev[i]) * 100;
+      });
       var ok = function (s) { return s.some(function (v) { return v !== null; }); };
-      if (!ok(rev) && !ok(pat)) return;
+      if (!ok(rev) && !ok(pat) && !ok(eps)) return;
       var box = document.createElement("div");
       var I = window.FT_INTERP;
       var interp = "";
@@ -664,16 +672,64 @@
         (ok(rev) ? "<canvas class='chart' id='cx-ov-rev' style='height:150px' role='img' aria-label='Revenue trend'></canvas>" : "") +
         '</div><div class="an-6"><div class="lbl">Net profit</div>' +
         (ok(pat) ? "<canvas class='chart' id='cx-ov-pat' style='height:150px' role='img' aria-label='Net profit trend'></canvas>" : "") +
-        "</div></div>" +
+        "</div>" +
+        ((ok(margin) || ok(netm)) ? '<div class="an-6"><div class="lbl">Margins (%)</div>' +
+        "<canvas class='chart' id='cx-ov-mgn' style='height:150px' role='img' aria-label='Margin trend'></canvas></div>" : "") +
+        (ok(eps) ? '<div class="an-6"><div class="lbl">EPS (₹)</div>' +
+        "<canvas class='chart' id='cx-ov-eps' style='height:150px' role='img' aria-label='EPS trend'></canvas></div>" : "") +
+        "</div>" +
         (interp ? "<p class='interp'>" + esc(interp) + "</p>" : "") + prov(r.body));
       var news = E("cx-ov-news");
       news.parentNode.insertBefore(box, news);
       setTimeout(function () {
         if (ok(rev) && document.getElementById("cx-ov-rev"))
-          window.FT_CHART.drawBars(document.getElementById("cx-ov-rev"), { labels: labels, series: [{ name: "Revenue", values: rev }] });
+          window.FT_CHART.drawBars(document.getElementById("cx-ov-rev"), { labels: labels, series: [{ name: "Revenue", values: rev }] }, { xTitle: "Financial Year", yTitle: "Revenue" });
         if (ok(pat) && document.getElementById("cx-ov-pat"))
-          window.FT_CHART.drawBars(document.getElementById("cx-ov-pat"), { labels: labels, series: [{ name: "PAT", values: pat }] });
+          window.FT_CHART.drawBars(document.getElementById("cx-ov-pat"), { labels: labels, series: [{ name: "PAT", values: pat }] }, { xTitle: "Financial Year", yTitle: "Net profit" });
+        if ((ok(margin) || ok(netm)) && document.getElementById("cx-ov-mgn"))
+          window.FT_CHART.drawLines(document.getElementById("cx-ov-mgn"), { labels: labels, series: [
+            { name: "Op margin %", values: margin },
+            { name: "Net margin %", values: netm },
+          ].filter(function (s) { return s.values.some(function (v) { return v !== null; }); }) }, { xTitle: "Financial Year", yTitle: "Margin (%)" });
+        if (ok(eps) && document.getElementById("cx-ov-eps"))
+          window.FT_CHART.drawBars(document.getElementById("cx-ov-eps"), { labels: labels, series: [{ name: "EPS", values: eps }] }, { xTitle: "Financial Year", yTitle: "EPS (₹)" });
       }, 60);
+      /* Cash flow: CFO / capex / FCF (FCF = CFO − |capex|, formula shown). */
+      API.get("fundamentals", { symbol: sym, statement: "cashflow", period: "annual" }).then(function (r2) {
+        var reps2 = ((((r2.body || {}).data) || {}).reports) || [];
+        if (reps2.length < 1) return;
+        function s2(keys) {
+          return reps2.slice(0, 4).reverse().map(function (rep) {
+            for (var i = 0; i < keys.length; i++) {
+              var n = Number(rep[keys[i]]);
+              if (rep[keys[i]] !== "None" && !isNaN(n)) return n;
+            }
+            return null;
+          });
+        }
+        var lab2 = reps2.slice(0, 4).reverse().map(function (x) { return String(x.fiscalDateEnding || x.date || "").slice(0, 7); });
+        var cfo = s2(["operatingCashflow", "operating_cashflow", "cashFromOperations", "cfo"]);
+        var capex = s2(["capitalExpenditures", "capex", "purchaseOfFixedAssets"]);
+        var fcf = cfo.map(function (v, i) {
+          return (v === null || capex[i] === null) ? null : v - Math.abs(capex[i]);
+        });
+        if (!cfo.some(function (v) { return v !== null; })) return;
+        var box2 = document.createElement("div");
+        box2.innerHTML = sec("Cash flow",
+          "<div class='lbl'>Operating cash flow vs capex vs FCF</div>" +
+          "<canvas class='chart' id='cx-ov-cf' style='height:170px' role='img' aria-label='Cash flow chart'></canvas>" +
+          "<div class='cx-note'>FCF = CFO − |capex| · reported CFO/capex where supplied.</div>" + prov(r2.body));
+        var ref = E("cx-ov-news");
+        if (ref) ref.parentNode.insertBefore(box2, ref);
+        setTimeout(function () {
+          var cv = document.getElementById("cx-ov-cf");
+          if (cv) window.FT_CHART.drawBars(cv, { labels: lab2, series: [
+            { name: "CFO", values: cfo },
+            { name: "Capex", values: capex },
+            { name: "FCF", values: fcf },
+          ].filter(function (s) { return s.values.some(function (v) { return v !== null; }); }) }, { xTitle: "Financial Year", yTitle: "Cash flow" });
+        }, 60);
+      }).catch(function () { /* optional */ });
     }).catch(function () { /* overview works without statements */ });
     API.get("ratiosheet", { symbol: sym }).then(function (r) {
       if (!E("cx-ov-ratio")) return;
@@ -823,6 +879,20 @@
     }
     return null;
   }
+  /* CSV export (client-side, from verified rendered data — title, period,
+     units, source, timestamp in the header rows). */
+  var __csvN = 0;
+  function csvDownload(csv, filename) {
+    try {
+      var blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      var a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = filename || "finsight-export.csv";
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function () { try { URL.revokeObjectURL(a.href); a.remove(); } catch (e) { /* ignore */ } }, 500);
+    } catch (e) { toast("Export failed."); }
+  }
   function stmtTable(title, env) {
     if (!env || !env.data || !((env.data.reports || []).length)) {
       return sec(title, empty(title, "No statement data is supplied by a configured provider right now."));
@@ -878,7 +948,32 @@
         "<div class='cx-prov'>Actual reported periods only — never interpolated.</div></div>";
     }
     var out = sec(title, h +
-      '<div class="cx-prov">' + (ccy ? "Currency <b>" + esc(ccy) + "</b> · " : "") + 'figures in <b>' + esc(unit) + "</b> · YoY shown only when mathematically valid.</div>" + F.legend({ stale: true, calc: true }) + prov(env));
+      '<div class="cx-prov">' + (ccy ? "Currency <b>" + esc(ccy) + "</b> · " : "") + 'figures in <b>' + esc(unit) + "</b> · YoY shown only when mathematically valid.</div>" + F.legend({ stale: true, calc: true }) + prov(env) +
+      "<div style='margin-top:8px'><button class='cx-btn2' id='stmt-csv-" + (__csvN++) + "'>Export CSV</button></div>");
+    (function (myId, myReps, myUnit, myCcy, mySrc, myAsOf) {
+      setTimeout(function () {
+        var b = document.getElementById(myId);
+        if (!b) return;
+        b.onclick = function () {
+          var cols = myReps.map(function (r) { return r.fiscalDateEnding || r.date || ""; });
+          var keys = [];
+          myReps.forEach(function (r) {
+            Object.keys(r).forEach(function (k) {
+              if (["fiscalDateEnding", "reportedCurrency", "date"].indexOf(k) < 0 && keys.indexOf(k) < 0) keys.push(k);
+            });
+          });
+          function q(v) { v = String(v === null || v === undefined ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+          var lines = ["# " + title, "# Unit: " + myUnit + (myCcy ? " (" + myCcy + ")" : ""),
+            "# Source: " + mySrc + " · as of " + myAsOf,
+            ["Particulars"].concat(cols).map(q).join(",")];
+          keys.forEach(function (k) {
+            lines.push([k].concat(myReps.map(function (r) { return r[k] === undefined ? "" : r[k]; })).map(q).join(","));
+          });
+          csvDownload(lines.join("\n"), "finsight-statement.csv");
+        };
+      }, 60);
+    })("stmt-csv-" + (__csvN - 1), reps, unit, ccy,
+      (env.source ? F.srcName(env.source) : ""), (env.as_of ? String(env.as_of).slice(0, 10) : ""));
     if (title === "Income statement") {
       setTimeout(function () {
         var cv = document.getElementById(chartId);
@@ -1040,7 +1135,43 @@
         row("Debt / Equity", de, "calc", KR_DEFS["Debt / Equity"]) +
         "</tbody></table></div>" +
         (sub.length ? "<div class='cx-note'>" + esc(sub.join(" · ")) + " (sector benchmarks where supplied).</div>" : "") +
-        F.legend({ stale: true, calc: true }) + prov(renv));
+        F.legend({ stale: true, calc: true }) + prov(renv) +
+        "<div style='margin-top:8px'><button class='cx-btn2' id='kr-csv'>Export CSV</button></div>");
+      (function (myPeriods, series) {
+        setTimeout(function () {
+          var b = document.getElementById("kr-csv");
+          if (!b) return;
+          b.onclick = function () {
+            function q(v) { v = String(v === null || v === undefined ? "" : v); return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v; }
+            var lines = ["# Key ratios", "# Source: reported statements + terminal calculations"];
+            series.forEach(function (s) {
+              lines.push([s[0]].concat(s[1].map(function (c) { return c === null ? "" : (c.v !== undefined ? c.v : c); })).map(q).join(","));
+            });
+            lines.splice(1, 0, ["Metric"].concat(myPeriods.map(function (p) { return p.slice(0, 7); })).map(q).join(","));
+            csvDownload(lines.join("\n"), "finsight-key-ratios.csv");
+          };
+        }, 60);
+      })(periods, [["Revenue", rev], ["Net profit", pat],
+        ["Net margin %", mg.map(function (c) { return c ? c.v : null; })],
+        ["ROE %", roe.map(function (c) { return c ? c.v : null; })],
+        ["Debt / Equity", de.map(function (c) { return c ? c.v : null; })]]);
+      (function () {
+        function vals(a) { return a.map(function (c) { return c ? c.v : null; }); }
+        var series = [
+          { name: "ROE %", values: vals(roe) },
+          { name: "Net margin %", values: vals(mg) },
+        ].filter(function (s) { return s.values.some(function (v) { return v !== null; }); });
+        var cv = document.getElementById("cx-kr-ch");
+        if (cv && series.length) {
+          setTimeout(function () {
+            var el2 = document.getElementById("cx-kr-ch");
+            if (el2) window.FT_CHART.drawLines(el2, {
+              labels: periods.map(function (p) { return p.slice(0, 7); }),
+              series: series,
+            }, { xTitle: "Fiscal year", yTitle: "Percent (%)" });
+          }, 60);
+        } else if (cv) { cv.style.display = "none"; }
+      })();
     }).catch(function () {
       if (E("cx-kr")) E("cx-kr").innerHTML = sec("Key ratios", err());
     });
@@ -1085,6 +1216,33 @@
           "<tr><td>ROCE</td>" + rows.map(function (x) { return "<td class='num'>" + cell(x.r.ROCE, function (v) { return v.toFixed(1) + "%"; }) + "</td>"; }).join("") + "</tr>" +
           "<tr><td>Market cap</td>" + rows.map(function (x) { return "<td class='num'>" + cell(x.r.MarketCapitalization, function (v) { return F.fmtIN(v, x.q.currency || "INR"); }) + "</td>"; }).join("") + "</tr>" +
           "</tbody></table></div>" + F.legend({ stale: true });
+        /* Horizontal ranking bars: P/E, ROE, market cap across peers. */
+        (function () {
+          function col(key, fmt, label) {
+            var vals = rows.map(function (x) {
+              var v = x.r[key];
+              v = (v === undefined || v === null || v === "None") ? null : Number(v);
+              return (v === null || isNaN(v)) ? null : { label: x.s.replace(/\.(NS|BO)$/, ""), value: v, display: fmt(v) };
+            }).filter(function (o) { return o !== null; });
+            return vals.length >= 2 ? { label: label, vals: vals } : null;
+          }
+          var groups = [
+            col("PERatio", function (v) { return v.toFixed(1) + "x"; }, "P/E (×) — lower left"),
+            col("ROE", function (v) { return v.toFixed(1) + "%"; }, "ROE (%) — higher right"),
+            col("MarketCapitalization", function (v) { return F.fmtMoney(v); }, "Market cap"),
+          ].filter(Boolean);
+          if (!groups.length) return;
+          var host = document.createElement("div");
+          host.innerHTML = groups.map(function (g, gi) {
+            return "<div style='margin-top:10px'><div class='lbl' style='margin-bottom:4px'>" + esc(g.label) + "</div><div id='peer-bars-" + gi + "'></div></div>";
+          }).join("");
+          var out = $("peer-out");
+          if (out) out.appendChild(host);
+          groups.forEach(function (g, gi) {
+            var el = document.getElementById("peer-bars-" + gi);
+            if (el && window.FT_VIZ) el.innerHTML = window.FT_VIZ.bars(g.vals);
+          });
+        })();
       });
     }
     $("peer-go").onclick = go;
@@ -1121,6 +1279,51 @@
         '<p class="cx-note">Peer comparison lives in the Compare workspace (no automatic peer universe, no rankings). ' +
         "<button class='cx-btn2' id='cx-peer'>Compare " + esc(sym) + " side-by-side →</button></p>");
       E("cx-val").innerHTML = h;
+      /* P/E history: year-end close ÷ reported basic EPS per fiscal year.
+         Method stated; years without both inputs are skipped. */
+      Promise.all([
+        API.get("fundamentals", { symbol: sym, statement: "income", period: "annual" }),
+        API.get("history", { symbol: sym, range: "5Y", interval: "1d" }),
+      ]).then(function (rsPE) {
+        if (!E("cx-val")) return;
+        var reps = ((((rsPE[0].body || {}).data) || {}).reports) || [];
+        var bars = ((((rsPE[1].body || {}).data) || {}).bars) || [];
+        if (reps.length < 2 || bars.length < 60) return;
+        function epsOf(rep) {
+          var keys = ["basicEPS", "epsBasic", "eps", "dilutedEPS"];
+          for (var i = 0; i < keys.length; i++) {
+            var n = Number(rep[keys[i]]);
+            if (rep[keys[i]] !== "None" && !isNaN(n) && n > 0) return n;
+          }
+          return null;
+        }
+        var pts = [], labs = [];
+        reps.slice(0, 5).reverse().forEach(function (rep) {
+          var fed = rep.fiscalDateEnding || rep.date || "";
+          var e = epsOf(rep);
+          if (!fed || e === null) return;
+          var endTs = null;
+          try { endTs = Math.floor(new Date(String(fed).slice(0, 10)).getTime() / 1000); } catch (ex) { return; }
+          var px = null;
+          bars.forEach(function (b) { if (b.t !== null && b.t !== undefined && b.t <= endTs && b.c) px = b.c; });
+          if (px === null) return;
+          pts.push(px / e);
+          labs.push(String(fed).slice(0, 7));
+        });
+        if (pts.length < 2) return;
+        var med = pts.slice().sort(function (a, b) { return a - b; })[Math.floor(pts.length / 2)];
+        var box = document.createElement("div");
+        box.innerHTML = sec("P/E history",
+          "<div class='lbl' style='margin-bottom:4px'>Trailing P/E at fiscal year-end (price ÷ reported basic EPS)</div>" +
+          "<canvas class='chart' id='cx-pe-ch' style='height:190px' role='img' aria-label='P/E history'></canvas>" +
+          "<div class='cx-note'>Median " + med.toFixed(1) + "× across " + pts.length + " year-ends · current " +
+          pts[pts.length - 1].toFixed(1) + "×.</div>" + F.legend({ stale: true, calc: true }));
+        E("cx-val").appendChild(box);
+        setTimeout(function () {
+          var cv = document.getElementById("cx-pe-ch");
+          if (cv) window.FT_CHART.drawLines(cv, { labels: labs, series: [{ name: "P/E (×)", values: pts }] }, { xTitle: "Fiscal year", yTitle: "P/E (×)" });
+        }, 60);
+      }).catch(function () { /* optional */ });
       var peerBtn = E("cx-peer");
       if (peerBtn) peerBtn.onclick = function () {
         try { sessionStorage.setItem("ft-cmp", sym); } catch (e) { /* ignore */ }
@@ -1234,9 +1437,41 @@
               (sv === undefined || sv === null || sv === "" ? "" : typeof sv === "number" ? F.fmtPct(sv) + " " + F.mark("calc", null) : estCell(sv)) + "</td></tr>";
           }).join("") + "</tbody></table></div>";
       }
+      function epsChart(list, id, title) {
+        var pts = list.map(function (x) {
+          var r = (x.reportedEPS === undefined || x.reportedEPS === null || isNaN(Number(x.reportedEPS))) ? null : Number(x.reportedEPS);
+          var e = (x.estimatedEPS === undefined || x.estimatedEPS === null || isNaN(Number(x.estimatedEPS))) ? null : Number(x.estimatedEPS);
+          return { p: x.fiscalDateEnding || x.reportedDate || "", r: r, e: e };
+        }).filter(function (x) { return x.p && (x.r !== null || x.e !== null); }).slice(-8);
+        if (pts.length < 2) return "";
+        return "<div style='margin-top:10px'><div class='lbl' style='margin-bottom:4px'>" + esc(title) + "</div>" +
+          "<canvas class='chart' data-epsch='" + id + "' style='height:170px' role='img' aria-label='" + esc(title) + "'></canvas></div>";
+      }
+      function drawEpsCharts() {
+        [["annual", "EPS trend — annual"], ["quarterly", "EPS trend — quarterly"]].forEach(function (g, gi) {
+          var list = (g[0] === "annual" ? d.annual : d.quarterly) || [];
+          var pts = list.map(function (x) {
+            var r = (x.reportedEPS === undefined || x.reportedEPS === null || isNaN(Number(x.reportedEPS))) ? null : Number(x.reportedEPS);
+            var e = (x.estimatedEPS === undefined || x.estimatedEPS === null || isNaN(Number(x.estimatedEPS))) ? null : Number(x.estimatedEPS);
+            return { p: x.fiscalDateEnding || x.reportedDate || "", r: r, e: e };
+          }).filter(function (x) { return x.p && (x.r !== null || x.e !== null); }).slice(-8);
+          if (pts.length < 2) return;
+          var cv = document.querySelector("[data-epsch='eps-" + gi + "']");
+          if (cv && window.FT_CHART) {
+            window.FT_CHART.drawLines(cv, {
+              labels: pts.map(function (x) { return String(x.p).slice(0, 7); }),
+              series: [
+                { name: "Reported EPS", values: pts.map(function (x) { return x.r; }) },
+                { name: "Est. EPS", values: pts.map(function (x) { return x.e; }) },
+              ].filter(function (s) { return s.values.some(function (v) { return v !== null; }); }),
+            }, { xTitle: "Period", yTitle: "EPS" });
+          }
+        });
+      }
       E("cx-earn").innerHTML = sec("Earnings", F.legend({ stale: true, calc: true }) + prov(r.body)) +
-        sec("Annual", (d.annual || []).length ? tbl(d.annual) : empty("Annual", "No annual earnings rows.")) +
-        sec("Quarterly", (d.quarterly || []).length ? tbl(d.quarterly) : empty("Quarterly", "No quarterly earnings rows."));
+        sec("Annual", (d.annual || []).length ? epsChart(d.annual, 0, "EPS trend — annual") + tbl(d.annual) : empty("Annual", "No annual earnings rows.")) +
+        sec("Quarterly", (d.quarterly || []).length ? epsChart(d.quarterly, 1, "EPS trend — quarterly") + tbl(d.quarterly) : empty("Quarterly", "No quarterly earnings rows."));
+      setTimeout(drawEpsCharts, 60);
     }).catch(function () { if (E("cx-earn")) E("cx-earn").innerHTML = sec("Earnings", err()); });
   }
   function newsRow(n) {
@@ -1314,7 +1549,11 @@
       }
       var total = owns.reduce(function (s, o) { return s + (Number(o.percentage) || 0); }, 0);
       E("cx-own").innerHTML = sec("Ownership",
-        '<div class="cx-scroll"><table class="cx-t"><thead><tr><th scope="col">Holder class</th><th scope="col" class="num">Holding</th><th scope="col">As of</th></tr></thead><tbody>' +
+        '<div class="an-grid"><div class="an-6"><div class="lbl" style="margin-bottom:4px">Current split</div>' +
+        "<canvas class='chart' id='cx-own-donut' style='height:190px' role='img' aria-label='Ownership donut'></canvas></div>" +
+        '<div class="an-6"><div class="lbl" style="margin-bottom:4px">Trend (% held)</div>' +
+        "<canvas class='chart' id='cx-own-tr' style='height:190px' role='img' aria-label='Ownership trend'></canvas></div></div>" +
+        '<div class="cx-scroll" style="margin-top:10px"><table class="cx-t"><thead><tr><th scope="col">Holder class</th><th scope="col" class="num">Holding</th><th scope="col">As of</th></tr></thead><tbody>' +
         owns.map(function (o, ix) {
           var pct = (o.percentage === null || o.percentage === undefined) ? "" : Number(o.percentage).toFixed(2) + "%";
           return "<tr" + (ix % 2 ? ' class="zeb"' : "") + "><td>" + Cv(o.category) + "</td><td class='num'>" + pct +
@@ -1323,6 +1562,39 @@
         (total ? '<div class="cx-note">Total ' + total.toFixed(1) + "% across reported classes" + F.mark("calc", null) +
           (owns[0] && owns[0].holding_date ? " · as of <b>" + esc(owns[0].holding_date) + "</b>" : "") + "</div>" : "") +
         F.legend({ stale: true, calc: true }) + prov(r.body));
+      setTimeout(function () {
+        var dd = document.getElementById("cx-own-donut");
+        if (dd && window.FT_CHART) {
+          window.FT_CHART.drawDonut(dd, owns.filter(function (o) {
+            return o.percentage !== null && o.percentage !== undefined;
+          }).map(function (o) {
+            return { label: o.category || "Other", value: Number(o.percentage),
+              display: Number(o.percentage).toFixed(1) + "%" };
+          }), { center: total ? total.toFixed(0) + "%" : "" });
+        }
+        var tc = document.getElementById("cx-own-tr");
+        if (tc && window.FT_CHART) {
+          var perSet = {};
+          owns.forEach(function (o) {
+            ((o.trend || [])).forEach(function (h) {
+              if (h && h.period) perSet[h.period] = 1;
+            });
+          });
+          var periods = Object.keys(perSet).sort().slice(-8);
+          var series = owns.map(function (o) {
+            var m = {};
+            ((o.trend || [])).forEach(function (h) { if (h && h.period) m[h.period] = h.percentage; });
+            var vals = periods.map(function (p) {
+              return (m[p] === null || m[p] === undefined) ? null : Number(m[p]);
+            });
+            if (!vals.some(function (v) { return v !== null && !isNaN(v); })) return null;
+            return { name: o.category || "Other", values: vals };
+          }).filter(Boolean);
+          if (series.length && periods.length >= 2) {
+            window.FT_CHART.drawLines(tc, { labels: periods, series: series });
+          } else if (tc) { tc.style.display = "none"; }
+        }
+      }, 60);
     }).catch(function () { if (E("cx-own")) E("cx-own").innerHTML = sec("Ownership", err()); });
   }
   function tCharts(sym, main) {
@@ -1339,6 +1611,9 @@
       '<div id="cx-rsbox" style="margin-top:10px"><div class="lbl" style="margin-bottom:4px">Relative strength vs benchmark</div>' +
       "<canvas class='chart' id='cx-rs' style='height:110px' role='img' aria-label='Relative strength chart'></canvas>" +
       "<div class='cx-note' id='cx-rsnote'></div></div>" +
+      '<div id="cx-rsibox" style="margin-top:10px"><div class="lbl" style="margin-bottom:4px">RSI (14) — momentum</div>' +
+      "<canvas class='chart' id='cx-rsi' style='height:120px' role='img' aria-label='RSI chart'></canvas>" +
+      "<div class='cx-note' id='cx-rsinote'></div></div>" +
       '<div style="margin-top:8px"><button class="cx-btn2" id="cx-vt" aria-expanded="false">View as table</button></div>' +
       '<div id="cx-vtwrap" class="vt-table" hidden></div><div id="cx-cerr"></div>');
     function smas() {
@@ -1347,6 +1622,7 @@
       return out.length ? out : [50];
     }
     var cxMarkers = [];
+    var cxCcy = "";
     API.get("analytics", { symbol: sym }).then(function (r) {
       var d = (r.body && r.body.data) || null;
       if (!d) return;
@@ -1359,6 +1635,40 @@
         cxMarkers.push({ value: Number(vcp.pivot), label: "VCP pivot", color: "#0e7490" });
       }
     }).catch(function () { /* markers optional */ });
+    /* Event + level annotations from verified feeds only:
+       52W band (quote), dividends/splits (actions), earnings dates. */
+    API.get("quote", { symbol: sym }).then(function (r) {
+      var qq = (r.body && r.body.data) || {};
+      if (qq.currency) cxCcy = qq.currency;
+      if (qq.fifty_two_week_high !== null && qq.fifty_two_week_high !== undefined)
+        cxMarkers.push({ value: Number(qq.fifty_two_week_high), label: "52W High", color: "#5b6068" });
+      if (qq.fifty_two_week_low !== null && qq.fifty_two_week_low !== undefined)
+        cxMarkers.push({ value: Number(qq.fifty_two_week_low), label: "52W Low", color: "#5b6068" });
+    }).catch(function () { /* optional */ });
+    function epochOf(ds) {
+      if (ds === null || ds === undefined) return null;
+      if (typeof ds === "number") return ds > 1e12 ? Math.floor(ds / 1000) : Math.floor(ds);
+      var t = Date.parse(String(ds));
+      return isNaN(t) ? null : Math.floor(t / 1000);
+    }
+    API.get("actions", { symbol: sym }).then(function (r) {
+      var dd = (r.body && r.body.data) || {};
+      (dd.dividends || []).slice(0, 8).forEach(function (x) {
+        var t = epochOf(x.date || x.ex_date || x.exDate);
+        if (t) cxMarkers.push({ t: t, label: "DIV", color: "#1a7f37" });
+      });
+      (dd.splits || []).slice(0, 8).forEach(function (x) {
+        var t = epochOf(x.date || x.ex_date || x.exDate);
+        if (t) cxMarkers.push({ t: t, label: "SPLIT", color: "#2563eb" });
+      });
+    }).catch(function () { /* optional */ });
+    API.get("earnings", { symbol: sym }).then(function (r) {
+      var dd = (r.body && r.body.data) || {};
+      ((dd.quarterly || []).concat(dd.annual || [])).slice(0, 8).forEach(function (x) {
+        var t = epochOf(x.reportedDate || x.fiscalDateEnding);
+        if (t) cxMarkers.push({ t: t, label: "EARN", color: "#9a6b12" });
+      });
+    }).catch(function () { /* optional */ });
     function draw(range) {
       E("cx-cerr").innerHTML = "";
       API.get("history", { symbol: sym, range: range, interval: "1d" }).then(function (r) {
@@ -1368,7 +1678,25 @@
           E("cx-cerr").innerHTML = empty("Chart", "No verified history for this range.");
           return;
         }
-        window.FT_CHART.drawPriceChart(E("cx-c"), d.bars, { sma: smas(), markers: cxMarkers });
+        window.FT_CHART.drawPriceChart(E("cx-c"), d.bars, {
+          sma: smas(), markers: cxMarkers,
+          yTitle: cxCcy ? "Price (" + cxCcy + ")" : "Price",
+          src: "Source " + F.srcName(r.body.source) + " · " + (r.body.timeliness || r.body.status || ""),
+        });
+        (function () {
+          var rc = E("cx-rsi");
+          if (!rc) return;
+          var closes = d.bars.map(function (b) { return b.c; });
+          window.FT_CHART.drawRSI(rc, closes, {});
+          var nn = E("cx-rsinote");
+          if (nn) {
+            var series = window.FT_CHART.rsiSeries(closes, 14).filter(function (v) { return v !== null; });
+            var last = series.length ? series[series.length - 1] : null;
+            nn.textContent = last === null ? "Not enough history for RSI-14." :
+              "RSI-14 " + last.toFixed(1) + (last > 70 ? " — overheated zone." : last < 30 ? " — oversold zone." : " — neutral zone.") +
+              " Terminal-calculated ‡ from verified closes.";
+          }
+        })();
         E("cx-cmeta").innerHTML = "Source <b>" + esc(F.srcName(r.body.source)) + "</b> · " + esc(d.bars.length) +
           " bars · as of <b>" + esc(day(r.body.as_of)) + "</b>";
         (function () {
@@ -1393,7 +1721,7 @@
             }
             window.FT_CHART.drawLines(cv, { labels: labels.map(function (t) {
               try { return new Date(t * 1000).toISOString().slice(0, 10); } catch (e) { return ""; }
-            }), series: [{ name: "RS vs " + bench.replace(/^\^/, ""), values: vals }] });
+            }), series: [{ name: "RS vs " + bench.replace(/^\^/, ""), values: vals }] }, { xTitle: "Date", yTitle: "Relative performance" });
             var nn2 = E("cx-rsnote");
             if (nn2) nn2.textContent = "Stock ÷ " + bench.replace(/^\^/, "") + ", rebased · " + vals.length + " sessions";
           }).catch(function () { /* RS pane optional */ });
@@ -1504,10 +1832,30 @@
           '</dl><p class="cx-note">Technical reference levels — not investment advice.</p>')
         : sec("Risk / reward", empty("Risk / reward", "Needs price, ATR and a real resistance level."));
       E("cx-tq").innerHTML = trend + rel + patt + risk +
+        sec("RSI (14)", "<canvas class='chart' id='cx-tq-rsi' style='height:130px' role='img' aria-label='RSI chart'></canvas><div class='cx-note' id='cx-tq-rsinote'></div>") +
         sec("Method", '<p class="cx-note">Calculated locally from verified backend history' +
           (d.history_source ? " (" + esc(d.history_source) + ")" : "") +
           (d.history_range ? " · " + esc(d.history_range) : "") + " · descriptive only.</p>" +
           F.legend({ calc: true }) + prov(r.body));
+      API.get("history", { symbol: sym, range: "1Y", interval: "1d" }).then(function (h) {
+        var cv = E("cx-tq-rsi");
+        if (!cv || !window.FT_CHART) return;
+        var bars = ((((h.body || {}).data) || {}).bars) || [];
+        var cl = bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null && v !== undefined; });
+        if (cl.length < 20) {
+          var nn = E("cx-tq-rsinote");
+          if (nn) nn.textContent = "Not enough history for RSI-14.";
+          return;
+        }
+        window.FT_CHART.drawRSI(cv, cl, {});
+        var nn2 = E("cx-tq-rsinote");
+        if (nn2) {
+          var s = window.FT_CHART.rsiSeries(cl, 14).filter(function (v) { return v !== null; });
+          var last = s.length ? s[s.length - 1] : null;
+          nn2.textContent = last === null ? "" : "RSI-14 " + last.toFixed(1) +
+            (last > 70 ? " — overheated." : last < 30 ? " — oversold." : " — neutral.") + " Terminal-calculated ‡.";
+        }
+      }).catch(function () { /* optional */ });
     }).catch(function () { if (E("cx-tq")) E("cx-tq").innerHTML = sec("Technicals", err()); });
   }
   /* ---------------- research tab: report-style snapshot + notes ---------------- */

@@ -134,6 +134,14 @@
               "</td><td>" + esc(g.updated_at || "") + "</td></tr>";
           }).join("") + "</tbody></table></div>" +
           ((gmp && gmp.discrepancy_note) ? "<div class='cx-note'>Status: GMP DISCREPANCY — values shown per source, never averaged.</div>" : "");
+        (function () {
+          var gb = gl.filter(function (g) { return g.value !== null && g.value !== undefined && !isNaN(Number(g.value)); })
+            .map(function (g) { return { label: String(g.company || "?").slice(0, 22), value: Number(g.value), display: "₹" + g.value }; });
+          if (gb.length >= 2 && window.FT_VIZ) {
+            host.innerHTML = "<div style='margin-bottom:8px'><div class='lbl' style='margin-bottom:4px'>GMP by company (₹, unofficial)</div>" +
+              window.FT_VIZ.bars(gb) + "</div>" + host.innerHTML;
+          }
+        })();
         return;
       }
       if (tab === "Subscription") {
@@ -782,6 +790,58 @@
         { label: "Debt / Equity", rep: null, calc: "debt_equity" },
         { label: "Current ratio", rep: null, calc: "current_ratio" },
       ], cols, function (v) { return v.toFixed(2) + "x"; });
+      /* financial trends: revenue / PAT / net margin across reported years */
+      (function () {
+        function pick(rep, keys) {
+          for (var i = 0; i < keys.length; i++) {
+            var n = Number(rep[keys[i]]);
+            if (rep[keys[i]] !== "None" && !isNaN(n)) return n;
+          }
+          return null;
+        }
+        var perSet = {};
+        cols.forEach(function (c) {
+          (((c.fin || {}).reports) || []).slice(0, 4).forEach(function (r) {
+            var p = String(r.fiscalDateEnding || r.date || "").slice(0, 7);
+            if (p) perSet[p] = 1;
+          });
+        });
+        var periods = Object.keys(perSet).sort().slice(-4);
+        if (!periods.length) return;
+        function seriesOf(fn) {
+          return cols.map(function (c) {
+            var m = {};
+            (((c.fin || {}).reports) || []).forEach(function (r) {
+              m[String(r.fiscalDateEnding || r.date || "").slice(0, 7)] = fn(r);
+            });
+            var vals = periods.map(function (p) { return (m[p] === undefined ? null : m[p]); });
+            if (!vals.some(function (v) { return v !== null; })) return null;
+            return { name: c.symbol.replace(/\.(NS|BO)$/, ""), values: vals };
+          }).filter(Boolean);
+        }
+        var revS = seriesOf(function (r) { return pick(r, ["totalRevenue", "revenue", "revenues", "sales"]); });
+        var patS = seriesOf(function (r) { return pick(r, ["netIncome", "net_income", "netEarnings"]); });
+        var blocks = "";
+        if (revS.length >= 1) {
+          blocks += "<div style='margin-bottom:10px'><div class='lbl' style='margin-bottom:4px'>Revenue trend</div>" +
+            "<canvas class='chart cmp-rev' style='height:180px' role='img' aria-label='Revenue trend comparison'></canvas></div>";
+        }
+        if (patS.length >= 1) {
+          blocks += "<div><div class='lbl' style='margin-bottom:4px'>Net profit trend</div>" +
+            "<canvas class='chart cmp-pat' style='height:180px' role='img' aria-label='Net profit trend comparison'></canvas></div>";
+        }
+        if (!blocks) return;
+        h += "<section aria-label='Financial trends'><h2>Revenue &amp; profit trends</h2><div class='card'>" +
+          blocks + "<div class='cx-note'>Reported annual statements · periods aligned by fiscal end.</div>" +
+          F.legend({ stale: true }) + "</div></section>";
+        setTimeout(function () {
+          var host = $("k-out");
+          if (!host || !window.FT_CHART) return;
+          var rc = host.querySelector(".cmp-rev"), pc = host.querySelector(".cmp-pat");
+          if (rc && revS.length) window.FT_CHART.drawLines(rc, { labels: periods, series: revS });
+          if (pc && patS.length) window.FT_CHART.drawLines(pc, { labels: periods, series: patS });
+        }, 60);
+      })();
       /* performance lines (normalized to 100) */
       var perf = cols.map(function (c) {
         var bars = ((c.hist || {}).bars) || [];
@@ -821,7 +881,7 @@
       }
       host.innerHTML = h || V.emptyFeature("Compare", "None of the selected companies returned comparable data.");
       if (perf.length >= 2 && $("cmp-perf")) {
-        window.FT_CHART.drawLines($("cmp-perf"), { labels: [], series: perf });
+        window.FT_CHART.drawLines($("cmp-perf"), { labels: [], series: perf }, { xTitle: "Date", yTitle: "Rebased = 100" });
       }
     }
     $("k-go").onclick = go;
@@ -849,6 +909,25 @@
       });
       var first = d.bars[0].nav, last = d.bars[d.bars.length - 1].nav;
       var chg = first ? (last - first) / first * 100 : null;
+      /* Period returns from dated NAV points (nearest point at/before
+         each lookback; omitted when the span isn't covered). */
+      function cagr(days) {
+        var end = d.bars[d.bars.length - 1];
+        var endT = null;
+        try { endT = new Date(end.date).getTime(); } catch (e) { return null; }
+        if (!endT || !last) return null;
+        var target = endT - days * 86400000, base = null;
+        d.bars.forEach(function (p) {
+          var t = null;
+          try { t = new Date(p.date).getTime(); } catch (e) { /* skip */ }
+          if (t && t <= target && p.nav) base = p.nav;
+        });
+        if (!base || days < 300) return null;
+        return (Math.pow(last / base, 365.25 / days) - 1) * 100;
+      }
+      var rets = [["1Y", 365], ["3Y", 1095], ["5Y", 1825]].map(function (g) {
+        return { label: g[0], value: cagr(g[1]) };
+      }).filter(function (x) { return x.value !== null; });
       var staleMk = F.mark("stale", { source: "mfapi.in", status: "AMFI end-of-day", asOf: d.latest_date });
       var calcMk = F.mark("calc", { source: "Terminal", status: "Calculated", asOf: d.latest_date });
       var info = { house: d.fund_house || "", cat: d.scheme_category || "", code: code, name: d.scheme_name || ("Scheme " + code) };
@@ -889,11 +968,15 @@
           "<div class='k-s'>" + F.esc(d.latest_date || "") + "</div></div>" +
           (chg !== null ? "<div class='kpi'><div class='k-l'>Change (" + d.bars.length + " sessions)</div>" +
             "<div class='k-v " + F.dirClass(chg) + "'>" + F.fmtPct(chg) + calcMk + "</div></div>" : "") +
+          rets.map(function (x) {
+            return "<div class='kpi'><div class='k-l'>CAGR " + x.label + "</div>" +
+              "<div class='k-v " + F.dirClass(x.value) + "'>" + F.fmtPct(x.value) + calcMk + "</div></div>";
+          }).join("") +
           "</div><div class='cx-note'>" + F.esc(info.house) +
           (info.cat ? " · " + F.esc(info.cat) : "") + "</div>" +
           "<div class='chart-box' style='margin-top:10px'><canvas class='chart' id='mf-c' style='height:230px' role='img' aria-label='NAV history'></canvas><div class='chart-tip'></div></div>" +
           "<div class='cx-prov'>Data · mfapi.in (AMFI) · end-of-day</div>";
-        if ($("mf-c")) window.FT_CHART.drawPriceChart($("mf-c"), bars, { sma: [] });
+        if ($("mf-c")) window.FT_CHART.drawPriceChart($("mf-c"), bars, { sma: [], yTitle: "NAV (₹)", src: "mfapi.in (AMFI) · end-of-day" });
       }
       Array.prototype.forEach.call(document.querySelectorAll("#mf-tabs button"), function (x) {
         x.onclick = function () { paint(x.getAttribute("data-mf")); };
