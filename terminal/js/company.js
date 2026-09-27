@@ -1861,7 +1861,24 @@
   /* ---------------- research tab: report-style snapshot + notes ---------------- */
   function tResearchNew(sym, main) {
     main.innerHTML = '<div id="cx-rep"></div><div id="cx-research"></div>' +
+      '<section class="cx-sec" id="cx-filings" style="display:none"><h2>SEC filings</h2><div id="cx-filings-out">' + skel(2) + "</div></section>" +
       '<section class="cx-sec"><h2>Your notes</h2><div id="cx-notes">' + skel(2) + "</div></section>";
+    /* EDGAR filing discovery (US issuers only — EDGAR covers US filings). */
+    (function () {
+      if (/\.(NS|BO)$/i.test(sym) || sym.charAt(0) === "^") return;
+      var q = sym.replace(/-USD$/, "");
+      API.get("filings", { q: q, limit: 6 }).then(function (r) {
+        if (!E("cx-filings-out")) return;
+        var items = ((((r.body || {}).data) || {}).items) || [];
+        if (!items.length) return;
+        E("cx-filings").style.display = "";
+        E("cx-filings-out").innerHTML = items.map(function (n) {
+          return "<div class='news-item'><b>" + esc(n.title || "") + "</b>" +
+            "<div class='meta'><span class='srcbadge'>SEC EDGAR</span> · " + esc(n.date || "") +
+            (n.url ? " · <a href='" + esc(n.url) + "' target='_blank' rel='noopener'>Filing →</a>" : "") + "</div></div>";
+        }).join("");
+      }).catch(function () { /* optional */ });
+    })();
     /* Investment snapshot: business, snapshot metrics, risks, monitor list —
        every line cited, everything from verified endpoints. */
     Promise.all([

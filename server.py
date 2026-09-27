@@ -332,6 +332,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._handle_market_overview()
         if path == "/api/indicators":
             return self._handle_indicators()
+        if path == "/api/fx":
+            from providers import openfeeds as _of
+            return _send_json(self, _of.fx_latest(qs.get("symbol", [""])[0] or "USDINR"))
+        if path == "/api/fx/history":
+            from providers import openfeeds as _of
+            try:
+                days = int(qs.get("days", ["90"])[0] or 90)
+            except (ValueError, TypeError):
+                days = 90
+            return _send_json(self, _of.fx_history(qs.get("symbol", [""])[0] or "USDINR", days))
+        if path == "/api/crypto":
+            from providers import openfeeds as _of
+            return _send_json(self, _of.crypto_quote(qs.get("symbol", [""])[0] or "BTC-USD"))
+        if path == "/api/filings":
+            from providers import openfeeds as _of
+            try:
+                limit = int(qs.get("limit", ["8"])[0] or 8)
+            except (ValueError, TypeError):
+                limit = 8
+            return _send_json(self, _of.edgar_search(qs.get("q", [""])[0], limit))
+        if path == "/api/rates":
+            from providers import openfeeds as _of
+            return _send_json(self, _of.treasury_rates())
         if path == "/api/mf/search":
             env = registry.mutualfunds.search_schemes(qs.get("q", [""])[0], limit=10)
             return _send_json(self, env, _envelope_status(env))

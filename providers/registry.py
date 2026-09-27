@@ -32,6 +32,7 @@ from .fundamentals import AlphaVantageFundamentalsProvider
 from .indianapi import IndianApiProvider
 from .mutualfunds import MutualFundProvider
 from .news import YahooCorporateActionsProvider, YahooRssNewsProvider
+from .openfeeds import OpenFeedsProvider
 from .orchestrator import ProviderManager
 from .stooq import StooqProvider
 from .tradingview import TradingViewProvider
@@ -50,6 +51,7 @@ _alphavantage = AlphaVantageFundamentalsProvider()
 _stooq = StooqProvider()
 _tradingview = TradingViewProvider()
 _upstox = UpstoxProvider()
+openfeeds = OpenFeedsProvider()
 
 # QUOTE chain (field-level routing: Upstox first for ISIN-mapped
 # Indian names, else pass-through to Yahoo):
@@ -268,6 +270,18 @@ def providers_status() -> dict:
                 "key_configured": _upstox_key(),
                 "capabilities": _base.describe(_upstox),
                 "health": health.get("upstox", {}),
+            },
+            {
+                "id": "openfeeds",
+                "label": "Open Feeds",
+                "state": "connected",
+                "detail": "Free, no key, server-side. Frankfurter ECB FX "
+                "rates + history, CoinGecko crypto quotes, US Treasury "
+                "average rates, SEC EDGAR filing search.",
+                "key_required": False,
+                "key_configured": True,
+                "capabilities": _base.describe(openfeeds),
+                "health": {},
             },
             {
                 "id": "nse",

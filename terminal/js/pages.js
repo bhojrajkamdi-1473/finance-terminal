@@ -1807,9 +1807,14 @@
   }
   function pMacro() {
     view().innerHTML = "<h1 class='h-page'>Macro</h1>" +
-      "<div class='sub'>Index snapshot from the fallback chain (delayed) + economic indicators via Alpha Vantage (free) where a key is configured. Nothing fabricated.</div>" +
+      "<div class='sub'>Index snapshot from the fallback chain (delayed) + economic indicators via Alpha Vantage (free) where a key is configured. FX history via Frankfurter (ECB), crypto via CoinGecko, US rates via Treasury fiscal data — all no-key public feeds. Nothing fabricated.</div>" +
       "<div id='mc-out' class='card'>" + skel(5) + "</div>" +
-      "<div class='card sect' id='mc-econ' style='margin-top:12px'>" + skel(4) + "</div>";
+      "<div class='card sect' id='mc-econ' style='margin-top:12px'>" + skel(4) + "</div>" +
+      "<div class='card sect'><h3>USD/INR trend (ECB reference)</h3>" +
+      "<canvas class='chart' id='mc-fx' style='height:190px' role='img' aria-label='USD/INR trend'></canvas>" +
+      "<div class='cx-note' id='mc-fxnote'></div></div>" +
+      "<div class='card sect'><h3>US Treasury average rates</h3><div id='mc-ust'>" + skel(3) + "</div></div>" +
+      "<div class='card sect'><h3>Digital assets (CoinGecko cross-check)</h3><div id='mc-crypto'>" + skel(2) + "</div></div>";
     API.get("market-overview").then(function (r) {
       if (!el("mc-out")) return;
       var items = ((r.body && r.body.items) || []).filter(function (i) { return isIndex(i.symbol); });
@@ -1895,6 +1900,61 @@
           : "<div class='empty'><b>" + F.esc(v) + "</b><p>" + F.esc((r.body && r.body.message) || "Unavailable") + "</p></div>";
       });
     };
+    /* USD/INR history (Frankfurter ECB) + Treasury rates + CoinGecko crypto. */
+    API.get("fx/history", { symbol: "USDINR", days: 180 }).then(function (r) {
+      var cv = document.getElementById("mc-fx");
+      if (!cv || !window.FT_CHART) return;
+      var bars = ((((r.body || {}).data) || {}).bars) || [];
+      var cl = bars.map(function (b) { return b.c; }).filter(function (v) { return v !== null && v !== undefined; });
+      if (cl.length < 5) {
+        var nn = document.getElementById("mc-fxnote");
+        if (nn) nn.textContent = "FX history unavailable.";
+        return;
+      }
+      window.FT_CHART.drawLines(cv, {
+        labels: bars.map(function (b) {
+          try { return new Date(b.t * 1000).toISOString().slice(0, 7); } catch (e) { return ""; }
+        }),
+        series: [{ name: "USD/INR", values: bars.map(function (b) { return b.c; }) }],
+      }, { xTitle: "Month", yTitle: "INR per USD" });
+      var nn2 = document.getElementById("mc-fxnote");
+      if (nn2) nn2.textContent = cl.length + " ECB reference sessions · o/h/l mirror close (no intraday range published).";
+    }).catch(function () { /* optional */ });
+    API.get("rates").then(function (r) {
+      var host = document.getElementById("mc-ust");
+      if (!host) return;
+      var pts = ((((r.body || {}).data) || {}).points) || [];
+      if (!pts.length) { host.innerHTML = "<div class='cx-note'>Treasury rates unavailable.</div>"; return; }
+      var seen = {}, rows = [];
+      pts.forEach(function (p) {
+        if (!p || !p.label || seen[p.label]) return;
+        seen[p.label] = 1;
+        rows.push(p);
+      });
+      host.innerHTML = "<div class='kpis'>" + rows.slice(0, 6).map(function (p) {
+        return kpi(p.label, F.fmtNum(p.value) + "%" + F.mark("stale", { source: "US Treasury", status: "End-of-day", asOf: p.date }),
+          (p.date || "") + " · US Treasury fiscal data");
+      }).join("") + "</div>" + F.legend({ stale: true });
+    }).catch(function () { /* optional */ });
+    ["BTC-USD", "ETH-USD"].forEach(function (sym, ix) {
+      API.get("crypto", { symbol: sym }).then(function (r) {
+        var host = document.getElementById("mc-crypto");
+        if (!host) return;
+        if (ix === 0) host.innerHTML = "";
+        var d = (r.body && r.body.data) || null;
+        if (!d || d.price === null || d.price === undefined) return;
+        var div = document.createElement("div");
+        div.innerHTML = "<div class='kpis' style='margin-top:8px'>" + kpi(d.name || sym,
+          F.fmtMoney(d.price) + " " + (d.currency || "USD") + F.mark("stale", { source: "CoinGecko", status: "delayed", asOf: d.updated }),
+          "24h " + F.fmtPct(d.change_pct) + " · CoinGecko free API") + "</div>";
+        host.appendChild(div);
+        if (ix === 1) {
+          var lg = document.createElement("div");
+          lg.innerHTML = F.legend({ stale: true });
+          host.appendChild(lg);
+        }
+      }).catch(function () { /* optional */ });
+    });
   }
   function pSettings() {
     view().innerHTML = "<h1 class='h-page'>Settings</h1>" +

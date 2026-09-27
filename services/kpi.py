@@ -267,4 +267,32 @@ FIELD_PROVIDERS = {
         "fallback": "none",
         "status": "live",
     },
+    "fx": {
+        "primary": "openfeeds-frankfurter",
+        "secondary": "yahoo",
+        "why": "ECB audited reference rates + history; Yahoo delayed cross-check.",
+        "fallback": "yahoo",
+        "status": "live",
+    },
+    "crypto": {
+        "primary": "yahoo",
+        "secondary": "openfeeds-coingecko",
+        "why": "Yahoo breadth; CoinGecko free cross-check with 24h change + mcap.",
+        "fallback": "openfeeds-coingecko",
+        "status": "live",
+    },
+    "us_rates": {
+        "primary": "openfeeds-treasury",
+        "secondary": "none",
+        "why": "US Treasury fiscal-data average rates; no other no-key source.",
+        "fallback": "none",
+        "status": "live",
+    },
+    "filings": {
+        "primary": "openfeeds-edgar",
+        "secondary": "none",
+        "why": "SEC EDGAR full-text search, US issuers only; links to official filings.",
+        "fallback": "none",
+        "status": "live",
+    },
 }
