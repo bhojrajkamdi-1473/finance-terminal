@@ -1150,12 +1150,14 @@
           list.map(function (x) {
             var sv = x.surprise !== undefined ? x.surprise : x.surprisePercentage;
             var cls = (typeof sv === "number") ? dir(sv) : "";
-            return "<tr><td>" + estCell(x.fiscalDateEnding || x.reportedDate) + "</td><td class='num'>" + estCell(x.reportedEPS) +
-              "</td><td class='num'>" + estCell(x.estimatedEPS) + "</td><td class='num " + cls + "'>" +
-              (sv === undefined || sv === null || sv === "" ? "" : typeof sv === "number" ? F.fmtPct(sv) : estCell(sv)) + "</td></tr>";
+            var rep = estCell(x.reportedEPS);
+            return "<tr><td>" + estCell(x.fiscalDateEnding || x.reportedDate) + "</td><td class='num'>" + rep +
+              (rep ? " " + F.mark("stale", null) : "") + "</td><td class='num'>" + estCell(x.estimatedEPS) +
+              "</td><td class='num " + cls + "'>" +
+              (sv === undefined || sv === null || sv === "" ? "" : typeof sv === "number" ? F.fmtPct(sv) + " " + F.mark("calc", null) : estCell(sv)) + "</td></tr>";
           }).join("") + "</tbody></table></div>";
       }
-      E("cx-earn").innerHTML = sec("Earnings", prov(r.body)) +
+      E("cx-earn").innerHTML = sec("Earnings", F.legend({ stale: true, calc: true }) + prov(r.body)) +
         sec("Annual", (d.annual || []).length ? tbl(d.annual) : empty("Annual", "No annual earnings rows.")) +
         sec("Quarterly", (d.quarterly || []).length ? tbl(d.quarterly) : empty("Quarterly", "No quarterly earnings rows."));
     }).catch(function () { if (E("cx-earn")) E("cx-earn").innerHTML = sec("Earnings", err()); });
@@ -1220,8 +1222,8 @@
       E("cx-act").innerHTML = sec("Corporate actions",
         evs.slice(0, 40).map(function (e) {
           return '<div class="cx-ev"><span class="dt">' + esc(String(e.date).slice(0, 10)) + '</span><span class="tp">' + esc(e.t) +
-            "</span><span>" + esc(e.v) + "</span><span class='src'>" + esc(F.srcName(e.s)) + "</span></div>";
-        }).join("") + prov(r.body));
+            "</span><span>" + esc(e.v) + " " + F.mark("stale", { source: e.s, status: "reported", asOf: e.date }) + "</span><span class='src'>" + esc(F.srcName(e.s)) + "</span></div>";
+        }).join("") + F.legend({ stale: true }) + prov(r.body));
     }).catch(function () { if (E("cx-act")) E("cx-act").innerHTML = sec("Corporate actions", err()); });
   }
   function tHoldings(sym, main) {
@@ -1239,10 +1241,11 @@
         owns.map(function (o, ix) {
           var pct = (o.percentage === null || o.percentage === undefined) ? "" : Number(o.percentage).toFixed(2) + "%";
           return "<tr" + (ix % 2 ? ' class="zeb"' : "") + "><td>" + Cv(o.category) + "</td><td class='num'>" + pct +
-            "</td><td>" + Cv(o.holding_date) + "</td></tr>";
+            (pct ? " " + F.mark("stale", null) : "") + "</td><td>" + Cv(o.holding_date) + "</td></tr>";
         }).join("") + "</tbody></table></div>" +
-        (total ? '<div class="cx-note">Total ' + total.toFixed(1) + "% across reported classes" +
-          (owns[0] && owns[0].holding_date ? " · as of <b>" + esc(owns[0].holding_date) + "</b>" : "") + "</div>" : "") + prov(r.body));
+        (total ? '<div class="cx-note">Total ' + total.toFixed(1) + "% across reported classes" + F.mark("calc", null) +
+          (owns[0] && owns[0].holding_date ? " · as of <b>" + esc(owns[0].holding_date) + "</b>" : "") + "</div>" : "") +
+        F.legend({ stale: true, calc: true }) + prov(r.body));
     }).catch(function () { if (E("cx-own")) E("cx-own").innerHTML = sec("Ownership", err()); });
   }
   function tCharts(sym, main) {
@@ -1333,7 +1336,7 @@
         bo = d.breakout || {}, tt = d.trend_template || {}, rr = d.risk_reward || {};
       function fact(l, v, tip) {
         if (v === null || v === undefined || v === "—" || v === "") return ""; // omitted, never placeholder
-        return "<div title='" + esc(tip || "") + "'><dt>" + l + "</dt><dd>" + v + "</dd></div>";
+        return "<div title='" + esc(tip || "") + "'><dt>" + l + "</dt><dd>" + v + " " + F.mark("calc", null) + "</dd></div>";
       }
       var snap = d.snapshot || {};
       /* Deterministic interpretation — only from calculated values. */
@@ -1383,7 +1386,8 @@
       E("cx-tq").innerHTML = trend + rel + patt + risk +
         sec("Method", '<p class="cx-note">Calculated locally from verified backend history' +
           (d.history_source ? " (" + esc(d.history_source) + ")" : "") +
-          (d.history_range ? " · " + esc(d.history_range) : "") + " · descriptive only.</p>" + prov(r.body));
+          (d.history_range ? " · " + esc(d.history_range) : "") + " · descriptive only.</p>" +
+          F.legend({ calc: true }) + prov(r.body));
     }).catch(function () { if (E("cx-tq")) E("cx-tq").innerHTML = sec("Technicals", err()); });
   }
   /* ---------------- research tab (new) ---------------- */

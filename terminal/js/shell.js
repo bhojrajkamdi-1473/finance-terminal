@@ -420,8 +420,10 @@
           var m = ret(cl, 21);
           if (m !== null) rows.push({ label: p[1], value: m, display: F.fmtPct(m) });
         });
-        host.innerHTML = V.bars(rows) ||
-          V.emptyFeature("Market performance", "Not enough verified history to compute returns.");
+        var barsHtml = V.bars(rows);
+        host.innerHTML = barsHtml
+          ? barsHtml + F.legend({ calc: true })
+          : V.emptyFeature("Market performance", "Not enough verified history to compute returns.");
         var note = I.trend("Nifty 50", hists["^NSEI"] || [], "the last month of verified closes");
         $("d-perfnote").innerHTML = note ? "<p class='interp'>" + esc2(note) + "</p>" : "";
       }
@@ -450,13 +452,13 @@
         var trendState = (m3m === null) ? null : (m3m >= 5 ? "Bullish" : m3m <= -5 ? "Bearish" : "Neutral");
         var dist = (last !== null && sma200) ? (last - sma200) / sma200 * 100 : null;
         var cells = [
-          { label: "Trend", value: trendState, sub: "3M Nifty move" },
-          { label: "Momentum", value: m1m === null ? null : F.fmtPct(m1m), sub: "1M Nifty" },
-          { label: "Distance from 200D", value: dist === null ? null : F.fmtPct(dist), sub: "SMA" },
+          { label: "Trend", value: trendState, sub: "3M Nifty move", mark: "calc" },
+          { label: "Momentum", value: m1m === null ? null : F.fmtPct(m1m), sub: "1M Nifty", mark: "calc" },
+          { label: "Distance from 200D", value: dist === null ? null : F.fmtPct(dist), sub: "SMA", mark: "calc" },
         ];
         var rtext = I.regime({ trend: trendState ? trendState.toLowerCase() : null,
           momentum: m1m === null ? null : (m1m >= 0 ? "positive" : "negative") });
-        rg.innerHTML = V.kpiStrip(cells) + (rtext ? "<p class='interp'>" + esc2(rtext) + "</p>" : "");
+        rg.innerHTML = V.kpiStrip(cells) + F.legend({ calc: true }) + (rtext ? "<p class='interp'>" + esc2(rtext) + "</p>" : "");
       }
       var st = $("d-struct");
       if (st) {
@@ -471,19 +473,20 @@
           else st.innerHTML = "";
         } else {
           st.innerHTML = V.kpiStrip([
-            { label: "52-week high", value: F.fmtNum(hi) },
-            { label: "52-week low", value: F.fmtNum(lo) },
-            { label: "Position in range", value: pos + "%" },
-          ]) + "<p class='interp'>Nifty 50 sits " + pos + "% up its 52-week range.</p>";
+            { label: "52-week high", value: F.fmtNum(hi), mark: "stale" },
+            { label: "52-week low", value: F.fmtNum(lo), mark: "stale" },
+            { label: "Position in range", value: pos + "%", mark: "calc" },
+          ]) + F.legend({ stale: true, calc: true }) + "<p class='interp'>Nifty 50 sits " + pos + "% up its 52-week range.</p>";
         }
       }
     }
     function moverRows(list) {
+      var F2 = window.FT_FMT;
       return list.map(function (i) {
         var c = i.quote;
         return "<li><span class='rk'>·</span><span><a href='#/company/" + esc2(i.symbol) + "'>" +
           esc2(c.name || i.symbol) + "</a> <span class='tk'>" + esc2(i.symbol) + "</span></span>" +
-          "<b>" + F.fmtNum(c.price) + "</b><b class='" + F.dirClass(c.change_pct) + "'>" + F.fmtPct(c.change_pct) + "</b></li>";
+          "<b>" + F.fmtNum(c.price) + F2.mark("stale", null) + "</b><b class='" + F.dirClass(c.change_pct) + "'>" + F.fmtPct(c.change_pct) + "</b></li>";
       }).join("");
     }
     function paintMovers() {
@@ -521,6 +524,7 @@
             "<span class='tr'><span class='fl' style='display:block;width:" + w + "%;background:" + col + "'></span></span><b>" + v + "</b></div>";
         }
         bh.innerHTML = bar("Advancing", adv, "var(--up)") + bar("Declining", dec, "var(--dn)") + bar("Unchanged", unch, "var(--faint)") +
+          F.legend({ calc: true }) +
           "<p class='interp'>" + esc2(I2.breadth(adv, dec, unch, "the tracked universe") +
             " Tracked universe — a participation proxy, not full market breadth.") + "</p>";
       }
