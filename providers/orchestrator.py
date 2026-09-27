@@ -916,7 +916,8 @@ class ProviderManager:
                     + ". "
                     + "; ".join(_leg_detail(results))
                     + " Set "
-                    "ALPHA_VANTAGE_API_KEY and/or TWELVE_DATA_API_KEY to "
+                    "ALPHA_VANTAGE_API_KEY, TWELVE_DATA_API_KEY and/or "
+                    "UPSTOX_ANALYTICS_TOKEN to "
                     "enable further coverage. The free Yahoo fundamentals "
                     "and no-auth Indian legs "
                     "were checked automatically for applicable symbols. "
@@ -1001,11 +1002,11 @@ class ProviderManager:
                     },
                     "status": "CALCULATED",
                 }
-            overview = av_d or y_d or in_d or {}
+            overview = av_d or y_d or in_d or ux_d or {}
             return {
                 "status": "live",
                 "source": "orchestrator",
-                "as_of": av.get("as_of") or yf.get("as_of") or inapi.get("as_of") or td.get("as_of"),
+                "as_of": av.get("as_of") or yf.get("as_of") or inapi.get("as_of") or ux.get("as_of") or td.get("as_of"),
                 "timeliness": "DELAYED",
                 "data": {
                     "symbol": symbol,
@@ -1415,7 +1416,10 @@ class ProviderManager:
             items: list[dict] = []
             for name in ("yahoo-rss", "alphavantage", "indian-api", "upstox"):
                 env = results.get(name, {})
-                if env.get("status") != "live":
+                # Retail legs report delayed (never live) — delayed with
+                # items is usable news, not a failure. Only error /
+                # unavailable legs are skipped.
+                if env.get("status") not in ("live", "delayed"):
                     continue
                 for it in (env.get("data") or {}).get("items") or []:
                     url = str(it.get("url") or "")

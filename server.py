@@ -509,7 +509,11 @@ class Handler(BaseHTTPRequestHandler):
 
         with ThreadPoolExecutor(max_workers=4) as pool:
             out = list(pool.map(one, DEFAULT_SYMBOLS))
-        env = {"ok": True, "items": out}
+        live = any(
+            isinstance(i, dict) and (i.get("quote") or {}) is not None and (i.get("quote") or {}).get("price") is not None
+            for i in out
+        )
+        env = {"ok": True, "status": "live" if live else "unavailable", "items": out}
         _domain_cache.set("market:overview", env, 60.0)
         env = dict(env)
         env["served_from"] = "provider"

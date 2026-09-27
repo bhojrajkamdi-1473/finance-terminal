@@ -476,6 +476,11 @@
   }
 
   /* ---------- company detail ---------- */
+  /* SUPERSEDED: company.js registers window.FT_PAGES.pCompany after this
+     file loads, so the pCompany + tOverview/tFinancials/tValuation below
+     never execute. Kept (not deleted) to avoid churning shared helpers;
+     canonical implementation lives in company.js (13 tabs incl. Key
+     Ratios + Peers). */
   /* 11 tabs — matches company.js override (canonical). */
   var CTABS = ["Overview", "Financials", "Valuation", "Estimates", "Earnings", "News", "Actions", "Ownership", "Charts", "Technicals", "Research"];
   function pCompany(sym, tab) {
@@ -1710,16 +1715,50 @@
         }).join("") + "</tbody></table></div><div class='prov'>fallback chain · delayed</div>" : unavail("Index data unavailable.");
     });
     var INDS = [["GDP", "Output"], ["INFLATION", "Prices"], ["UNEMPLOYMENT", "Labor"], ["FEDERAL_FUNDS_RATE", "Rates"]];
-    Promise.all(INDS.map(function (p) { return API.get("macro", { indicator: p[0] }); })).then(function (rs) {
-      if (!el("mc-econ")) return;
-      el("mc-econ").innerHTML = "<h3>Economic indicators</h3><div class='kpis'>" + rs.map(function (r, ix) {
-        var d = r.body && r.body.data;
-        var pts = (d && d.points) || [];
-        var last = pts[0] || {};
-        return kpi(INDS[ix][0].replace(/_/g, " "), pts.length ? F.esc(last.value || "—") : "—",
-          pts.length ? (last.date || "") + " · " + ((d && d.unit) || "") + " · Alpha Vantage" : ((r.body && r.body.message) || "Unavailable"));
-      }).join("") + "</div>";
-    });
+    var ALL_INDS = ["GDP", "REAL_GDP", "REAL_GDP_PER_CAPITA", "INFLATION", "UNEMPLOYMENT",
+      "FEDERAL_FUNDS_RATE", "CPI", "RETAIL_SALES", "DURABLES", "TREASURY_YIELD", "NONFARM_PAYROLL"];
+    function econTiles(list, hostId) {
+      var host = el(hostId);
+      if (!host) return;
+      host.innerHTML = "<div class='cx-skel'></div><div class='cx-skel'></div>";
+      Promise.all(list.map(function (n) { return API.get("macro", { indicator: n }); })).then(function (rs) {
+        if (!el(hostId)) return;
+        el(hostId).innerHTML = "<h3>Economic indicators</h3><div class='kpis'>" + rs.map(function (r, ix) {
+          var d = r.body && r.body.data;
+          var pts = (d && d.points) || [];
+          var last = pts[0] || {};
+          var ok = pts.length > 0;
+          return kpi(list[ix][0].replace(/_/g, " "),
+            ok ? F.esc(last.value || "—") : "—",
+            ok ? (last.date || "") + " · " + ((d && d.unit) || "") + " · Alpha Vantage"
+               : ((r.body && r.body.message) || "Unavailable") + " · Alpha Vantage");
+        }).join("") + "</div>" + F.legend({ stale: true });
+      });
+    }
+    econTiles(INDS, "mc-econ");
+    var sel = document.createElement("div");
+    sel.className = "card sect";
+    sel.innerHTML = "<h3>More indicators</h3><div class='row'><label class='f'>Indicator<select id='mc-sel' class='in'>" +
+      ALL_INDS.map(function (n) { return "<option value='" + n + "'>" + n.replace(/_/g, " ") + "</option>"; }).join("") +
+      "</select></label><button class='btn sm' id='mc-load'>Load</button></div>" +
+      "<div class='src'>One Alpha Vantage call per load (25 req/day free quota) — nothing prefetched.</div>" +
+      "<div id='mc-extra' style='margin-top:8px'></div>";
+    var econHost = el("mc-econ");
+    if (econHost && econHost.parentNode) econHost.parentNode.insertBefore(sel, econHost.nextSibling);
+    var mlBtn = document.getElementById("mc-load");
+    if (mlBtn) mlBtn.onclick = function () {
+      var v = document.getElementById("mc-sel").value;
+      var extra = document.getElementById("mc-extra");
+      extra.innerHTML = "<div class='cx-skel'></div>";
+      API.get("macro", { indicator: v }).then(function (r) {
+        if (!document.getElementById("mc-extra")) return;
+        var d = r.body && r.body.data, pts = (d && d.points) || [], last = pts[0] || {};
+        document.getElementById("mc-extra").innerHTML = pts.length
+          ? "<div class='kpis'>" + kpi(v.replace(/_/g, " "), F.esc(last.value || "—"),
+              (last.date || "") + " · " + ((d && d.unit) || "") + " · Alpha Vantage") + "</div>" + F.legend({ stale: true })
+          : "<div class='empty'><b>" + F.esc(v) + "</b><p>" + F.esc((r.body && r.body.message) || "Unavailable") + "</p></div>";
+      });
+    };
   }
   function pSettings() {
     view().innerHTML = "<h1 class='h-page'>Settings</h1>" +

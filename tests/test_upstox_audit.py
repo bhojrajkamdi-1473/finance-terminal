@@ -601,7 +601,6 @@ class RoutingTests(_EnvGuard):
         self.assertEqual(env["data"]["price"], 77.0)
 
     def test_upstox_news_merges_into_pipeline(self):
-        # Merge loop only consumes status=live legs (matches real legs).
         rss = _Stub(
             get_news=lambda s, t, lim: live_envelope(
                 "yahoo-rss",
@@ -638,6 +637,76 @@ class RoutingTests(_EnvGuard):
         urls = [i["url"] for i in env["data"]["items"]]
         self.assertIn("https://x/2", urls)
         self.assertIn("upstox", str(env["providers_queried"]))
+
+    def test_delayed_news_legs_are_not_dropped(self):
+        # Retail legs report delayed, never live. Delayed WITH items is
+        # usable news — the merge must not silently discard it.
+        up = _Stub(
+            get_news=lambda s, t, lim: live_envelope(
+                "upstox",
+                {"items": [{"title": "TCS buyback", "url": "https://x/9", "summary": "s"}]},
+                delayed=True,
+            )
+        )
+        os.environ["UPSTOX_ANALYTICS_TOKEN"] = TOKEN
+        try:
+            m = self._manager(upstox=up)
+            env = m.get_news("TCS.NS", None, 10)
+        finally:
+            os.environ.pop("UPSTOX_ANALYTICS_TOKEN", None)
+        self.assertEqual(env["status"], "live")
+        self.assertIn("https://x/9", [i["url"] for i in env["data"]["items"]])
+
+    def test_valuation_overview_keeps_sole_upstox_survivor(self):
+        # AV/Yahoo/Indian down + Upstox delayed: the flat overview must
+        # carry Upstox's AV-style fields, not {}.
+        from providers.base import unavailable as _un
+
+        ux_flat = {
+            "Symbol": "TCS.NS", "Currency": "INR", "PERatio": 18.82,
+            "PriceToBookRatio": 1.84, "ROE": 8.94,
+        }
+        up = _Stub(get_ratios=lambda s: live_envelope("upstox", dict(ux_flat), delayed=True))
+        m = self._manager(
+            upstox=up,
+            yahoo=_Stub(get_quote=lambda s: _un("yahoo", "down")),
+        )
+        env = m.get_valuation("TCS.NS")
+        self.assertEqual(env["status"], "live")
+        ov = env["data"]["overview"]
+        self.assertTrue(ov, "overview must not be empty when Upstox answered")
+        self.assertEqual(ov["PERatio"], 18.82)
+        self.assertEqual(env["reconciliation"]["primary"], "upstox")
+
+    def test_gdp_aliases_to_real_gdp_and_rejects_garbage(self):
+        from providers import fundamentals as _f
+
+        seen = {}
+        prov = _f.AlphaVantageFundamentalsProvider()
+        orig = prov._domain
+
+        def fake_domain(function, symbol=""):
+            seen["function"] = function
+            return live_envelope("alphavantage", {"unit": "Billions USD", "data": []}, delayed=True)
+
+        prov._domain = fake_domain
+        try:
+            env = prov.get_economic("GDP")
+        finally:
+            prov._domain = orig
+        self.assertEqual(seen.get("function"), "REAL_GDP")
+        self.assertEqual(env["data"]["indicator"], "GDP")
+
+        def fake_garbage(function, symbol=""):
+            return live_envelope("alphavantage", {"Error Message": "Nope."}, delayed=True)
+
+        prov._domain = fake_garbage
+        try:
+            env2 = prov.get_economic("INFLATION")
+        finally:
+            prov._domain = orig
+        self.assertEqual(env2["status"], "unavailable")
+        self.assertNotIn("Error Message", json.dumps(env2.get("data") or {}))
 
 
 class TechnicalValidationTests(unittest.TestCase):

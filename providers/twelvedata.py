@@ -463,7 +463,7 @@ class TwelveDataProvider(MarketDataProvider):
             return err
         assert td_symbol is not None
         env = self._domain("/statistics", td_symbol)
-        if env.get("status") != "live":
+        if env.get("status") not in ("live", "delayed"):
             return env
         p = env["data"] or {}
         stats = p.get("statistics") or p
@@ -517,7 +517,7 @@ class TwelveDataProvider(MarketDataProvider):
             return err
         assert td_symbol is not None
         env = self._domain("/earnings", td_symbol)
-        if env.get("status") != "live":
+        if env.get("status") not in ("live", "delayed"):
             return env
         p = env["data"] or {}
         rows: list = []
@@ -559,7 +559,7 @@ class TwelveDataProvider(MarketDataProvider):
             ("/splits", splits, ("effective_date", "date")),
         ):
             env = self._domain(endpoint, td_symbol)
-            if env.get("status") != "live":
+            if env.get("status") not in ("live", "delayed"):
                 notes.append(f"{endpoint}: {env.get('message')}")
                 continue
             p = env["data"] or {}
@@ -629,7 +629,7 @@ class TwelveDataProvider(MarketDataProvider):
         if not fn:
             return error_envelope("twelvedata", f"Unknown statement '{statement}'.")
         env = self._domain(fn, td_symbol, cost=100)
-        if env.get("status") != "live":
+        if env.get("status") not in ("live", "delayed"):
             return env
         p = env["data"] or {}
         key = "annual" if period != "quarterly" else "quarter"

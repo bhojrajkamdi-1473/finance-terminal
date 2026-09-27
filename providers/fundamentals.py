@@ -350,7 +350,7 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
         """Annual + quarterly earnings (reported EPS, estimated EPS where
         the feed provides it, surprise, dates). Periods kept separate."""
         env = self._domain("EARNINGS", symbol)
-        if env.get("status") != "live":
+        if env.get("status") not in ("live", "delayed"):
             return env
         payload = env["data"] or {}
         out = {
@@ -477,10 +477,21 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
                 f"Unknown indicator '{indicator}'. Supported: "
                 + ", ".join(sorted(allowed)),
             )
-        env = self._domain(indicator)
-        if env.get("status") != "live":
+        # Alpha Vantage has no bare GDP function — REAL_GDP is the
+        # verified equivalent. Keep the requested label in the output.
+        function = {"GDP": "REAL_GDP"}.get(indicator, indicator)
+        env = self._domain(function)
+        # _domain reports delayed (never live) for retail feeds — map
+        # every answered envelope; only error/unavailable short-circuit.
+        if env.get("status") not in ("live", "delayed"):
             return env
         payload = env["data"] or {}
+        if isinstance(payload, dict) and payload.get("Error Message"):
+            return unavailable(
+                "alphavantage",
+                f"Indicator {indicator} rejected by upstream: "
+                f"{str(payload.get('Error Message'))[:160]}",
+            )
         env["data"] = {
             "indicator": indicator,
             "unit": payload.get("unit"),
@@ -492,7 +503,7 @@ class AlphaVantageFundamentalsProvider(FundamentalsProvider):
     def get_daily_history(self, symbol: str) -> dict:
         """TIME_SERIES_DAILY (free, end-of-day). Last leg of HISTORY."""
         env = self._domain("TIME_SERIES_DAILY", symbol)
-        if env.get("status") != "live":
+        if env.get("status") not in ("live", "delayed"):
             return env
         payload = env["data"] or {}
         series = payload.get("Time Series (Daily)") or {}

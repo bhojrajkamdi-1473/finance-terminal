@@ -150,6 +150,7 @@
     }
     host.querySelector("#cxai-run").onclick = function () {
       var btn = host.querySelector("#cxai-run");
+      if (btn.disabled) return;
       btn.disabled = true;
       host.querySelector("#cxai-out").innerHTML = '<div class="cx-skel"></div><div class="cx-skel"></div><div class="cx-skel"></div>';
       window.FT_API.post("ai/research", { ticker: sym, depth: depth, force: true }).then(function (x) {
@@ -168,6 +169,25 @@
         }).catch(function () { /* optional */ });
       }).catch(function () { btn.disabled = false; fail("Network error while running analysis."); });
     };
+    /* Availability gate: /api/ai/status decides whether runs are possible.
+       The panel never presents itself as available when the backend says
+       otherwise — explicit state, not a spinner. Run history still loads. */
+    window.FT_API.get("ai/status").then(function (sx) {
+      var b = (sx && sx.body) || {};
+      var m = host.querySelector("#cxai-meta");
+      if (b.available) {
+        if (m) m.textContent = "AI research available · " + (b.model || b.provider || "") + " · cached reports load below.";
+        return;
+      }
+      var btn = host.querySelector("#cxai-run");
+      if (btn) btn.disabled = true;
+      if (m) m.textContent = "AI research not configured.";
+      host.querySelector("#cxai-out").innerHTML =
+        "<div class='cx-empty'><b>AI research unavailable</b><p>" +
+        esc(b.reason || "LLM provider not configured.") + "</p>" +
+        "<p class='why'>Setup: set AI_PROVIDER + AI_API_KEY (+ optional AI_MODEL) in the server environment / Render dashboard, then redeploy. " +
+        "Verified market data in the tabs above remains available. Previously completed runs (if any) still list below.</p></div>";
+    }).catch(function () { /* reachability failure: leave panel interactive; run will report */ });
     window.FT_API.get("ai/research", { ticker: sym, depth: "standard" }).then(function (x) {
       var b = (x && x.body) || {};
       if (b.ok && b.report) { host.querySelector("#cxai-out").innerHTML = reportHtml(b.report); meta(b.report); }
